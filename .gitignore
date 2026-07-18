@@ -1,0 +1,13 @@
+# Uploaded equipment images
+uploads/equipment/*
+!uploads/equipment/.gitkeep
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Environment / secrets
+.env
+*.log

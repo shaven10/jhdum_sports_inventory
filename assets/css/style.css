@@ -1,0 +1,167 @@
+:root {
+    --jhcsc-primary: #1a5276;
+    --jhcsc-secondary: #2e86c1;
+    --jhcsc-accent: #f39c12;
+}
+
+body {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background-color: #f4f6f9;
+}
+
+main {
+    flex: 1;
+}
+
+.navbar-brand {
+    font-size: 1.1rem;
+}
+
+.stat-card {
+    border: none;
+    border-radius: 12px;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.stat-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+}
+
+.stat-card .stat-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+}
+
+.stat-card .stat-value {
+    font-size: 1.75rem;
+    font-weight: 700;
+}
+
+.stat-card .stat-label {
+    color: #6c757d;
+    font-size: 0.85rem;
+}
+
+.equipment-card {
+    border: none;
+    border-radius: 12px;
+    overflow: hidden;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.equipment-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.12);
+}
+
+.equipment-card .card-img-top {
+    height: 180px;
+    object-fit: cover;
+    background: #e9ecef;
+}
+
+.equipment-card .placeholder-img {
+    height: 180px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    font-size: 3rem;
+}
+
+.login-page {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #1a5276 0%, #2e86c1 50%, #3498db 100%);
+}
+
+.login-card {
+    border: none;
+    border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    overflow: hidden;
+    max-width: 420px;
+    width: 100%;
+}
+
+.login-header {
+    background: var(--jhcsc-primary);
+    color: white;
+    padding: 2rem;
+    text-align: center;
+}
+
+.login-header h2 {
+    margin: 0;
+    font-weight: 700;
+}
+
+.login-header p {
+    margin: 0.5rem 0 0;
+    opacity: 0.8;
+}
+
+.table-responsive {
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.card {
+    border: none;
+    border-radius: 12px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+
+.card-header {
+    background: white;
+    border-bottom: 1px solid #eee;
+    font-weight: 600;
+}
+
+.page-header {
+    margin-bottom: 1.5rem;
+}
+
+.page-header h1 {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: #2c3e50;
+}
+
+.notification-dropdown {
+    width: 320px;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.filter-bar {
+    background: white;
+    border-radius: 12px;
+    padding: 1rem;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+
+.qr-code {
+    max-width: 120px;
+}
+
+@media print {
+    .navbar, .footer, .no-print, .btn, .filter-bar {
+        display: none !important;
+    }
+    main {
+        padding: 0 !important;
+    }
+}
