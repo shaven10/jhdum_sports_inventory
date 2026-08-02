@@ -57,7 +57,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!$sportId || !$teamA || !$teamB) $errors[] = 'Sport and both teams are required.';
     if ($teamA === $teamB) $errors[] = 'Teams must be different.';
-    if ($scheduledAt === '') $errors[] = 'Schedule date/time is required.';
+    if ($scheduledAt !== '' && strtotime($scheduledAt) === false) {
+        $errors[] = 'Invalid schedule date/time.';
+    }
     if (!in_array($status, ['scheduled', 'ongoing', 'completed', 'cancelled', 'forfeit'], true)) {
         $errors[] = 'Invalid status.';
     }
@@ -82,9 +84,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $winner = determineMatchWinner($scoreA, $scoreB, $teamA, $teamB, $status, $forfeitTeam);
         }
 
+        $scheduledValue = $scheduledAt !== '' ? date('Y-m-d H:i:s', strtotime($scheduledAt)) : null;
         $stmt = $db->prepare('UPDATE intramural_matches SET sport_id=?, team_a_id=?, team_b_id=?, scheduled_at=?, venue=?, referee_name=?, status=?, score_a=?, score_b=?, winner_team_id=?, forfeit_team_id=?, notes=? WHERE id=?');
         $stmt->execute([
-            $sportId, $teamA, $teamB, date('Y-m-d H:i:s', strtotime($scheduledAt)),
+            $sportId, $teamA, $teamB, $scheduledValue,
             $venue, $referee, $status, $scoreA, $scoreB, $winner, $forfeitTeam, $notes, $id
         ]);
         auditLog($_SESSION['user_id'], 'update', 'intramural_match', $id, null, ['status' => $status, 'score_a' => $scoreA, 'score_b' => $scoreB]);

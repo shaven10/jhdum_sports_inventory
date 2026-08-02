@@ -93,6 +93,9 @@ $flash = getFlash();
                         <li><hr class="dropdown-divider"></li>
                         <li><h6 class="dropdown-header">Competition</h6></li>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/matches/index.php">Matches</a></li>
+                        <?php if (canManageMatches()): ?>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/matches/generate.php"><i class="bi bi-magic"></i> Generate Matches</a></li>
+                        <?php endif; ?>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/matches/calendar.php">Calendar</a></li>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/standings/index.php">Standings</a></li>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/standings/overall.php">Overall Standing</a></li>

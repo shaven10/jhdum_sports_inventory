@@ -4,6 +4,10 @@ if (!canManageMatches()) {
     flash('error', 'You do not have permission to schedule matches.');
     redirect(BASE_URL . '/intramurals/matches/index.php');
 }
+// Tabulators generate fixtures then assign date/time — not free-form single matches
+if (hasRole('tabulator') && !canManageIntramurals()) {
+    redirect(BASE_URL . '/intramurals/matches/generate.php');
+}
 requireWritableSeason();
 
 $db = getDB();

@@ -18,9 +18,9 @@ $sql = "SELECT m.*, s.name as sport_name,
     ta.name as team_a_name, tb.name as team_b_name
     FROM intramural_matches m
     JOIN intramural_sports s ON m.sport_id = s.id
-    JOIN intramural_teams ta ON m.team_a_id = ta.id
-    JOIN intramural_teams tb ON m.team_b_id = tb.id
-    WHERE DATE(m.scheduled_at) BETWEEN ? AND ?";
+    LEFT JOIN intramural_teams ta ON m.team_a_id = ta.id
+    LEFT JOIN intramural_teams tb ON m.team_b_id = tb.id
+    WHERE m.scheduled_at IS NOT NULL AND DATE(m.scheduled_at) BETWEEN ? AND ?";
 $params = [$start, $end];
 if ($seasonId) {
     $sql .= ' AND m.season_id = ?';

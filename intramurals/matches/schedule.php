@@ -1,0 +1,170 @@
+<?php
+require_once __DIR__ . '/../../includes/auth.php';
+if (!canManageMatches()) {
+    flash('error', 'You do not have permission to schedule matches.');
+    redirect(BASE_URL . '/intramurals/matches/index.php');
+}
+requireWritableSeason();
+
+$db = getDB();
+$id = (int) get('id');
+
+$stmt = $db->prepare("SELECT m.*, s.name as sport_name, s.category as sport_category, s.tournament_format, s.format_notes,
+    ta.name as team_a_name, tb.name as team_b_name
+    FROM intramural_matches m
+    JOIN intramural_sports s ON m.sport_id = s.id
+    LEFT JOIN intramural_teams ta ON m.team_a_id = ta.id
+    LEFT JOIN intramural_teams tb ON m.team_b_id = tb.id
+    WHERE m.id = ?");
+$stmt->execute([$id]);
+$match = $stmt->fetch();
+
+if (!$match) {
+    flash('error', 'Match not found.');
+    redirect(BASE_URL . '/intramurals/matches/index.php');
+}
+
+$teams = $db->query('SELECT * FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll();
+$errors = [];
+$isTabulator = hasRole('tabulator') && !canManageIntramurals();
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!verifyCsrf(post('csrf_token'))) {
+        flash('error', 'Invalid request.');
+        redirect(BASE_URL . '/intramurals/matches/schedule.php?id=' . $id);
+    }
+
+    $scheduledAt = post('scheduled_at');
+    $venue = post('venue');
+    $referee = post('referee_name');
+    $notes = post('notes', $match['notes'] ?? '');
+    $teamA = (int) post('team_a_id') ?: null;
+    $teamB = (int) post('team_b_id') ?: null;
+
+    if ($scheduledAt === '') {
+        $errors[] = 'Date & time is required.';
+    }
+    if ($teamA && $teamB && $teamA === $teamB) {
+        $errors[] = 'Teams must be different.';
+    }
+
+    // Keep existing teams if tabulator doesn't change TBD slots
+    if ($isTabulator) {
+        if ($match['team_a_id']) {
+            $teamA = (int) $match['team_a_id'];
+        }
+        if ($match['team_b_id']) {
+            $teamB = (int) $match['team_b_id'];
+        }
+    }
+
+    if (empty($errors)) {
+        $db->prepare('UPDATE intramural_matches SET scheduled_at=?, venue=?, referee_name=?, notes=?, team_a_id=?, team_b_id=? WHERE id=?')
+            ->execute([
+                date('Y-m-d H:i:s', strtotime($scheduledAt)),
+                $venue ?: null,
+                $referee ?: null,
+                $notes ?: null,
+                $teamA,
+                $teamB,
+                $id,
+            ]);
+        auditLog($_SESSION['user_id'], 'schedule_match', 'intramural_match', $id, null, [
+            'scheduled_at' => $scheduledAt,
+            'venue' => $venue,
+        ]);
+        flash('success', 'Match date & time saved.');
+        redirect(BASE_URL . '/intramurals/matches/view.php?id=' . $id);
+    }
+}
+
+$dtLocal = $match['scheduled_at'] ? date('Y-m-d\TH:i', strtotime($match['scheduled_at'])) : '';
+
+$pageTitle = 'Assign Match Schedule';
+require_once __DIR__ . '/../../includes/header.php';
+require __DIR__ . '/../_season_bar.php';
+?>
+
+<div class="page-header">
+    <h1><i class="bi bi-clock"></i> Assign Date &amp; Time</h1>
+    <p class="text-muted mb-0">
+        <?= sanitize($match['sport_name']) ?>
+        · <?= sanitize($match['round_label'] ?: ('Round ' . (int) $match['round_number'])) ?>
+        · <span class="badge bg-info text-dark"><?= sanitize(tournamentFormatLabel($match['tournament_format'] ?? null)) ?></span>
+    </p>
+</div>
+
+<div class="row"><div class="col-lg-7"><div class="card"><div class="card-body">
+    <?php if ($errors): ?>
+    <div class="alert alert-danger"><ul class="mb-0"><?php foreach ($errors as $e): ?><li><?= sanitize($e) ?></li><?php endforeach; ?></ul></div>
+    <?php endif; ?>
+
+    <div class="alert alert-light border mb-3">
+        <strong><?= sanitize($match['team_a_name'] ?: 'TBD') ?></strong>
+        vs
+        <strong><?= sanitize($match['team_b_name'] ?: 'TBD') ?></strong>
+        <?php if (!empty($match['format_notes'])): ?>
+        <div class="small text-muted mt-1"><?= sanitize($match['format_notes']) ?></div>
+        <?php endif; ?>
+    </div>
+
+    <form method="POST">
+        <?= csrfField() ?>
+        <div class="row g-3">
+            <div class="col-md-6">
+                <label class="form-label">Date &amp; Time *</label>
+                <input type="datetime-local" name="scheduled_at" class="form-control" required value="<?= sanitize(post('scheduled_at', $dtLocal)) ?>">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Venue</label>
+                <input type="text" name="venue" class="form-control" value="<?= sanitize(post('venue', $match['venue'] ?? '')) ?>">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Referee</label>
+                <input type="text" name="referee_name" class="form-control" value="<?= sanitize(post('referee_name', $match['referee_name'] ?? '')) ?>">
+            </div>
+
+            <?php if (!$match['team_a_id'] || !$match['team_b_id']): ?>
+            <div class="col-md-6">
+                <label class="form-label">Team A <?= $match['team_a_id'] ? '' : '(TBD)' ?></label>
+                <?php if ($match['team_a_id'] && $isTabulator): ?>
+                <input type="hidden" name="team_a_id" value="<?= (int) $match['team_a_id'] ?>">
+                <input type="text" class="form-control" value="<?= sanitize($match['team_a_name']) ?>" disabled>
+                <?php else: ?>
+                <select name="team_a_id" class="form-select" <?= $match['team_a_id'] ? '' : '' ?>>
+                    <option value="">TBD</option>
+                    <?php foreach ($teams as $t): ?>
+                    <option value="<?= $t['id'] ?>" <?= (int) ($match['team_a_id'] ?? 0) === (int) $t['id'] ? 'selected' : '' ?>><?= sanitize($t['name']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <?php endif; ?>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Team B <?= $match['team_b_id'] ? '' : '(TBD)' ?></label>
+                <?php if ($match['team_b_id'] && $isTabulator): ?>
+                <input type="hidden" name="team_b_id" value="<?= (int) $match['team_b_id'] ?>">
+                <input type="text" class="form-control" value="<?= sanitize($match['team_b_name']) ?>" disabled>
+                <?php else: ?>
+                <select name="team_b_id" class="form-select">
+                    <option value="">TBD</option>
+                    <?php foreach ($teams as $t): ?>
+                    <option value="<?= $t['id'] ?>" <?= (int) ($match['team_b_id'] ?? 0) === (int) $t['id'] ? 'selected' : '' ?>><?= sanitize($t['name']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <?php endif; ?>
+            </div>
+            <?php endif; ?>
+
+            <div class="col-12">
+                <label class="form-label">Notes</label>
+                <textarea name="notes" class="form-control" rows="2"><?= sanitize(post('notes', $match['notes'] ?? '')) ?></textarea>
+            </div>
+        </div>
+        <div class="mt-4 d-flex gap-2">
+            <button class="btn btn-primary">Save Schedule</button>
+            <a href="<?= BASE_URL ?>/intramurals/matches/view.php?id=<?= $id ?>" class="btn btn-outline-secondary">Cancel</a>
+        </div>
+    </form>
+</div></div></div></div>
+
+<?php require_once __DIR__ . '/../../includes/footer.php'; ?>

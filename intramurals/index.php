@@ -48,7 +48,7 @@ require __DIR__ . '/_season_bar.php';
         <a href="<?= BASE_URL ?>/intramurals/athletes/add.php" class="btn btn-primary"><i class="bi bi-person-plus"></i> Register Athlete</a>
         <?php endif; ?>
         <?php if (canManageMatches()): ?>
-        <a href="<?= BASE_URL ?>/intramurals/matches/add.php" class="btn btn-outline-primary"><i class="bi bi-calendar-plus"></i> Schedule Match</a>
+        <a href="<?= BASE_URL ?>/intramurals/matches/generate.php" class="btn btn-primary"><i class="bi bi-magic"></i> Generate Matches</a>
         <?php endif; ?>
         <?php if (hasRole('unit_manager') && getUserTeamId()): ?>
         <a href="<?= BASE_URL ?>/intramurals/teams/view.php?id=<?= (int) getUserTeamId() ?>" class="btn btn-outline-secondary"><i class="bi bi-shield"></i> My Team</a>

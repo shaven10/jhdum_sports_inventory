@@ -26,6 +26,277 @@ function tournamentFormatLabel(?string $format): string
     return $labels[$key] ?? ucfirst(str_replace('_', ' ', $key));
 }
 
+/**
+ * Build fixture list for a tournament format.
+ * Each fixture: ['team_a_id'=>?int, 'team_b_id'=>?int, 'round_number'=>int, 'round_label'=>string, 'match_order'=>int, 'notes'=>?string]
+ *
+ * @param list<int> $teamIds
+ * @return list<array<string, mixed>>
+ */
+function buildTournamentFixtures(string $format, array $teamIds): array
+{
+    $teamIds = array_values(array_unique(array_map('intval', $teamIds)));
+    $teamIds = array_values(array_filter($teamIds, fn($id) => $id > 0));
+    sort($teamIds);
+
+    if (count($teamIds) < 2) {
+        return [];
+    }
+
+    switch ($format) {
+        case 'single_elimination':
+            return buildSingleEliminationFixtures($teamIds);
+        case 'double_elimination':
+            // First pass: generate single-elim bracket; consolation rounds can be added later.
+            $fixtures = buildSingleEliminationFixtures($teamIds);
+            foreach ($fixtures as &$f) {
+                $f['notes'] = trim(($f['notes'] ?? '') . ' (Double elimination — winners bracket)');
+            }
+            unset($f);
+            return $fixtures;
+        case 'group_knockout':
+            // Group stage fixtures (round robin). Knockout bracket can be generated after standings.
+            $group = buildRoundRobinFixtures($teamIds, 'Group Stage');
+            foreach ($group as &$f) {
+                $f['notes'] = 'Group stage — generate knockout bracket after standings if needed';
+            }
+            unset($f);
+            return $group;
+        case 'custom':
+        case 'round_robin':
+        default:
+            return buildRoundRobinFixtures($teamIds, 'Round Robin');
+    }
+}
+
+/**
+ * @param list<int> $teamIds
+ * @return list<array<string, mixed>>
+ */
+function buildRoundRobinFixtures(array $teamIds, string $roundLabel = 'Round Robin'): array
+{
+    $fixtures = [];
+    $n = count($teamIds);
+    $order = 0;
+    for ($i = 0; $i < $n; $i++) {
+        for ($j = $i + 1; $j < $n; $j++) {
+            $order++;
+            $fixtures[] = [
+                'team_a_id' => $teamIds[$i],
+                'team_b_id' => $teamIds[$j],
+                'round_number' => 1,
+                'round_label' => $roundLabel,
+                'match_order' => $order,
+                'notes' => null,
+            ];
+        }
+    }
+    return $fixtures;
+}
+
+/**
+ * Single elimination: first round with byes, plus TBD shells for later rounds.
+ *
+ * @param list<int> $teamIds
+ * @return list<array<string, mixed>>
+ */
+function buildSingleEliminationFixtures(array $teamIds): array
+{
+    $n = count($teamIds);
+    $size = 1;
+    while ($size < $n) {
+        $size *= 2;
+    }
+
+    // Seed list with byes (null) to fill bracket
+    $slots = $teamIds;
+    while (count($slots) < $size) {
+        $slots[] = null; // bye
+    }
+
+    $fixtures = [];
+    $order = 0;
+    $rounds = (int) log($size, 2);
+    $roundLabels = [
+        1 => $size === 2 ? 'Final' : ($size === 4 ? 'Semi-finals' : 'Round of ' . $size),
+    ];
+    for ($r = 2; $r <= $rounds; $r++) {
+        $teamsInRound = (int) ($size / (2 ** ($r - 1)));
+        if ($teamsInRound === 2) {
+            $roundLabels[$r] = 'Final';
+        } elseif ($teamsInRound === 4) {
+            $roundLabels[$r] = 'Semi-finals';
+        } elseif ($teamsInRound === 8) {
+            $roundLabels[$r] = 'Quarter-finals';
+        } else {
+            $roundLabels[$r] = 'Round of ' . $teamsInRound;
+        }
+    }
+
+    // Round 1 pairings
+    $nextAdvancers = [];
+    for ($i = 0; $i < $size; $i += 2) {
+        $a = $slots[$i];
+        $b = $slots[$i + 1];
+        if ($a === null && $b === null) {
+            $nextAdvancers[] = null;
+            continue;
+        }
+        if ($a === null || $b === null) {
+            // Bye — team advances, no match created
+            $nextAdvancers[] = $a ?? $b;
+            continue;
+        }
+        $order++;
+        $fixtures[] = [
+            'team_a_id' => $a,
+            'team_b_id' => $b,
+            'round_number' => 1,
+            'round_label' => $roundLabels[1] ?? 'Round 1',
+            'match_order' => $order,
+            'notes' => null,
+        ];
+        $nextAdvancers[] = null; // winner TBD
+    }
+
+    // Later rounds as TBD shells
+    for ($r = 2; $r <= $rounds; $r++) {
+        $count = (int) ($size / (2 ** $r));
+        if ($count < 1) {
+            break;
+        }
+        for ($i = 0; $i < $count; $i++) {
+            $order++;
+            $fixtures[] = [
+                'team_a_id' => null,
+                'team_b_id' => null,
+                'round_number' => $r,
+                'round_label' => $roundLabels[$r] ?? ('Round ' . $r),
+                'match_order' => $order,
+                'notes' => 'TBD — fill teams after previous round results',
+            ];
+        }
+    }
+
+    return $fixtures;
+}
+
+/**
+ * Persist generated fixtures for a sport/season. Returns number of matches inserted.
+ *
+ * @param list<int> $teamIds
+ * @return array{created: int, format: string, error?: string}
+ */
+function generateMatchesForSport(int $sportId, int $seasonId, array $teamIds, ?int $createdBy = null, bool $replaceUnscheduled = false): array
+{
+    $db = getDB();
+    $stmt = $db->prepare('SELECT * FROM intramural_sports WHERE id = ? AND is_active = 1');
+    $stmt->execute([$sportId]);
+    $sport = $stmt->fetch();
+    if (!$sport) {
+        return ['created' => 0, 'format' => '', 'error' => 'Sport not found.'];
+    }
+
+    $format = $sport['tournament_format'] ?? 'round_robin';
+    $fixtures = buildTournamentFixtures($format, $teamIds);
+    if (empty($fixtures)) {
+        return ['created' => 0, 'format' => $format, 'error' => 'Select at least 2 teams to generate matches.'];
+    }
+
+    if ($replaceUnscheduled) {
+        // Remove only generated matches that have no score yet and are not ongoing/completed
+        $db->prepare("DELETE FROM intramural_matches
+            WHERE season_id = ? AND sport_id = ? AND is_generated = 1
+              AND status IN ('scheduled', 'cancelled')
+              AND score_a IS NULL AND score_b IS NULL")
+            ->execute([$seasonId, $sportId]);
+    }
+
+    $insert = $db->prepare('INSERT INTO intramural_matches
+        (season_id, sport_id, round_number, round_label, match_order, is_generated, team_a_id, team_b_id, scheduled_at, status, notes, created_by)
+        VALUES (?, ?, ?, ?, ?, 1, ?, ?, NULL, \'scheduled\', ?, ?)');
+
+    $created = 0;
+    foreach ($fixtures as $f) {
+        $insert->execute([
+            $seasonId,
+            $sportId,
+            (int) $f['round_number'],
+            $f['round_label'],
+            (int) $f['match_order'],
+            $f['team_a_id'],
+            $f['team_b_id'],
+            $f['notes'],
+            $createdBy,
+        ]);
+        $created++;
+    }
+
+    return ['created' => $created, 'format' => $format];
+}
+
+/**
+ * Generate fixtures for multiple sports in one pass.
+ *
+ * @param list<int> $sportIds
+ * @param list<int>|null $sharedTeamIds  When set, used for every sport. When null, teams come from season registrations per sport.
+ * @return array{created: int, sports: int, details: list<array>, errors: list<string>}
+ */
+function generateMatchesForSports(array $sportIds, int $seasonId, ?array $sharedTeamIds, ?int $createdBy = null, bool $replaceUnscheduled = false): array
+{
+    $db = getDB();
+    $sportIds = array_values(array_unique(array_filter(array_map('intval', $sportIds))));
+    $details = [];
+    $errors = [];
+    $total = 0;
+    $okSports = 0;
+
+    $regTeamsStmt = $db->prepare('SELECT DISTINCT team_id FROM intramural_registrations WHERE sport_id = ? AND season_id = ?');
+
+    foreach ($sportIds as $sportId) {
+        if ($sharedTeamIds !== null) {
+            $teamIds = $sharedTeamIds;
+        } else {
+            $regTeamsStmt->execute([$sportId, $seasonId]);
+            $teamIds = array_map('intval', $regTeamsStmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
+        }
+
+        $result = generateMatchesForSport($sportId, $seasonId, $teamIds, $createdBy, $replaceUnscheduled);
+        $sportStmt = $db->prepare('SELECT * FROM intramural_sports WHERE id = ?');
+        $sportStmt->execute([$sportId]);
+        $sport = $sportStmt->fetch() ?: ['name' => 'Sport #' . $sportId, 'category' => 'mixed'];
+
+        if (!empty($result['error'])) {
+            $errors[] = sportLabel($sport) . ': ' . $result['error'];
+            $details[] = [
+                'sport_id' => $sportId,
+                'sport' => $sport,
+                'created' => 0,
+                'format' => $result['format'] ?? '',
+                'error' => $result['error'],
+            ];
+            continue;
+        }
+
+        $okSports++;
+        $total += (int) $result['created'];
+        $details[] = [
+            'sport_id' => $sportId,
+            'sport' => $sport,
+            'created' => (int) $result['created'],
+            'format' => $result['format'],
+            'error' => null,
+        ];
+    }
+
+    return [
+        'created' => $total,
+        'sports' => $okSports,
+        'details' => $details,
+        'errors' => $errors,
+    ];
+}
+
 function uploadAthletePhoto(array $file): ?string
 {
     return uploadToPath($file, UPLOAD_PATH_ATHLETES, 'ath');

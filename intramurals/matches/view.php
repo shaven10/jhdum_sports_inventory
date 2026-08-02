@@ -12,8 +12,8 @@ $stmt = $db->prepare("SELECT m.*, s.name as sport_name, s.category as sport_cate
     tw.name as winner_name
     FROM intramural_matches m
     JOIN intramural_sports s ON m.sport_id = s.id
-    JOIN intramural_teams ta ON m.team_a_id = ta.id
-    JOIN intramural_teams tb ON m.team_b_id = tb.id
+    LEFT JOIN intramural_teams ta ON m.team_a_id = ta.id
+    LEFT JOIN intramural_teams tb ON m.team_b_id = tb.id
     LEFT JOIN intramural_teams tw ON m.winner_team_id = tw.id
     WHERE m.id = ?");
 $stmt->execute([$id]);
@@ -56,7 +56,14 @@ require __DIR__ . '/../_season_bar.php';
     </div>
     <div class="d-flex gap-2">
         <?php if (canManageMatches()): ?>
+        <a href="<?= BASE_URL ?>/intramurals/matches/schedule.php?id=<?= $id ?>" class="btn btn-<?= empty($match['scheduled_at']) ? 'warning' : 'outline-primary' ?>">
+            <?= empty($match['scheduled_at']) ? 'Set Date/Time' : 'Reschedule' ?>
+        </a>
+        <?php if (canManageIntramurals()): ?>
         <a href="<?= BASE_URL ?>/intramurals/matches/edit.php?id=<?= $id ?>" class="btn btn-primary">Edit / Record Score</a>
+        <?php elseif (canRecordScores()): ?>
+        <a href="<?= BASE_URL ?>/intramurals/matches/edit.php?id=<?= $id ?>" class="btn btn-primary">Record Score</a>
+        <?php endif; ?>
         <?php endif; ?>
         <a href="<?= BASE_URL ?>/intramurals/matches/index.php" class="btn btn-outline-secondary">Back</a>
     </div>
@@ -68,7 +75,7 @@ require __DIR__ . '/../_season_bar.php';
             <div class="card-body text-center py-4">
                 <div class="row align-items-center">
                     <div class="col-5">
-                        <div class="fs-4 fw-bold" style="color:<?= sanitize($match['team_a_color']) ?>"><?= sanitize($match['team_a_name']) ?></div>
+                        <div class="fs-4 fw-bold" style="color:<?= sanitize($match['team_a_color'] ?: '#666') ?>"><?= sanitize($match['team_a_name'] ?: 'TBD') ?></div>
                     </div>
                     <div class="col-2">
                         <?php if ($match['score_a'] !== null && $match['score_b'] !== null): ?>
@@ -78,7 +85,7 @@ require __DIR__ . '/../_season_bar.php';
                         <?php endif; ?>
                     </div>
                     <div class="col-5">
-                        <div class="fs-4 fw-bold" style="color:<?= sanitize($match['team_b_color']) ?>"><?= sanitize($match['team_b_name']) ?></div>
+                        <div class="fs-4 fw-bold" style="color:<?= sanitize($match['team_b_color'] ?: '#666') ?>"><?= sanitize($match['team_b_name'] ?: 'TBD') ?></div>
                     </div>
                 </div>
                 <div class="mt-3"><?= statusBadge($match['status']) ?></div>
