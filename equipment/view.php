@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../includes/auth.php';
-requireLogin();
+requireInventoryModule();
 
 $id = (int) get('id');
 if (!$id) {
@@ -38,7 +38,7 @@ require_once __DIR__ . '/../includes/header.php';
         <p class="text-muted mb-0"><?= sanitize($eq['category_name']) ?> &middot; <?= sanitize($eq['barcode']) ?></p>
     </div>
     <div class="d-flex gap-2">
-        <?php if ($eq['quantity_available'] > 0 && $_SESSION['user_role'] === 'student'): ?>
+        <?php if ($eq['quantity_available'] > 0 && canBorrowEquipment()): ?>
         <a href="<?= BASE_URL ?>/requests/create.php?equipment_id=<?= $eq['id'] ?>" class="btn btn-primary"><i class="bi bi-clipboard-plus"></i> Request to Borrow</a>
         <?php endif; ?>
         <?php if (canManageInventory()): ?>
@@ -67,38 +67,38 @@ require_once __DIR__ . '/../includes/header.php';
     </div>
 
     <div class="col-lg-8">
-        <div class="row g-3 mb-4">
-            <div class="col-4 col-md-2">
+        <div class="row g-3 mb-4 stat-grid">
+            <div class="col-6 col-md-4 col-lg-2">
                 <div class="card text-center p-3">
                     <div class="fs-4 fw-bold text-primary"><?= $eq['quantity_total'] ?></div>
                     <small class="text-muted">Total</small>
                 </div>
             </div>
-            <div class="col-4 col-md-2">
+            <div class="col-6 col-md-4 col-lg-2">
                 <div class="card text-center p-3">
                     <div class="fs-4 fw-bold text-success"><?= $eq['quantity_available'] ?></div>
                     <small class="text-muted">Available</small>
                 </div>
             </div>
-            <div class="col-4 col-md-2">
+            <div class="col-6 col-md-4 col-lg-2">
                 <div class="card text-center p-3">
                     <div class="fs-4 fw-bold text-info"><?= $eq['quantity_borrowed'] ?></div>
                     <small class="text-muted">Borrowed</small>
                 </div>
             </div>
-            <div class="col-4 col-md-2">
+            <div class="col-6 col-md-4 col-lg-2">
                 <div class="card text-center p-3">
                     <div class="fs-4 fw-bold text-warning"><?= $eq['quantity_reserved'] ?></div>
                     <small class="text-muted">Reserved</small>
                 </div>
             </div>
-            <div class="col-4 col-md-2">
+            <div class="col-6 col-md-4 col-lg-2">
                 <div class="card text-center p-3">
                     <div class="fs-4 fw-bold text-danger"><?= $eq['quantity_damaged'] ?></div>
                     <small class="text-muted">Damaged</small>
                 </div>
             </div>
-            <div class="col-4 col-md-2">
+            <div class="col-6 col-md-4 col-lg-2">
                 <div class="card text-center p-3">
                     <div class="fs-4 fw-bold text-secondary"><?= $eq['quantity_maintenance'] ?></div>
                     <small class="text-muted">Maintenance</small>

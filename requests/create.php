@@ -1,6 +1,11 @@
 <?php
 require_once __DIR__ . '/../includes/auth.php';
-requireLogin();
+requireInventoryModule();
+
+if (!canBorrowEquipment() && !canManageInventory()) {
+    flash('error', 'You do not have permission to create borrowing requests.');
+    redirect(BASE_URL . '/equipment/index.php');
+}
 
 $db = getDB();
 $equipmentId = (int) get('equipment_id');

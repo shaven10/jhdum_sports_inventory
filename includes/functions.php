@@ -117,8 +117,16 @@ function getSetting(string $key, $default = null)
 function updateSetting(string $key, $value, int $userId): void
 {
     $db = getDB();
-    $stmt = $db->prepare('UPDATE system_settings SET setting_value = ?, updated_by = ? WHERE setting_key = ?');
-    $stmt->execute([(string) $value, $userId, $key]);
+    $stmt = $db->prepare('SELECT id FROM system_settings WHERE setting_key = ?');
+    $stmt->execute([$key]);
+
+    if ($stmt->fetch()) {
+        $db->prepare('UPDATE system_settings SET setting_value = ?, updated_by = ? WHERE setting_key = ?')
+           ->execute([(string) $value, $userId, $key]);
+    } else {
+        $db->prepare('INSERT INTO system_settings (setting_key, setting_value, setting_type, updated_by) VALUES (?, ?, ?, ?)')
+           ->execute([$key, (string) $value, 'string', $userId]);
+    }
 }
 
 function formatDate(?string $date, string $format = 'M d, Y'): string
@@ -154,7 +162,9 @@ function statusBadge(string $status): string
         'damaged'     => 'danger',
         'scheduled'   => 'info',
         'in_progress' => 'warning',
+        'ongoing'     => 'warning',
         'completed'   => 'success',
+        'forfeit'     => 'danger',
         'reported'    => 'warning',
         'resolved'    => 'success',
     ];
@@ -163,16 +173,25 @@ function statusBadge(string $status): string
     return '<span class="badge bg-' . $class . '">' . ucfirst(str_replace('_', ' ', $status)) . '</span>';
 }
 
+function roleLabel(string $role): string
+{
+    $labels = getAllRoles();
+    return $labels[$role] ?? ucfirst(str_replace('_', ' ', $role));
+}
+
 function roleBadge(string $role): string
 {
     $classes = [
-        'admin'       => 'danger',
-        'coordinator' => 'primary',
-        'staff'       => 'info',
-        'student'     => 'success',
+        'admin'         => 'danger',
+        'coordinator'   => 'primary',
+        'staff'         => 'info',
+        'unit_manager'  => 'warning',
+        'coach'         => 'dark',
+        'tabulator'     => 'secondary',
+        'student'       => 'success',
     ];
     $class = $classes[$role] ?? 'secondary';
-    return '<span class="badge bg-' . $class . '">' . ucfirst($role) . '</span>';
+    return '<span class="badge bg-' . $class . '">' . sanitize(roleLabel($role)) . '</span>';
 }
 
 function purposeLabel(string $purpose): string

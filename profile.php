@@ -62,7 +62,10 @@ require_once __DIR__ . '/includes/header.php';
                         <div class="col-md-6"><label class="form-label">First Name</label><input type="text" name="first_name" class="form-control" value="<?= sanitize($user['first_name']) ?>" required></div>
                         <div class="col-md-6"><label class="form-label">Last Name</label><input type="text" name="last_name" class="form-control" value="<?= sanitize($user['last_name']) ?>" required></div>
                         <div class="col-md-6"><label class="form-label">Username</label><input type="text" class="form-control" value="<?= sanitize($user['username']) ?>" disabled></div>
-                        <div class="col-md-6"><label class="form-label">Role</label><input type="text" class="form-control" value="<?= ucfirst($user['role']) ?>" disabled></div>
+                        <div class="col-md-6"><label class="form-label">Role</label><input type="text" class="form-control" value="<?= sanitize(roleLabel($user['role'])) ?>" disabled></div>
+                        <?php if (!empty($user['team_name'])): ?>
+                        <div class="col-md-6"><label class="form-label">Assigned Team</label><input type="text" class="form-control" value="<?= sanitize($user['team_name']) ?>" disabled></div>
+                        <?php endif; ?>
                         <div class="col-12"><label class="form-label">Email</label><input type="email" name="email" class="form-control" value="<?= sanitize($user['email']) ?>" required></div>
                         <div class="col-md-6"><label class="form-label">Student ID</label><input type="text" name="student_id" class="form-control" value="<?= sanitize($user['student_id'] ?? '') ?>"></div>
                         <div class="col-md-6"><label class="form-label">Department</label><input type="text" name="department" class="form-control" value="<?= sanitize($user['department'] ?? '') ?>"></div>

@@ -18,7 +18,7 @@ if ($role) {
 }
 
 $whereClause = implode(' AND ', $where);
-$stmt = $db->prepare("SELECT u.* FROM users u WHERE $whereClause ORDER BY u.created_at DESC");
+$stmt = $db->prepare("SELECT u.*, t.name as team_name FROM users u LEFT JOIN intramural_teams t ON u.team_id = t.id WHERE $whereClause ORDER BY u.created_at DESC");
 $stmt->execute($params);
 $users = $stmt->fetchAll();
 
@@ -37,8 +37,8 @@ require_once __DIR__ . '/../includes/header.php';
         <div class="col-md-3">
             <select name="role" class="form-select">
                 <option value="">All Roles</option>
-                <?php foreach (['admin', 'coordinator', 'staff', 'student'] as $r): ?>
-                <option value="<?= $r ?>" <?= $role === $r ? 'selected' : '' ?>><?= ucfirst($r) ?></option>
+                <?php foreach (getAllRoles() as $value => $label): ?>
+                <option value="<?= $value ?>" <?= $role === $value ? 'selected' : '' ?>><?= sanitize($label) ?></option>
                 <?php endforeach; ?>
             </select>
         </div>
@@ -51,7 +51,7 @@ require_once __DIR__ . '/../includes/header.php';
         <div class="table-responsive">
             <table class="table table-hover mb-0">
                 <thead class="table-light">
-                    <tr><th>Name</th><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th>Actions</th></tr>
+                    <tr><th>Name</th><th>Username</th><th>Email</th><th>Role</th><th>Team</th><th>Status</th><th>Actions</th></tr>
                 </thead>
                 <tbody>
                     <?php foreach ($users as $user): ?>
@@ -60,6 +60,7 @@ require_once __DIR__ . '/../includes/header.php';
                         <td><?= sanitize($user['username']) ?></td>
                         <td><?= sanitize($user['email']) ?></td>
                         <td><?= roleBadge($user['role']) ?></td>
+                        <td><?= sanitize($user['team_name'] ?? '-') ?></td>
                         <td><?= $user['is_active'] ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-secondary">Inactive</span>' ?></td>
                         <td>
                             <a href="<?= BASE_URL ?>/users/edit.php?id=<?= $user['id'] ?>" class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i></a>

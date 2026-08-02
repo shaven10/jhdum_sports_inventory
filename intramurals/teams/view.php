@@ -1,0 +1,203 @@
+<?php
+require_once __DIR__ . '/../../includes/auth.php';
+requireLogin();
+
+$db = getDB();
+$id = (int) get('id');
+$sportFilter = (int) get('sport');
+$seasonId = getCurrentSeasonId();
+
+$stmt = $db->prepare('SELECT t.*,
+    um.first_name as um_first, um.last_name as um_last, um.username as um_username
+    FROM intramural_teams t
+    LEFT JOIN users um ON t.unit_manager_id = um.id
+    WHERE t.id = ?');
+$stmt->execute([$id]);
+$team = $stmt->fetch();
+
+if (!$team) {
+    flash('error', 'Team not found.');
+    redirect(BASE_URL . '/intramurals/teams/index.php');
+}
+
+$sports = $db->query('SELECT * FROM intramural_sports WHERE is_active = 1 ORDER BY name, category')->fetchAll();
+
+$eventCoaches = [];
+try {
+    if ($seasonId) {
+        $ec = $db->prepare('SELECT ec.sport_id, s.name as sport_name, s.category, u.first_name, u.last_name, u.username
+            FROM intramural_event_coaches ec
+            JOIN intramural_sports s ON ec.sport_id = s.id
+            JOIN users u ON ec.coach_user_id = u.id
+            WHERE ec.team_id = ? AND ec.season_id = ?
+            ORDER BY s.name, s.category');
+        $ec->execute([$id, $seasonId]);
+    } else {
+        $ec = $db->prepare('SELECT ec.sport_id, s.name as sport_name, s.category, u.first_name, u.last_name, u.username
+            FROM intramural_event_coaches ec
+            JOIN intramural_sports s ON ec.sport_id = s.id
+            JOIN users u ON ec.coach_user_id = u.id
+            WHERE ec.team_id = ?
+            ORDER BY s.name, s.category');
+        $ec->execute([$id]);
+    }
+    $eventCoaches = $ec->fetchAll();
+} catch (Throwable $e) {
+    $eventCoaches = [];
+}
+
+// Coaches only see their assigned events on this team
+$coachSportFilter = null;
+if (hasRole('coach') && !canManageIntramurals()) {
+    $coachSportFilter = getCoachSportIdsForTeam($id);
+    if (empty($coachSportFilter)) {
+        flash('error', 'You are not assigned as a coach for any event on this team.');
+        redirect(BASE_URL . '/intramurals/teams/index.php');
+    }
+}
+
+$sql = "SELECT a.*, r.jersey_number, r.position, r.event_category, r.sport_id, s.name as sport_name, s.category as sport_category,
+               cu.first_name as coach_first, cu.last_name as coach_last
+        FROM intramural_registrations r
+        JOIN intramural_athletes a ON r.athlete_id = a.id
+        JOIN intramural_sports s ON r.sport_id = s.id
+        LEFT JOIN intramural_event_coaches ec ON ec.team_id = r.team_id AND ec.sport_id = r.sport_id" .
+        ($seasonId ? ' AND ec.season_id = r.season_id' : '') . "
+        LEFT JOIN users cu ON ec.coach_user_id = cu.id
+        WHERE r.team_id = ? AND a.is_active = 1";
+$params = [$id];
+if ($seasonId) {
+    $sql .= ' AND r.season_id = ?';
+    $params[] = $seasonId;
+}
+if ($sportFilter) {
+    $sql .= ' AND r.sport_id = ?';
+    $params[] = $sportFilter;
+}
+if ($coachSportFilter !== null) {
+    $placeholders = implode(',', array_fill(0, count($coachSportFilter), '?'));
+    $sql .= " AND r.sport_id IN ($placeholders)";
+    $params = array_merge($params, $coachSportFilter);
+}
+$sql .= ' ORDER BY s.name, a.last_name, a.first_name';
+$stmt = $db->prepare($sql);
+$stmt->execute($params);
+$members = $stmt->fetchAll();
+
+$houseAthletes = $db->prepare('SELECT * FROM intramural_athletes WHERE team_id = ? AND is_active = 1 ORDER BY last_name, first_name');
+$houseAthletes->execute([$id]);
+$houseAthletes = $houseAthletes->fetchAll();
+
+$pageTitle = $team['name'];
+require_once __DIR__ . '/../../includes/header.php';
+require __DIR__ . '/../_season_bar.php';
+?>
+
+<div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div class="d-flex align-items-center gap-3">
+        <?php if ($team['logo']): ?>
+        <img src="<?= UPLOAD_URL_TEAMS . sanitize($team['logo']) ?>" alt="" class="rounded" style="width:64px;height:64px;object-fit:cover;border:3px solid <?= sanitize($team['color']) ?>">
+        <?php else: ?>
+        <div class="rounded d-flex align-items-center justify-content-center text-white fw-bold" style="width:64px;height:64px;background:<?= sanitize($team['color']) ?>">
+            <?= sanitize(strtoupper(substr($team['short_name'] ?: $team['name'], 0, 2))) ?>
+        </div>
+        <?php endif; ?>
+        <div>
+            <h1 class="mb-0"><?= sanitize($team['name']) ?></h1>
+            <p class="text-muted mb-0">
+                <?= sanitize($team['department'] ?: '') ?>
+                <?php if ($team['um_first']): ?> · Unit Manager: <?= sanitize($team['um_first'] . ' ' . $team['um_last']) ?><?php endif; ?>
+                · <?= count($eventCoaches) ?> event coach<?= count($eventCoaches) === 1 ? '' : 'es' ?>
+            </p>
+        </div>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+        <?php if (canEditOwnTeam($id) || canManageIntramurals()): ?>
+        <a href="<?= BASE_URL ?>/intramurals/teams/coaches.php?id=<?= $id ?>" class="btn btn-primary"><i class="bi bi-person-badge"></i> Event Coaches</a>
+        <a href="<?= BASE_URL ?>/intramurals/teams/edit.php?id=<?= $id ?>" class="btn btn-outline-primary">Edit Team</a>
+        <?php endif; ?>
+        <a href="<?= BASE_URL ?>/intramurals/teams/index.php" class="btn btn-outline-secondary">Back</a>
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span>Team Members by Sport</span>
+                <form method="GET" class="d-flex gap-2">
+                    <input type="hidden" name="id" value="<?= $id ?>">
+                    <select name="sport" class="form-select form-select-sm" onchange="this.form.submit()">
+                        <option value="">All Sports</option>
+                        <?php foreach ($sports as $s): ?>
+                        <?php if ($coachSportFilter !== null && !in_array((int) $s['id'], $coachSportFilter, true)) continue; ?>
+                        <option value="<?= $s['id'] ?>" <?= $sportFilter === (int) $s['id'] ? 'selected' : '' ?>><?= sanitize(sportLabel($s)) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </form>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table mb-0">
+                        <thead class="table-light">
+                            <tr><th>Jersey</th><th>Athlete</th><th>Sport</th><th>Coach</th><th>Position</th><th>Event/Category</th></tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($members as $m): ?>
+                            <tr>
+                                <td><?= sanitize($m['jersey_number'] ?: '-') ?></td>
+                                <td><a href="<?= BASE_URL ?>/intramurals/athletes/view.php?id=<?= $m['id'] ?>"><?= sanitize(athleteFullName($m)) ?></a></td>
+                                <td><?= sanitize($m['sport_name']) ?> (<?= ucfirst($m['sport_category']) ?>)</td>
+                                <td><?= $m['coach_first'] ? sanitize($m['coach_first'] . ' ' . $m['coach_last']) : '<span class="text-muted">Unassigned</span>' ?></td>
+                                <td><?= sanitize($m['position'] ?: '-') ?></td>
+                                <td><?= sanitize($m['event_category'] ?: '-') ?></td>
+                            </tr>
+                            <?php endforeach; ?>
+                            <?php if (empty($members)): ?>
+                            <tr><td colspan="6" class="text-muted p-3">No sport registrations for this team yet.</td></tr>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>Event Coaches</span>
+                <?php if (canEditOwnTeam($id) || canManageIntramurals()): ?>
+                <a href="<?= BASE_URL ?>/intramurals/teams/coaches.php?id=<?= $id ?>" class="btn btn-sm btn-outline-primary">Manage</a>
+                <?php endif; ?>
+            </div>
+            <ul class="list-group list-group-flush">
+                <?php foreach ($eventCoaches as $ec): ?>
+                <?php if ($coachSportFilter !== null && !in_array((int) $ec['sport_id'], $coachSportFilter, true)) continue; ?>
+                <li class="list-group-item">
+                    <div class="fw-semibold"><?= sanitize($ec['sport_name']) ?> <small class="text-muted">(<?= ucfirst($ec['category']) ?>)</small></div>
+                    <small><?= sanitize($ec['first_name'] . ' ' . $ec['last_name']) ?> · <?= sanitize($ec['username']) ?></small>
+                </li>
+                <?php endforeach; ?>
+                <?php if (empty($eventCoaches)): ?>
+                <li class="list-group-item text-muted">No event coaches assigned yet.</li>
+                <?php endif; ?>
+            </ul>
+        </div>
+        <div class="card">
+            <div class="card-header">House Athletes (<?= count($houseAthletes) ?>)</div>
+            <ul class="list-group list-group-flush">
+                <?php foreach ($houseAthletes as $a): ?>
+                <li class="list-group-item d-flex justify-content-between">
+                    <a href="<?= BASE_URL ?>/intramurals/athletes/view.php?id=<?= $a['id'] ?>"><?= sanitize(athleteFullName($a)) ?></a>
+                    <small class="text-muted"><?= sanitize($a['student_id']) ?></small>
+                </li>
+                <?php endforeach; ?>
+                <?php if (empty($houseAthletes)): ?>
+                <li class="list-group-item text-muted">No athletes assigned to this house.</li>
+                <?php endif; ?>
+            </ul>
+        </div>
+    </div>
+</div>
+
+<?php require_once __DIR__ . '/../../includes/footer.php'; ?>

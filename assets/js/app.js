@@ -37,7 +37,71 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
+
+    initMobileNav();
+    initResponsiveTables();
+    initResponsiveBtnGroups();
 });
+
+function initMobileNav() {
+    const navCollapse = document.getElementById('navbarNav');
+    if (!navCollapse) return;
+
+    navCollapse.querySelectorAll('.nav-link:not(.dropdown-toggle), .dropdown-item').forEach(function(link) {
+        link.addEventListener('click', function() {
+            if (window.innerWidth < 992 && navCollapse.classList.contains('show')) {
+                bootstrap.Collapse.getOrCreateInstance(navCollapse).hide();
+            }
+        });
+    });
+}
+
+function initResponsiveTables() {
+    const wrappers = document.querySelectorAll('.table-responsive');
+    const mobileQuery = window.matchMedia('(max-width: 767.98px)');
+
+    function enhanceTables() {
+        wrappers.forEach(function(wrapper) {
+            const table = wrapper.querySelector('table');
+            if (!table) return;
+
+            if (mobileQuery.matches) {
+                wrapper.classList.add('table-responsive-mobile');
+                const headers = [];
+                table.querySelectorAll('thead th').forEach(function(th) {
+                    headers.push(th.textContent.trim());
+                });
+                table.querySelectorAll('tbody tr').forEach(function(row) {
+                    row.querySelectorAll('td').forEach(function(td, index) {
+                        if (headers[index]) {
+                            td.setAttribute('data-label', headers[index]);
+                        }
+                    });
+                });
+            } else {
+                wrapper.classList.remove('table-responsive-mobile');
+            }
+        });
+    }
+
+    enhanceTables();
+    mobileQuery.addEventListener('change', enhanceTables);
+    window.addEventListener('resize', debounce(enhanceTables, 200));
+}
+
+function initResponsiveBtnGroups() {
+    document.querySelectorAll('.filter-bar .btn-group').forEach(function(group) {
+        group.classList.add('btn-group-responsive');
+    });
+}
+
+function debounce(fn, delay) {
+    let timer;
+    return function() {
+        clearTimeout(timer);
+        timer = setTimeout(fn, delay);
+    };
+}
 
 function printReport() {
     window.print();

@@ -2,6 +2,10 @@
 require_once __DIR__ . '/includes/auth.php';
 requireLogin();
 
+if (isIntramuralsOnlyRole()) {
+    redirect(getHomeUrl());
+}
+
 checkOverdueRequests();
 $stats = getDashboardStats();
 $db = getDB();
@@ -34,16 +38,23 @@ $pageTitle = 'Dashboard';
 require_once __DIR__ . '/includes/header.php';
 ?>
 
-<div class="page-header d-flex justify-content-between align-items-center">
+<div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2">
     <div>
         <h1><i class="bi bi-speedometer2"></i> Dashboard</h1>
         <p class="text-muted mb-0">Welcome back, <?= sanitize($_SESSION['user_name']) ?>!</p>
     </div>
-    <?php if ($_SESSION['user_role'] === 'student'): ?>
-    <a href="<?= BASE_URL ?>/equipment/index.php" class="btn btn-primary">
-        <i class="bi bi-plus-circle"></i> Request Equipment
-    </a>
-    <?php endif; ?>
+    <div class="d-flex gap-2 flex-wrap">
+        <?php if (canBorrowEquipment()): ?>
+        <a href="<?= BASE_URL ?>/equipment/index.php" class="btn btn-primary">
+            <i class="bi bi-plus-circle"></i> Request Equipment
+        </a>
+        <?php endif; ?>
+        <?php if (isTeamScopedRole()): ?>
+        <a href="<?= BASE_URL ?>/intramurals/index.php" class="btn btn-outline-primary">
+            <i class="bi bi-trophy"></i> Intramurals
+        </a>
+        <?php endif; ?>
+    </div>
 </div>
 
 <div class="row g-3 mb-4">

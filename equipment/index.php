@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../includes/auth.php';
-requireLogin();
+requireInventoryModule();
 
 $db = getDB();
 $search = get('search');
@@ -140,7 +140,7 @@ require_once __DIR__ . '/../includes/header.php';
             </div>
             <div class="card-footer bg-white border-top-0 d-flex gap-2">
                 <a href="<?= BASE_URL ?>/equipment/view.php?id=<?= $eq['id'] ?>" class="btn btn-sm btn-outline-primary flex-fill">View</a>
-                <?php if ($eq['quantity_available'] > 0 && $_SESSION['user_role'] === 'student'): ?>
+                <?php if ($eq['quantity_available'] > 0 && canBorrowEquipment()): ?>
                 <a href="<?= BASE_URL ?>/requests/create.php?equipment_id=<?= $eq['id'] ?>" class="btn btn-sm btn-primary flex-fill">Request</a>
                 <?php endif; ?>
                 <?php if (canManageInventory()): ?>

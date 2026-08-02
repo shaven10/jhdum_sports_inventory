@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../includes/auth.php';
-requireLogin();
+requireInventoryModule();
 
 $db = getDB();
 $status = get('status');
@@ -10,7 +10,7 @@ $perPage = 15;
 $where = ['1=1'];
 $params = [];
 
-if ($_SESSION['user_role'] === 'student') {
+if (canBorrowEquipment() && !canManageInventory()) {
     $where[] = 'br.user_id = ?';
     $params[] = $_SESSION['user_id'];
 }
@@ -45,7 +45,7 @@ require_once __DIR__ . '/../includes/header.php';
     <div>
         <h1><i class="bi bi-clipboard-check"></i> Borrowing Requests</h1>
     </div>
-    <?php if ($_SESSION['user_role'] === 'student'): ?>
+    <?php if (canBorrowEquipment()): ?>
     <a href="<?= BASE_URL ?>/equipment/index.php" class="btn btn-primary"><i class="bi bi-plus-lg"></i> New Request</a>
     <?php endif; ?>
 </div>
@@ -70,7 +70,7 @@ require_once __DIR__ . '/../includes/header.php';
                 <thead class="table-light">
                     <tr>
                         <th>Request #</th>
-                        <?php if ($_SESSION['user_role'] !== 'student'): ?><th>Borrower</th><?php endif; ?>
+                        <?php if (canManageInventory()): ?><th>Borrower</th><?php endif; ?>
                         <th>Equipment</th>
                         <th>Qty</th>
                         <th>Borrow Date</th>
@@ -87,7 +87,7 @@ require_once __DIR__ . '/../includes/header.php';
                     <?php foreach ($requests as $req): ?>
                     <tr>
                         <td><strong><?= sanitize($req['request_number']) ?></strong></td>
-                        <?php if ($_SESSION['user_role'] !== 'student'): ?>
+                        <?php if (canManageInventory()): ?>
                         <td><?= sanitize($req['first_name'] . ' ' . $req['last_name']) ?></td>
                         <?php endif; ?>
                         <td><?= sanitize($req['equipment_name']) ?></td>

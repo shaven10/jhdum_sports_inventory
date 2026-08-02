@@ -2,7 +2,7 @@
 require_once __DIR__ . '/includes/auth.php';
 
 if (isLoggedIn()) {
-    redirect(BASE_URL . '/dashboard.php');
+    redirect(getHomeUrl());
 }
 
 $error = '';
@@ -16,7 +16,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         $result = login($username, $password);
         if ($result['success']) {
-            redirect(BASE_URL . '/dashboard.php');
+            redirect(getHomeUrl());
         } else {
             $error = $result['message'];
         }
@@ -34,10 +34,11 @@ $pageTitle = 'Login';
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
     <link href="<?= BASE_URL ?>/assets/css/style.css" rel="stylesheet">
+    <?= renderThemeStyles() ?>
 </head>
 <body>
 <div class="login-page">
-    <div class="login-card">
+    <div class="login-card mx-auto">
         <div class="login-header">
             <i class="bi bi-trophy" style="font-size: 3rem;"></i>
             <h2 class="mt-2"><?= APP_NAME ?></h2>
@@ -77,6 +78,7 @@ $pageTitle = 'Login';
                 <small class="text-muted">admin / admin123</small><br>
                 <small class="text-muted">coordinator / admin123</small><br>
                 <small class="text-muted">staff / admin123</small><br>
+                <small class="text-muted">tabulator / admin123</small><br>
                 <small class="text-muted">student / admin123</small>
             </div>
         </div>

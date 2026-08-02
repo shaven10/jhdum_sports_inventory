@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../includes/auth.php';
-requireLogin();
+requireInventoryModule();
 
 $id = (int) get('id');
 if (!$id) {
@@ -27,7 +27,7 @@ if (!$req) {
     redirect(BASE_URL . '/requests/index.php');
 }
 
-if ($_SESSION['user_role'] === 'student' && $req['user_id'] != $_SESSION['user_id']) {
+if (canBorrowEquipment() && !canManageInventory() && (int) $req['user_id'] !== (int) $_SESSION['user_id']) {
     flash('error', 'You do not have permission to view this request.');
     redirect(BASE_URL . '/requests/index.php');
 }
