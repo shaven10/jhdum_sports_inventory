@@ -36,7 +36,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
         } elseif ($newPass !== $confirm) {
             $errors[] = 'Passwords do not match.';
         } else {
-            getDB()->prepare('UPDATE users SET password = ? WHERE id = ?')->execute([password_hash($newPass, PASSWORD_DEFAULT), $user['id']]);
+            getDB()->prepare('UPDATE users SET password = ?, password_plain = ? WHERE id = ?')->execute([password_hash($newPass, PASSWORD_DEFAULT), $newPass, $user['id']]);
             flash('success', 'Password changed successfully.');
             redirect(BASE_URL . '/profile.php');
         }

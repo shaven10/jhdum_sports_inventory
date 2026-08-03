@@ -40,9 +40,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $notes = post('notes', $match['notes'] ?? '');
     $teamA = (int) post('team_a_id') ?: null;
     $teamB = (int) post('team_b_id') ?: null;
+    $clearSchedule = post('clear_schedule') === '1';
 
-    if ($scheduledAt === '') {
-        $errors[] = 'Date & time is required.';
+    if (!$clearSchedule && $scheduledAt === '') {
+        $errors[] = 'Date & time is required (or check “Clear schedule”).';
+    } elseif (!$clearSchedule && strtotime($scheduledAt) === false) {
+        $errors[] = 'Invalid date & time.';
     }
     if ($teamA && $teamB && $teamA === $teamB) {
         $errors[] = 'Teams must be different.';
@@ -59,9 +62,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if (empty($errors)) {
+        $scheduledValue = $clearSchedule ? null : date('Y-m-d H:i:s', strtotime($scheduledAt));
         $db->prepare('UPDATE intramural_matches SET scheduled_at=?, venue=?, referee_name=?, notes=?, team_a_id=?, team_b_id=? WHERE id=?')
             ->execute([
-                date('Y-m-d H:i:s', strtotime($scheduledAt)),
+                $scheduledValue,
                 $venue ?: null,
                 $referee ?: null,
                 $notes ?: null,
@@ -70,15 +74,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $id,
             ]);
         auditLog($_SESSION['user_id'], 'schedule_match', 'intramural_match', $id, null, [
-            'scheduled_at' => $scheduledAt,
+            'scheduled_at' => $scheduledValue,
             'venue' => $venue,
         ]);
-        flash('success', 'Match date & time saved.');
+        flash('success', $clearSchedule ? 'Match schedule cleared.' : 'Match date & time saved.');
         redirect(BASE_URL . '/intramurals/matches/view.php?id=' . $id);
     }
 }
 
 $dtLocal = $match['scheduled_at'] ? date('Y-m-d\TH:i', strtotime($match['scheduled_at'])) : '';
+$season = getCurrentSeason();
 
 $pageTitle = 'Assign Match Schedule';
 require_once __DIR__ . '/../../includes/header.php';
@@ -86,9 +91,10 @@ require __DIR__ . '/../_season_bar.php';
 ?>
 
 <div class="page-header">
-    <h1><i class="bi bi-clock"></i> Assign Date &amp; Time</h1>
+    <h1><i class="bi bi-clock"></i> Edit Date &amp; Time</h1>
     <p class="text-muted mb-0">
         <?= sanitize($match['sport_name']) ?>
+        <span class="badge bg-secondary"><?= ucfirst($match['sport_category']) ?></span>
         · <?= sanitize($match['round_label'] ?: ('Round ' . (int) $match['round_number'])) ?>
         · <span class="badge bg-info text-dark"><?= sanitize(tournamentFormatLabel($match['tournament_format'] ?? null)) ?></span>
     </p>
@@ -108,12 +114,23 @@ require __DIR__ . '/../_season_bar.php';
         <?php endif; ?>
     </div>
 
+    <div class="alert alert-info py-2 small">
+        Auto-generated times are only a starting point. You may set <strong>any date and time</strong>
+        <?php if ($season && !empty($season['start_date']) && !empty($season['end_date'])): ?>
+        — including dates outside the season period
+        (<?= formatDate($season['start_date']) ?> – <?= formatDate($season['end_date']) ?>).
+        <?php else: ?>
+        — not limited to the active season dates.
+        <?php endif; ?>
+    </div>
+
     <form method="POST">
         <?= csrfField() ?>
         <div class="row g-3">
             <div class="col-md-6">
                 <label class="form-label">Date &amp; Time *</label>
-                <input type="datetime-local" name="scheduled_at" class="form-control" required value="<?= sanitize(post('scheduled_at', $dtLocal)) ?>">
+                <input type="datetime-local" name="scheduled_at" class="form-control" value="<?= sanitize(post('scheduled_at', $dtLocal)) ?>">
+                <div class="form-text">Pick any calendar date/time. Not restricted to season dates.</div>
             </div>
             <div class="col-md-6">
                 <label class="form-label">Venue</label>
@@ -131,7 +148,7 @@ require __DIR__ . '/../_season_bar.php';
                 <input type="hidden" name="team_a_id" value="<?= (int) $match['team_a_id'] ?>">
                 <input type="text" class="form-control" value="<?= sanitize($match['team_a_name']) ?>" disabled>
                 <?php else: ?>
-                <select name="team_a_id" class="form-select" <?= $match['team_a_id'] ? '' : '' ?>>
+                <select name="team_a_id" class="form-select">
                     <option value="">TBD</option>
                     <?php foreach ($teams as $t): ?>
                     <option value="<?= $t['id'] ?>" <?= (int) ($match['team_a_id'] ?? 0) === (int) $t['id'] ? 'selected' : '' ?>><?= sanitize($t['name']) ?></option>
@@ -158,6 +175,12 @@ require __DIR__ . '/../_season_bar.php';
             <div class="col-12">
                 <label class="form-label">Notes</label>
                 <textarea name="notes" class="form-control" rows="2"><?= sanitize(post('notes', $match['notes'] ?? '')) ?></textarea>
+            </div>
+            <div class="col-12">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="clear_schedule" value="1" id="clearSchedule">
+                    <label class="form-check-label" for="clearSchedule">Clear schedule (mark as unscheduled)</label>
+                </div>
             </div>
         </div>
         <div class="mt-4 d-flex gap-2">

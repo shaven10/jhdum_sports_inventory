@@ -14,7 +14,7 @@ $end = date('Y-m-t', strtotime($start));
 $prev = date('Y-m', strtotime($start . ' -1 month'));
 $next = date('Y-m', strtotime($start . ' +1 month'));
 
-$sql = "SELECT m.*, s.name as sport_name,
+$sql = "SELECT m.*, s.name as sport_name, s.category as sport_category,
     ta.name as team_a_name, tb.name as team_b_name
     FROM intramural_matches m
     JOIN intramural_sports s ON m.sport_id = s.id
@@ -86,7 +86,7 @@ require __DIR__ . '/../_season_bar.php';
                         echo '<div class="fw-semibold small mb-1">' . $day . '</div>';
                         if (!empty($byDate[$date])) {
                             foreach ($byDate[$date] as $m) {
-                                $label = date('H:i', strtotime($m['scheduled_at'])) . ' ' . $m['sport_name'];
+                                $label = date('H:i', strtotime($m['scheduled_at'])) . ' ' . $m['sport_name'] . ' (' . ucfirst($m['sport_category']) . ')';
                                 echo '<a class="d-block small text-decoration-none mb-1 p-1 rounded bg-primary bg-opacity-10" href="' . BASE_URL . '/intramurals/matches/view.php?id=' . $m['id'] . '">';
                                 echo sanitize($label) . '<br><span class="text-muted">' . sanitize($m['team_a_name']) . ' vs ' . sanitize($m['team_b_name']) . '</span>';
                                 echo '</a>';

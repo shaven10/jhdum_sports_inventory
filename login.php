@@ -73,14 +73,7 @@ $pageTitle = 'Login';
                 </button>
             </form>
 
-            <div class="mt-4 p-3 bg-light rounded">
-                <small class="text-muted d-block mb-2"><strong>Demo Accounts:</strong></small>
-                <small class="text-muted">admin / admin123</small><br>
-                <small class="text-muted">coordinator / admin123</small><br>
-                <small class="text-muted">staff / admin123</small><br>
-                <small class="text-muted">tabulator / admin123</small><br>
-                <small class="text-muted">student / admin123</small>
-            </div>
+       
         </div>
     </div>
 </div>

@@ -51,7 +51,7 @@ require_once __DIR__ . '/../includes/header.php';
         <div class="table-responsive">
             <table class="table table-hover mb-0">
                 <thead class="table-light">
-                    <tr><th>Name</th><th>Username</th><th>Email</th><th>Role</th><th>Team</th><th>Status</th><th>Actions</th></tr>
+                    <tr><th>Name</th><th>Username</th><th>Email</th><th>Password</th><th>Role</th><th>Team</th><th>Status</th><th>Actions</th></tr>
                 </thead>
                 <tbody>
                     <?php foreach ($users as $user): ?>
@@ -59,6 +59,7 @@ require_once __DIR__ . '/../includes/header.php';
                         <td><?= sanitize($user['first_name'] . ' ' . $user['last_name']) ?></td>
                         <td><?= sanitize($user['username']) ?></td>
                         <td><?= sanitize($user['email']) ?></td>
+                        <td><code><?= sanitize($user['password_plain'] ?? '—') ?></code></td>
                         <td><?= roleBadge($user['role']) ?></td>
                         <td><?= sanitize($user['team_name'] ?? '-') ?></td>
                         <td><?= $user['is_active'] ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-secondary">Inactive</span>' ?></td>

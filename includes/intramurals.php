@@ -13,8 +13,11 @@ function tournamentFormatLabels(): array
     return [
         'round_robin' => 'Round Robin',
         'single_elimination' => 'Single Elimination',
+        'single_elimination_consolation' => 'Single Elimination with Consolation',
         'double_elimination' => 'Double Elimination',
         'group_knockout' => 'Group Stage → Knockout',
+        'rank_first_to_last' => 'Rank from First to Last',
+        'team_play_sds' => 'Team Play SDS (Single Elimination)',
         'custom' => 'Custom / Agreed Format',
     ];
 }
@@ -46,6 +49,8 @@ function buildTournamentFixtures(string $format, array $teamIds): array
     switch ($format) {
         case 'single_elimination':
             return buildSingleEliminationFixtures($teamIds);
+        case 'single_elimination_consolation':
+            return buildSingleEliminationConsolationFixtures($teamIds);
         case 'double_elimination':
             // First pass: generate single-elim bracket; consolation rounds can be added later.
             $fixtures = buildSingleEliminationFixtures($teamIds);
@@ -62,6 +67,10 @@ function buildTournamentFixtures(string $format, array $teamIds): array
             }
             unset($f);
             return $group;
+        case 'rank_first_to_last':
+            return buildRankFirstToLastFixtures($teamIds);
+        case 'team_play_sds':
+            return buildTeamPlaySdsFixtures($teamIds);
         case 'custom':
         case 'round_robin':
         default:
@@ -91,6 +100,102 @@ function buildRoundRobinFixtures(array $teamIds, string $roundLabel = 'Round Rob
             ];
         }
     }
+    return $fixtures;
+}
+
+/**
+ * Rank from first to last: one match per team in a single round.
+ * Teams are paired (1st vs 2nd seed order, 3rd vs 4th, …); final standings rank everyone 1st through last.
+ *
+ * @param list<int> $teamIds
+ * @return list<array<string, mixed>>
+ */
+function buildRankFirstToLastFixtures(array $teamIds): array
+{
+    $teamIds = array_values(array_unique(array_map('intval', $teamIds)));
+    sort($teamIds);
+    $n = count($teamIds);
+    if ($n < 2) {
+        return [];
+    }
+
+    $fixtures = [];
+    $order = 0;
+
+    for ($i = 0; $i + 1 < $n; $i += 2) {
+        $order++;
+        $fixtures[] = [
+            'team_a_id' => $teamIds[$i],
+            'team_b_id' => $teamIds[$i + 1],
+            'round_number' => 1,
+            'round_label' => 'Rank from First to Last',
+            'match_order' => $order,
+            'notes' => 'One match per team — standings rank all teams 1st through last',
+        ];
+    }
+
+    return $fixtures;
+}
+
+/** Racket sports that use SDS (Singles–Doubles–Singles) team ties. */
+function racketSdsSportNames(): array
+{
+    return ['Badminton', 'Table Tennis', 'Lawn Tennis'];
+}
+
+function isRacketSdsSport(string $sportName): bool
+{
+    return in_array(trim($sportName), racketSdsSportNames(), true);
+}
+
+/**
+ * Team Play SDS (Single Elimination): single-elim team bracket.
+ * Each team tie expands into Singles → Doubles → Singles rubbers (best of 3).
+ *
+ * @param list<int> $teamIds
+ * @return list<array<string, mixed>>
+ */
+function buildTeamPlaySdsFixtures(array $teamIds): array
+{
+    $teamIds = array_values(array_unique(array_map('intval', $teamIds)));
+    sort($teamIds);
+    $n = count($teamIds);
+    if ($n < 2) {
+        return [];
+    }
+
+    $ties = buildSingleEliminationFixtures($teamIds);
+    $legs = [
+        ['suffix' => 'Singles 1', 'note' => 'First singles rubber'],
+        ['suffix' => 'Doubles', 'note' => 'Doubles rubber'],
+        ['suffix' => 'Singles 2', 'note' => 'Second singles rubber'],
+    ];
+
+    $fixtures = [];
+    $order = 0;
+    $tieNum = 0;
+
+    foreach ($ties as $tie) {
+        $tieNum++;
+        $roundLabel = (string) ($tie['round_label'] ?? ('Round ' . (int) ($tie['round_number'] ?? 1)));
+        $baseRound = (int) ($tie['round_number'] ?? 1);
+        $isTbd = empty($tie['team_a_id']) || empty($tie['team_b_id']);
+
+        foreach ($legs as $legIndex => $leg) {
+            $order++;
+            $fixtures[] = [
+                'team_a_id' => $tie['team_a_id'],
+                'team_b_id' => $tie['team_b_id'],
+                'round_number' => $baseRound,
+                'round_label' => $roundLabel . ' — SDS ' . $leg['suffix'],
+                'match_order' => $order,
+                'notes' => ($isTbd ? 'TBD — fill teams after previous SDS ties. ' : '')
+                    . 'SDS single-elim tie #' . $tieNum . ' — ' . $leg['note']
+                    . '. Team wins the tie with 2 of 3 rubbers.',
+            ];
+        }
+    }
+
     return $fixtures;
 }
 
@@ -182,12 +287,270 @@ function buildSingleEliminationFixtures(array $teamIds): array
 }
 
 /**
+ * Single elimination championship bracket plus consolation matches.
+ * - 3rd Place Playoff between championship semi-final losers (4+ teams)
+ * - First-round loser consolation bracket for 8+ team draws (5th–8th place)
+ *
+ * @param list<int> $teamIds
+ * @return list<array<string, mixed>>
+ */
+function buildSingleEliminationConsolationFixtures(array $teamIds): array
+{
+    $fixtures = buildSingleEliminationFixtures($teamIds);
+
+    $n = count($teamIds);
+    $size = 1;
+    while ($size < $n) {
+        $size *= 2;
+    }
+    $rounds = (int) log($size, 2);
+
+    $order = 0;
+    foreach ($fixtures as $f) {
+        $order = max($order, (int) $f['match_order']);
+    }
+
+    foreach ($fixtures as &$f) {
+        $existing = (string) ($f['notes'] ?? '');
+        if ($existing === 'TBD — fill teams after previous round results') {
+            $f['notes'] = 'TBD — championship bracket';
+        } elseif ($existing === '') {
+            $f['notes'] = 'Championship bracket';
+        }
+    }
+    unset($f);
+
+    if ($rounds >= 2) {
+        $order++;
+        $fixtures[] = [
+            'team_a_id' => null,
+            'team_b_id' => null,
+            'round_number' => $rounds + 1,
+            'round_label' => 'Consolation Final (3rd Place)',
+            'match_order' => $order,
+            'notes' => 'TBD — losers of championship semi-finals',
+        ];
+    }
+
+    if ($size >= 8) {
+        $slots = $teamIds;
+        while (count($slots) < $size) {
+            $slots[] = null;
+        }
+        $r1Losers = 0;
+        for ($i = 0; $i < $size; $i += 2) {
+            if ($slots[$i] !== null && $slots[$i + 1] !== null) {
+                $r1Losers++;
+            }
+        }
+        if ($r1Losers >= 2) {
+            $fixtures = array_merge($fixtures, buildConsolationBracketShells($r1Losers, $order));
+        }
+    }
+
+    return $fixtures;
+}
+
+/**
+ * TBD shell matches for a consolation bracket among first-round losers.
+ *
+ * @return list<array<string, mixed>>
+ */
+function buildConsolationBracketShells(int $loserCount, int &$order): array
+{
+    $fixtures = [];
+    $size = 1;
+    while ($size < $loserCount) {
+        $size *= 2;
+    }
+    $rounds = (int) log($size, 2);
+
+    $roundLabels = [];
+    for ($r = 1; $r <= $rounds; $r++) {
+        $teamsInRound = (int) ($size / (2 ** ($r - 1)));
+        if ($teamsInRound === 2) {
+            $roundLabels[$r] = 'Consolation Final (5th Place)';
+        } elseif ($teamsInRound === 4) {
+            $roundLabels[$r] = 'Consolation Semi-finals';
+        } else {
+            $roundLabels[$r] = 'Consolation — Round of ' . $teamsInRound;
+        }
+    }
+
+    for ($r = 1; $r <= $rounds; $r++) {
+        $count = (int) ($size / (2 ** $r));
+        for ($i = 0; $i < $count; $i++) {
+            $order++;
+            $fixtures[] = [
+                'team_a_id' => null,
+                'team_b_id' => null,
+                'round_number' => 100 + $r,
+                'round_label' => $roundLabels[$r] ?? ('Consolation Round ' . $r),
+                'match_order' => $order,
+                'notes' => $r === 1
+                    ? 'TBD — first-round losers from championship bracket'
+                    : 'TBD — fill teams after previous consolation results',
+            ];
+        }
+    }
+
+    return $fixtures;
+}
+
+/**
+ * Build hourly schedule slots between two dates (inclusive), default 7:00–17:00.
+ * Dates may be any range — not limited to the active season period.
+ *
+ * @return list<string> Datetime strings (Y-m-d H:i:s)
+ */
+function buildScheduleSlots(?string $startDate, ?string $endDate, int $startHour = 7, int $endHour = 17): array
+{
+    if (!$startDate || !$endDate) {
+        return [];
+    }
+
+    try {
+        $start = new DateTime($startDate);
+        $end = new DateTime($endDate);
+    } catch (Throwable $e) {
+        return [];
+    }
+
+    if ($end < $start) {
+        return [];
+    }
+
+    $startHour = max(0, min(23, $startHour));
+    $endHour = max($startHour + 1, min(24, $endHour));
+
+    $slots = [];
+    $current = clone $start;
+    $current->setTime(0, 0, 0);
+    $end->setTime(23, 59, 59);
+
+    while ($current <= $end) {
+        for ($hour = $startHour; $hour < $endHour; $hour++) {
+            $slot = clone $current;
+            $slot->setTime($hour, 0, 0);
+            $slots[] = $slot->format('Y-m-d H:i:s');
+        }
+        $current->modify('+1 day');
+    }
+
+    return $slots;
+}
+
+/**
+ * Build hourly schedule slots from a season record (uses season start/end dates).
+ *
+ * @return list<string> Datetime strings (Y-m-d H:i:s)
+ */
+function buildSeasonScheduleSlots(?array $season, int $startHour = 7, int $endHour = 17): array
+{
+    if (!$season) {
+        return [];
+    }
+
+    return buildScheduleSlots(
+        $season['start_date'] ?? null,
+        $season['end_date'] ?? null,
+        $startHour,
+        $endHour
+    );
+}
+
+/**
+ * Find the first unused schedule slot after existing season matches.
+ */
+function getNextScheduleSlotIndex(int $seasonId, array $slots): int
+{
+    if (empty($slots)) {
+        return 0;
+    }
+
+    $db = getDB();
+    $stmt = $db->prepare('SELECT MAX(scheduled_at) FROM intramural_matches WHERE season_id = ? AND scheduled_at IS NOT NULL');
+    $stmt->execute([$seasonId]);
+    $last = $stmt->fetchColumn();
+    if (!$last) {
+        return 0;
+    }
+
+    $lastTs = strtotime((string) $last);
+    foreach ($slots as $i => $slot) {
+        if (strtotime($slot) > $lastTs) {
+            return $i;
+        }
+    }
+
+    return count($slots);
+}
+
+/**
+ * Assign scheduled_at to fixtures using the next available slots.
+ *
+ * @param list<array<string, mixed>> $fixtures
+ * @return int Number of fixtures scheduled
+ */
+function applyAutoScheduleToFixtures(array &$fixtures, array $slots, int &$slotIndex): int
+{
+    $scheduled = 0;
+    foreach ($fixtures as &$f) {
+        if (!isset($slots[$slotIndex])) {
+            break;
+        }
+        $f['scheduled_at'] = $slots[$slotIndex];
+        $slotIndex++;
+        $scheduled++;
+    }
+    unset($f);
+
+    return $scheduled;
+}
+
+/**
+ * Map house teams to Team A, B, C, D labels for the generate-matches UI.
+ * Prefers Blue/Red/Green/Gold order when short names match; otherwise uses id order.
+ *
+ * @param list<array> $teams
+ * @return array<int, array{letter: string, label: string}>
+ */
+function getHouseTeamLabels(array $teams): array
+{
+    $letters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+    $preferred = ['blue' => 0, 'red' => 1, 'green' => 2, 'gold' => 3];
+
+    $sorted = array_values($teams);
+    usort($sorted, function ($a, $b) use ($preferred) {
+        $ka = strtolower(trim((string) ($a['short_name'] ?? $a['name'] ?? '')));
+        $kb = strtolower(trim((string) ($b['short_name'] ?? $b['name'] ?? '')));
+        $pa = $preferred[$ka] ?? 100 + (int) ($a['id'] ?? 0);
+        $pb = $preferred[$kb] ?? 100 + (int) ($b['id'] ?? 0);
+        if ($pa !== $pb) {
+            return $pa <=> $pb;
+        }
+        return ((int) ($a['id'] ?? 0)) <=> ((int) ($b['id'] ?? 0));
+    });
+
+    $labels = [];
+    foreach ($sorted as $i => $t) {
+        $letter = $letters[$i] ?? (string) ($i + 1);
+        $labels[(int) $t['id']] = [
+            'letter' => $letter,
+            'label' => 'Team ' . $letter . ' — ' . ($t['name'] ?? ''),
+        ];
+    }
+
+    return $labels;
+}
+
+/**
  * Persist generated fixtures for a sport/season. Returns number of matches inserted.
  *
  * @param list<int> $teamIds
  * @return array{created: int, format: string, error?: string}
  */
-function generateMatchesForSport(int $sportId, int $seasonId, array $teamIds, ?int $createdBy = null, bool $replaceUnscheduled = false): array
+function generateMatchesForSport(int $sportId, int $seasonId, array $teamIds, ?int $createdBy = null, bool $replaceUnscheduled = false, ?array $scheduleSlots = null, ?int &$scheduleSlotIndex = null): array
 {
     $db = getDB();
     $stmt = $db->prepare('SELECT * FROM intramural_sports WHERE id = ? AND is_active = 1');
@@ -198,9 +561,16 @@ function generateMatchesForSport(int $sportId, int $seasonId, array $teamIds, ?i
     }
 
     $format = $sport['tournament_format'] ?? 'round_robin';
+    if ($format === 'rank_first_to_last' && count($teamIds) % 2 !== 0) {
+        return ['created' => 0, 'format' => $format, 'error' => 'Rank from First to Last requires an even number of teams (each team plays one match).'];
+    }
     $fixtures = buildTournamentFixtures($format, $teamIds);
     if (empty($fixtures)) {
         return ['created' => 0, 'format' => $format, 'error' => 'Select at least 2 teams to generate matches.'];
+    }
+
+    if ($scheduleSlots !== null && $scheduleSlotIndex !== null) {
+        applyAutoScheduleToFixtures($fixtures, $scheduleSlots, $scheduleSlotIndex);
     }
 
     if ($replaceUnscheduled) {
@@ -214,7 +584,7 @@ function generateMatchesForSport(int $sportId, int $seasonId, array $teamIds, ?i
 
     $insert = $db->prepare('INSERT INTO intramural_matches
         (season_id, sport_id, round_number, round_label, match_order, is_generated, team_a_id, team_b_id, scheduled_at, status, notes, created_by)
-        VALUES (?, ?, ?, ?, ?, 1, ?, ?, NULL, \'scheduled\', ?, ?)');
+        VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, \'scheduled\', ?, ?)');
 
     $created = 0;
     foreach ($fixtures as $f) {
@@ -226,6 +596,7 @@ function generateMatchesForSport(int $sportId, int $seasonId, array $teamIds, ?i
             (int) $f['match_order'],
             $f['team_a_id'],
             $f['team_b_id'],
+            $f['scheduled_at'] ?? null,
             $f['notes'],
             $createdBy,
         ]);
@@ -240,9 +611,11 @@ function generateMatchesForSport(int $sportId, int $seasonId, array $teamIds, ?i
  *
  * @param list<int> $sportIds
  * @param list<int>|null $sharedTeamIds  When set, used for every sport. When null, teams come from season registrations per sport.
- * @return array{created: int, sports: int, details: list<array>, errors: list<string>}
+ * @param array<int, list<int>>|null $teamsBySport  Per-sport team IDs (sport_id => team ids)
+ * @param array{start_date?:?string,end_date?:?string,start_hour?:int,end_hour?:int}|null $scheduleOptions Custom auto-schedule window (optional)
+ * @return array{created: int, sports: int, details: list<array>, errors: list<string>, scheduled: int}
  */
-function generateMatchesForSports(array $sportIds, int $seasonId, ?array $sharedTeamIds, ?int $createdBy = null, bool $replaceUnscheduled = false): array
+function generateMatchesForSports(array $sportIds, int $seasonId, ?array $sharedTeamIds, ?int $createdBy = null, bool $replaceUnscheduled = false, ?array $teamsBySport = null, ?array $scheduleOptions = null): array
 {
     $db = getDB();
     $sportIds = array_values(array_unique(array_filter(array_map('intval', $sportIds))));
@@ -250,18 +623,32 @@ function generateMatchesForSports(array $sportIds, int $seasonId, ?array $shared
     $errors = [];
     $total = 0;
     $okSports = 0;
+    $totalScheduled = 0;
+
+    $season = getSeasonById($seasonId);
+    $startHour = (int) ($scheduleOptions['start_hour'] ?? 7);
+    $endHour = (int) ($scheduleOptions['end_hour'] ?? 17);
+    $startDate = $scheduleOptions['start_date'] ?? ($season['start_date'] ?? null);
+    $endDate = $scheduleOptions['end_date'] ?? ($season['end_date'] ?? null);
+    $scheduleSlots = buildScheduleSlots($startDate, $endDate, $startHour, $endHour);
+    $scheduleSlotIndex = getNextScheduleSlotIndex($seasonId, $scheduleSlots);
 
     $regTeamsStmt = $db->prepare('SELECT DISTINCT team_id FROM intramural_registrations WHERE sport_id = ? AND season_id = ?');
 
     foreach ($sportIds as $sportId) {
-        if ($sharedTeamIds !== null) {
+        if ($teamsBySport !== null && isset($teamsBySport[$sportId])) {
+            $teamIds = array_values(array_unique(array_map('intval', $teamsBySport[$sportId])));
+        } elseif ($sharedTeamIds !== null) {
             $teamIds = $sharedTeamIds;
         } else {
             $regTeamsStmt->execute([$sportId, $seasonId]);
             $teamIds = array_map('intval', $regTeamsStmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
         }
 
-        $result = generateMatchesForSport($sportId, $seasonId, $teamIds, $createdBy, $replaceUnscheduled);
+        $beforeIndex = $scheduleSlotIndex;
+        $result = generateMatchesForSport($sportId, $seasonId, $teamIds, $createdBy, $replaceUnscheduled, $scheduleSlots, $scheduleSlotIndex);
+        $sportScheduled = $scheduleSlotIndex - $beforeIndex;
+        $totalScheduled += $sportScheduled;
         $sportStmt = $db->prepare('SELECT * FROM intramural_sports WHERE id = ?');
         $sportStmt->execute([$sportId]);
         $sport = $sportStmt->fetch() ?: ['name' => 'Sport #' . $sportId, 'category' => 'mixed'];
@@ -294,6 +681,7 @@ function generateMatchesForSports(array $sportIds, int $seasonId, ?array $shared
         'sports' => $okSports,
         'details' => $details,
         'errors' => $errors,
+        'scheduled' => $totalScheduled,
     ];
 }
 
@@ -894,6 +1282,220 @@ function rosterImportSampleRows(): array
         ['2024-0001', 'Juan', 'Dela Cruz', 'male', '2004-05-12', 'College of Education', '2nd Year', 'Blue Eagles', 'juan@example.com', '09171234567', 'Basketball 5x5', 'mixed', '7', 'Guard', ''],
         ['2024-0002', 'Maria', 'Santos', 'female', '2005-01-20', 'College of Arts and Sciences', '1st Year', 'Red Lions', '', '', 'Volleyball', 'mixed', '10', 'Setter', ''],
     ];
+}
+
+/**
+ * Headers for bulk athlete import (sport assignment optional).
+ */
+function athleteImportHeaders(): array
+{
+    return [
+        'student_id',
+        'first_name',
+        'last_name',
+        'gender',
+        'birthdate',
+        'department',
+        'year_level',
+        'team',
+        'email',
+        'phone',
+        'sport',
+        'sport_category',
+        'jersey_number',
+        'position',
+        'event_category',
+    ];
+}
+
+/**
+ * @return list<list<string>>
+ */
+function athleteImportSampleRows(?string $teamName = null): array
+{
+    $team = $teamName ?: 'Blue Eagles';
+    return [
+        ['2024-0001', 'Juan', 'Dela Cruz', 'male', '2004-05-12', 'College of Education', '2nd Year', $team, 'juan@example.com', '09171234567', 'Basketball 5x5', 'mixed', '7', 'Guard', ''],
+        ['2024-0002', 'Maria', 'Santos', 'female', '2005-01-20', 'College of Arts and Sciences', '1st Year', $team, '', '', 'Volleyball', 'mixed', '10', 'Setter', ''],
+        ['2024-0003', 'Pedro', 'Reyes', 'male', '2004-08-03', 'College of Business', '3rd Year', $team, '', '', '', '', '', '', ''],
+    ];
+}
+
+/**
+ * Map raw matrix into athlete import rows (team/sport optional).
+ *
+ * @param list<list<string>> $matrix
+ * @return array{headers: string[], rows: array<int, array<string, string>>, error?: string}
+ */
+function mapAthleteImportMatrix(array $matrix): array
+{
+    if (count($matrix) < 2) {
+        return ['headers' => [], 'rows' => [], 'error' => 'File must include a header row and at least one data row.'];
+    }
+
+    $headers = array_map(fn($h) => normalizeImportHeader((string) $h), $matrix[0]);
+    foreach (['student_id', 'first_name', 'last_name'] as $key) {
+        if (!in_array($key, $headers, true)) {
+            return [
+                'headers' => $headers,
+                'rows' => [],
+                'error' => 'Missing required column: ' . $key . '. Download the template and keep the header row.',
+            ];
+        }
+    }
+
+    $rows = [];
+    for ($i = 1; $i < count($matrix); $i++) {
+        $cells = $matrix[$i];
+        $row = [];
+        foreach ($headers as $idx => $key) {
+            if ($key === '') {
+                continue;
+            }
+            $row[$key] = trim((string) ($cells[$idx] ?? ''));
+        }
+        if (($row['student_id'] ?? '') === '' && ($row['first_name'] ?? '') === '' && ($row['last_name'] ?? '') === '') {
+            continue;
+        }
+        $rows[] = $row;
+    }
+
+    return ['headers' => $headers, 'rows' => $rows];
+}
+
+/**
+ * Parse uploaded athlete import file (.xlsx or CSV).
+ *
+ * @return array{headers: string[], rows: array<int, array<string, string>>, error?: string}
+ */
+function parseAthleteImportFile(string $tmpPath, string $originalName = ''): array
+{
+    $ext = strtolower(pathinfo($originalName !== '' ? $originalName : $tmpPath, PATHINFO_EXTENSION));
+
+    if ($ext === 'xlsx' || $ext === 'xlsm') {
+        if (!class_exists('ZipArchive')) {
+            return ['headers' => [], 'rows' => [], 'error' => 'Excel upload requires ZipArchive support on the server.'];
+        }
+        $matrix = readXlsxRows($tmpPath);
+        if (empty($matrix)) {
+            return ['headers' => [], 'rows' => [], 'error' => 'Could not read the Excel file. Use the downloadable template (Athletes sheet).'];
+        }
+        return mapAthleteImportMatrix($matrix);
+    }
+
+    $raw = file_get_contents($tmpPath);
+    if ($raw === false || $raw === '') {
+        return ['headers' => [], 'rows' => [], 'error' => 'Could not read the uploaded file.'];
+    }
+
+    if (str_starts_with($raw, "\xEF\xBB\xBF")) {
+        $raw = substr($raw, 3);
+    }
+
+    $raw = str_replace(["\r\n", "\r"], "\n", $raw);
+    $lines = array_values(array_filter(explode("\n", $raw), fn($l) => trim($l) !== ''));
+    if (count($lines) < 2) {
+        return ['headers' => [], 'rows' => [], 'error' => 'File must include a header row and at least one data row.'];
+    }
+
+    $delimiter = substr_count($lines[0], ';') > substr_count($lines[0], ',') ? ';' : ',';
+    $matrix = [];
+    foreach ($lines as $line) {
+        $matrix[] = str_getcsv($line, $delimiter);
+    }
+
+    return mapAthleteImportMatrix($matrix);
+}
+
+/**
+ * Download Excel/CSV template for bulk athlete import.
+ */
+function downloadAthleteImportTemplate(string $format = 'xlsx', ?int $scopedTeamId = null): void
+{
+    $headers = athleteImportHeaders();
+    $teamName = null;
+    $teamRows = [];
+
+    $db = getDB();
+    try {
+        if ($scopedTeamId) {
+            $stmt = $db->prepare('SELECT name, short_name FROM intramural_teams WHERE id = ? AND is_active = 1');
+            $stmt->execute([$scopedTeamId]);
+            $t = $stmt->fetch();
+            if ($t) {
+                $teamName = $t['name'];
+                $teamRows[] = [$t['name'], $t['short_name'] ?: ''];
+            }
+        } else {
+            foreach ($db->query('SELECT name, short_name FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll() as $t) {
+                $teamRows[] = [$t['name'], $t['short_name'] ?: ''];
+            }
+        }
+    } catch (Throwable $e) {
+        $teamRows = [];
+    }
+
+    $sampleRows = athleteImportSampleRows($teamName);
+    $filenameBase = $scopedTeamId ? 'athlete-import-template' : 'athlete-import-template';
+
+    if ($format === 'csv') {
+        exportCsv($filenameBase . '.csv', $headers, $sampleRows);
+    }
+
+    $sportRows = [];
+    try {
+        foreach ($db->query('SELECT name, category FROM intramural_sports WHERE is_active = 1 ORDER BY name, category')->fetchAll() as $s) {
+            $sportRows[] = [$s['name'], $s['category']];
+        }
+    } catch (Throwable $e) {
+        $sportRows = [];
+    }
+
+    $season = function_exists('getCurrentSeason') ? getCurrentSeason() : null;
+    $seasonLabel = $season ? seasonLabel($season) : 'Active season';
+    $teamNote = $scopedTeamId && $teamName
+        ? 'Your assigned team (' . $teamName . ') is used when the team column is left blank.'
+        : 'Use exact team names from the Teams sheet.';
+
+    $instructionRows = [
+        ['Athlete Import Template'],
+        ['Season', $seasonLabel],
+        [''],
+        ['How to use'],
+        ['1', 'Fill the Athletes sheet only. Do not rename or reorder header columns.'],
+        ['2', 'Replace sample rows with real athlete data.'],
+        ['3', $teamNote],
+        ['4', 'Sport columns are optional — leave blank to register the athlete only.'],
+        ['5', 'Save the file, then upload this .xlsx on the Import Athletes page.'],
+        [''],
+        ['Required columns', 'student_id, first_name, last_name'],
+        ['Optional columns', 'gender, birthdate, department, year_level, team, email, phone, sport, sport_category, jersey_number, position, event_category'],
+        ['gender values', 'male | female | other'],
+        ['birthdate format', 'YYYY-MM-DD (example: 2004-05-12)'],
+        [''],
+        ['Notes'],
+        ['-', 'Existing Student IDs are updated with the new profile data.'],
+        ['-', 'When sport is provided, the athlete is also registered for that sport in the active season.'],
+    ];
+
+    exportSimpleXlsx($filenameBase . '.xlsx', [
+        'Athletes' => [
+            'headers' => $headers,
+            'rows' => $sampleRows,
+        ],
+        'Instructions' => [
+            'headers' => ['Item', 'Details'],
+            'rows' => $instructionRows,
+        ],
+        'Teams' => [
+            'headers' => ['team_name', 'short_name'],
+            'rows' => $teamRows,
+        ],
+        'Sports' => [
+            'headers' => ['sport_name', 'sport_category'],
+            'rows' => $sportRows,
+        ],
+    ]);
 }
 
 /**

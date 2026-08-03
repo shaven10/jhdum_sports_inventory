@@ -50,7 +50,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
 
         if (!empty($password)) {
             if (strlen($password) >= 6) {
-                $db->prepare('UPDATE users SET password = ? WHERE id = ?')->execute([password_hash($password, PASSWORD_DEFAULT), $id]);
+                $db->prepare('UPDATE users SET password = ?, password_plain = ? WHERE id = ?')->execute([password_hash($password, PASSWORD_DEFAULT), $password, $id]);
             } else {
                 $errors[] = 'Password must be at least 6 characters.';
             }
@@ -93,6 +93,7 @@ require_once __DIR__ . '/../includes/header.php';
     <div class="col-md-6"><label class="form-label">Last Name</label><input type="text" name="last_name" class="form-control" value="<?= sanitize($user['last_name']) ?>" required></div>
     <div class="col-md-6"><label class="form-label">Username</label><input type="text" class="form-control" value="<?= sanitize($user['username']) ?>" disabled></div>
     <div class="col-md-6"><label class="form-label">Email</label><input type="email" name="email" class="form-control" value="<?= sanitize($user['email']) ?>" required></div>
+    <div class="col-md-6"><label class="form-label">Current Password</label><input type="text" class="form-control font-monospace" value="<?= sanitize($user['password_plain'] ?? '—') ?>" readonly></div>
     <div class="col-md-6"><label class="form-label">New Password (leave blank to keep)</label><input type="password" name="password" class="form-control" minlength="6"></div>
     <div class="col-md-6"><label class="form-label">Role</label>
         <select name="role" id="roleSelect" class="form-select">

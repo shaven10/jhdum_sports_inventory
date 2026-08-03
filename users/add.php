@@ -47,8 +47,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
 
     if (empty($errors)) {
         $hash = password_hash($password, PASSWORD_DEFAULT);
-        $stmt = $db->prepare('INSERT INTO users (username, email, password, first_name, last_name, student_id, department, phone, role, team_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-        $stmt->execute([$username, $email, $hash, $firstName, $lastName, $studentId, $department, $phone, $role, $teamId]);
+        $stmt = $db->prepare('INSERT INTO users (username, email, password, password_plain, first_name, last_name, student_id, department, phone, role, team_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $stmt->execute([$username, $email, $hash, $password, $firstName, $lastName, $studentId, $department, $phone, $role, $teamId]);
         $id = (int) $db->lastInsertId();
         syncUserTeamAssignment($id, $role, $teamId);
         auditLog($_SESSION['user_id'], 'create_user', 'user', $id);

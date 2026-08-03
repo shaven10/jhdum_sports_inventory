@@ -84,6 +84,9 @@ $flash = getFlash();
                         <li><hr class="dropdown-divider"></li>
                         <li><h6 class="dropdown-header">Participants</h6></li>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/athletes/index.php">Athletes</a></li>
+                        <?php if (canManageTeamAthletes()): ?>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/athletes/import.php"><i class="bi bi-file-earmark-arrow-up"></i> Import Athletes</a></li>
+                        <?php endif; ?>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/teams/index.php">Teams</a></li>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/sports/index.php">Sports / Events</a></li>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/roster/index.php">Rosters</a></li>

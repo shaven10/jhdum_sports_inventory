@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS users (
     username VARCHAR(50) NOT NULL UNIQUE,
     email VARCHAR(100) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,
+    password_plain VARCHAR(255) DEFAULT NULL,
     first_name VARCHAR(50) NOT NULL,
     last_name VARCHAR(50) NOT NULL,
     student_id VARCHAR(20) DEFAULT NULL,
@@ -192,11 +193,11 @@ INSERT INTO equipment_categories (name, description) VALUES
 ('General Sports', 'General sports equipment and accessories');
 
 -- Insert default admin user (password: admin123)
-INSERT INTO users (username, email, password, first_name, last_name, role) VALUES
-('admin', 'admin@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'System', 'Administrator', 'admin'),
-('coordinator', 'coordinator@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'Sports', 'Coordinator', 'coordinator'),
-('staff', 'staff@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'Sports', 'Staff', 'staff'),
-('student', 'student@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'Juan', 'Dela Cruz', 'student');
+INSERT INTO users (username, email, password, password_plain, first_name, last_name, role) VALUES
+('admin', 'admin@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'admin123', 'System', 'Administrator', 'admin'),
+('coordinator', 'coordinator@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'admin123', 'Sports', 'Coordinator', 'coordinator'),
+('staff', 'staff@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'admin123', 'Sports', 'Staff', 'staff'),
+('student', 'student@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'admin123', 'Juan', 'Dela Cruz', 'student');
 
 -- Insert sample equipment
 INSERT INTO equipment (category_id, name, description, barcode, quantity_total, quantity_available, `condition`, location) VALUES
@@ -291,7 +292,7 @@ CREATE TABLE IF NOT EXISTS intramural_sports (
     scoring_method ENUM('points', 'sets', 'games', 'time') NOT NULL DEFAULT 'points',
     rules TEXT,
     schedule_notes TEXT,
-    tournament_format ENUM('round_robin', 'single_elimination', 'double_elimination', 'group_knockout', 'custom') NOT NULL DEFAULT 'round_robin',
+    tournament_format ENUM('round_robin', 'single_elimination', 'single_elimination_consolation', 'double_elimination', 'group_knockout', 'rank_first_to_last', 'team_play_sds', 'custom') NOT NULL DEFAULT 'round_robin',
     format_notes TEXT,
     win_points INT NOT NULL DEFAULT 3,
     draw_points INT NOT NULL DEFAULT 1,
@@ -422,20 +423,25 @@ INSERT INTO intramural_sports (name, description, category, scoring_method, poin
 ('Dance Sports', 'Dance sports', 'mixed', 'points', 2, 3),
 ('Mass Power Dance', 'Mass power dance', 'mixed', 'points', 1, 3);
 
+UPDATE intramural_sports
+SET tournament_format = 'team_play_sds',
+    format_notes = 'Team Play SDS — single elimination; each team tie is Singles, Doubles, Singles (best of 3)'
+WHERE name IN ('Badminton', 'Table Tennis', 'Lawn Tennis');
+
 -- Link users.team_id after teams exist
 ALTER TABLE users
     ADD CONSTRAINT fk_users_team FOREIGN KEY (team_id) REFERENCES intramural_teams(id) ON DELETE SET NULL;
 
 -- Sample unit managers and coaches (password reset by install.php to admin123)
-INSERT INTO users (username, email, password, first_name, last_name, department, role, team_id) VALUES
-('um_blue', 'um_blue@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'Unit', 'Manager Blue', 'College of Education', 'unit_manager', 1),
-('coach_blue', 'coach_blue@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'Coach', 'Blue', 'College of Education', 'coach', 1),
-('um_red', 'um_red@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'Unit', 'Manager Red', 'College of Arts and Sciences', 'unit_manager', 2),
-('coach_red', 'coach_red@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'Coach', 'Red', 'College of Arts and Sciences', 'coach', 2),
-('um_green', 'um_green@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'Unit', 'Manager Green', 'College of Agriculture', 'unit_manager', 3),
-('coach_green', 'coach_green@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'Coach', 'Green', 'College of Agriculture', 'coach', 3),
-('um_gold', 'um_gold@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'Unit', 'Manager Gold', 'College of Business', 'unit_manager', 4),
-('coach_gold', 'coach_gold@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'Coach', 'Gold', 'College of Business', 'coach', 4);
+INSERT INTO users (username, email, password, password_plain, first_name, last_name, department, role, team_id) VALUES
+('um_blue', 'um_blue@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'admin123', 'Unit', 'Manager Blue', 'College of Education', 'unit_manager', 1),
+('coach_blue', 'coach_blue@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'admin123', 'Coach', 'Blue', 'College of Education', 'coach', 1),
+('um_red', 'um_red@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'admin123', 'Unit', 'Manager Red', 'College of Arts and Sciences', 'unit_manager', 2),
+('coach_red', 'coach_red@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'admin123', 'Coach', 'Red', 'College of Arts and Sciences', 'coach', 2),
+('um_green', 'um_green@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'admin123', 'Unit', 'Manager Green', 'College of Agriculture', 'unit_manager', 3),
+('coach_green', 'coach_green@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'admin123', 'Coach', 'Green', 'College of Agriculture', 'coach', 3),
+('um_gold', 'um_gold@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'admin123', 'Unit', 'Manager Gold', 'College of Business', 'unit_manager', 4),
+('coach_gold', 'coach_gold@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'admin123', 'Coach', 'Gold', 'College of Business', 'coach', 4);
 
 UPDATE intramural_teams SET unit_manager_id = (SELECT id FROM users WHERE username = 'um_blue'), coach_user_id = (SELECT id FROM users WHERE username = 'coach_blue'), coach_name = 'Coach Blue' WHERE id = 1;
 UPDATE intramural_teams SET unit_manager_id = (SELECT id FROM users WHERE username = 'um_red'), coach_user_id = (SELECT id FROM users WHERE username = 'coach_red'), coach_name = 'Coach Red' WHERE id = 2;

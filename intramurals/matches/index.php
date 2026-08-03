@@ -74,7 +74,7 @@ $queryBase = BASE_URL . '/intramurals/matches/index.php?search=' . urlencode($se
 <div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2">
     <div>
         <h1><i class="bi bi-calendar3"></i> Match Scheduling</h1>
-        <p class="text-muted mb-0">Generate fixtures by tournament style, then assign date &amp; time</p>
+        <p class="text-muted mb-0">Generate fixtures by tournament style, auto-schedule, then edit any date/time as needed</p>
     </div>
     <div class="d-flex gap-2 flex-wrap">
         <?php if (canManageMatches()): ?>
@@ -135,6 +135,7 @@ $queryBase = BASE_URL . '/intramurals/matches/index.php?search=' . urlencode($se
                     <tr>
                         <th>Date/Time</th>
                         <th>Sport</th>
+                        <th>Category</th>
                         <th>Round</th>
                         <th>Match</th>
                         <th>Score</th>
@@ -157,6 +158,7 @@ $queryBase = BASE_URL . '/intramurals/matches/index.php?search=' . urlencode($se
                             <?= sanitize($m['sport_name']) ?>
                             <br><small class="text-muted"><?= sanitize(tournamentFormatLabel($m['tournament_format'] ?? null)) ?></small>
                         </td>
+                        <td><span class="badge bg-secondary"><?= ucfirst($m['sport_category']) ?></span></td>
                         <td><?= sanitize($m['round_label'] ?: ('R' . (int) ($m['round_number'] ?? 1))) ?></td>
                         <td>
                             <span style="color:<?= sanitize($m['team_a_color'] ?: '#666') ?>"><?= sanitize($m['team_a_name'] ?: 'TBD') ?></span>
@@ -184,7 +186,7 @@ $queryBase = BASE_URL . '/intramurals/matches/index.php?search=' . urlencode($se
                     </tr>
                     <?php endforeach; ?>
                     <?php if (empty($matches)): ?>
-                    <tr><td colspan="8" class="text-muted p-3">No matches found. <?php if (canManageMatches()): ?><a href="<?= BASE_URL ?>/intramurals/matches/generate.php">Generate fixtures</a><?php endif; ?></td></tr>
+                    <tr><td colspan="9" class="text-muted p-3">No matches found. <?php if (canManageMatches()): ?><a href="<?= BASE_URL ?>/intramurals/matches/generate.php">Generate fixtures</a><?php endif; ?></td></tr>
                     <?php endif; ?>
                 </tbody>
             </table>

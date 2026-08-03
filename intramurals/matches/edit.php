@@ -126,8 +126,9 @@ $dtLocal = $match['scheduled_at'] ? date('Y-m-d\TH:i', strtotime($match['schedul
                 </div>
             </div>
             <div class="col-md-6">
-                <label class="form-label">Date & Time *</label>
-                <input type="datetime-local" name="scheduled_at" class="form-control" required value="<?= sanitize(post('scheduled_at', $dtLocal)) ?>">
+                <label class="form-label">Date & Time</label>
+                <input type="datetime-local" name="scheduled_at" class="form-control" value="<?= sanitize(post('scheduled_at', $dtLocal)) ?>">
+                <div class="form-text">Any date/time is allowed — not limited to season dates. Leave blank to keep unscheduled.</div>
             </div>
             <div class="col-md-6">
                 <label class="form-label">Team A *</label>

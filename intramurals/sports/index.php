@@ -132,7 +132,7 @@ require __DIR__ . '/../_season_bar.php';
                     <?php if ($editSport): ?><input type="hidden" name="id" value="<?= $editSport['id'] ?>"><?php endif; ?>
                     <div class="mb-3">
                         <label class="form-label">Sport Name *</label>
-                        <input type="text" name="name" class="form-control" required value="<?= sanitize($editSport['name'] ?? post('name')) ?>">
+                        <input type="text" name="name" id="sportNameInput" class="form-control" required value="<?= sanitize($editSport['name'] ?? post('name')) ?>">
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Category *</label>
@@ -182,12 +182,17 @@ require __DIR__ . '/../_season_bar.php';
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Agreed Tournament Style *</label>
-                        <select name="tournament_format" class="form-select" required>
+                        <select name="tournament_format" class="form-select" required id="tournamentFormatSelect">
                             <?php foreach (tournamentFormatLabels() as $val => $label): ?>
                             <option value="<?= $val ?>" <?= ($editSport['tournament_format'] ?? post('tournament_format', 'round_robin')) === $val ? 'selected' : '' ?>><?= sanitize($label) ?></option>
                             <?php endforeach; ?>
                         </select>
-                        <div class="form-text">Tabulators use this when building the match schedule manually.</div>
+                        <div class="form-text" id="sdsFormatHint" style="display:none">
+                            <strong>Team Play SDS (Single Elimination)</strong> — single-elim team bracket;
+                            each tie is Singles → Doubles → Singles (best of 3).
+                            Recommended for Badminton, Table Tennis, and Lawn Tennis.
+                        </div>
+                        <div class="form-text">Tabulators use this when generating match fixtures.</div>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Format Notes (agreed details)</label>
@@ -270,5 +275,30 @@ require __DIR__ . '/../_season_bar.php';
         </div>
     </div>
 </div>
+
+<script>
+(function () {
+    const racketSports = <?= json_encode(racketSdsSportNames()) ?>;
+    const nameInput = document.getElementById('sportNameInput');
+    const formatSelect = document.getElementById('tournamentFormatSelect');
+    const sdsHint = document.getElementById('sdsFormatHint');
+    if (!nameInput || !formatSelect) return;
+
+    function syncSdsUi() {
+        const name = (nameInput.value || '').trim();
+        const isRacket = racketSports.some(function (s) { return s.toLowerCase() === name.toLowerCase(); });
+        const isSds = formatSelect.value === 'team_play_sds';
+        if (sdsHint) sdsHint.style.display = isSds ? '' : 'none';
+        if (isRacket && formatSelect.value === 'round_robin' && !<?= $editSport ? 'true' : 'false' ?>) {
+            formatSelect.value = 'team_play_sds';
+            if (sdsHint) sdsHint.style.display = '';
+        }
+    }
+
+    nameInput.addEventListener('input', syncSdsUi);
+    formatSelect.addEventListener('change', syncSdsUi);
+    syncSdsUi();
+})();
+</script>
 
 <?php require_once __DIR__ . '/../../includes/footer.php'; ?>

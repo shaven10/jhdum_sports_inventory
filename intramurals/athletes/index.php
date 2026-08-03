@@ -94,6 +94,7 @@ require __DIR__ . '/../_season_bar.php';
     </div>
     <div class="d-flex gap-2">
         <?php if (canManageTeamAthletes()): ?>
+        <a href="<?= BASE_URL ?>/intramurals/athletes/import.php" class="btn btn-success"><i class="bi bi-file-earmark-arrow-up"></i> Import Athletes</a>
         <a href="<?= BASE_URL ?>/intramurals/athletes/add.php" class="btn btn-primary"><i class="bi bi-person-plus"></i> Register Athlete</a>
         <?php endif; ?>
         <a href="<?= BASE_URL ?>/intramurals/index.php" class="btn btn-outline-secondary">Back</a>

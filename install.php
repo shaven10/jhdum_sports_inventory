@@ -37,8 +37,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $pdo->exec('USE ' . $dbname);
         $passwordHash = password_hash('admin123', PASSWORD_DEFAULT);
-        $stmt = $pdo->prepare('UPDATE users SET password = ?');
-        $stmt->execute([$passwordHash]);
+        $stmt = $pdo->prepare('UPDATE users SET password = ?, password_plain = ?');
+        $stmt->execute([$passwordHash, 'admin123']);
 
         $messages[] = 'Database installed successfully!';
         $messages[] = 'Default login: admin / admin123';
