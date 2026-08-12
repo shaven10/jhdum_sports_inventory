@@ -72,19 +72,20 @@ require __DIR__ . '/../_season_bar.php';
             <div class="card-header">Sports & Events</div>
             <div class="card-body p-0">
                 <table class="table mb-0">
-                    <thead class="table-light"><tr><th>Sport</th><th>Team</th><th>Jersey</th><th>Position</th><th>Event</th></tr></thead>
+                    <thead class="table-light"><tr><th>Event</th><th>Category</th><th>Team</th><th>Jersey</th><th>Position</th><th>Division</th></tr></thead>
                     <tbody>
                         <?php foreach ($regs as $r): ?>
                         <tr>
-                            <td><?= sanitize($r['sport_name']) ?> (<?= ucfirst($r['category']) ?>)</td>
+                            <td><strong><?= sanitize($r['sport_name']) ?></strong></td>
+                            <td><span class="badge bg-secondary"><?= sanitize(ucfirst($r['category'])) ?></span></td>
                             <td style="color:<?= sanitize($r['color']) ?>"><?= sanitize($r['team_name']) ?></td>
-                            <td><?= sanitize($r['jersey_number'] ?: '-') ?></td>
-                            <td><?= sanitize($r['position'] ?: '-') ?></td>
-                            <td><?= sanitize($r['event_category'] ?: '-') ?></td>
+                            <td><?= sanitize($r['jersey_number'] ?: '—') ?></td>
+                            <td><?= sanitize($r['position'] ?: '—') ?></td>
+                            <td><?= sanitize($r['event_category'] ?: '—') ?></td>
                         </tr>
                         <?php endforeach; ?>
                         <?php if (empty($regs)): ?>
-                        <tr><td colspan="5" class="text-muted p-3">Not assigned to any sport yet.</td></tr>
+                        <tr><td colspan="6" class="text-muted p-3">Not assigned to any event yet.</td></tr>
                         <?php endif; ?>
                     </tbody>
                 </table>

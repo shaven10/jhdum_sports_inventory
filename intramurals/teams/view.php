@@ -20,7 +20,7 @@ if (!$team) {
     redirect(BASE_URL . '/intramurals/teams/index.php');
 }
 
-$sports = $db->query('SELECT * FROM intramural_sports WHERE is_active = 1 ORDER BY name, category')->fetchAll();
+$sports = $db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll();
 
 $eventCoaches = [];
 try {
@@ -140,21 +140,34 @@ require __DIR__ . '/../_season_bar.php';
                 <div class="table-responsive">
                     <table class="table mb-0">
                         <thead class="table-light">
-                            <tr><th>Jersey</th><th>Athlete</th><th>Sport</th><th>Coach</th><th>Position</th><th>Event/Category</th></tr>
+                            <tr>
+                                <th>Jersey</th>
+                                <th>Student ID</th>
+                                <th>Athlete</th>
+                                <th>Gender</th>
+                                <th>Event</th>
+                                <th>Category</th>
+                                <th>Coach</th>
+                                <th>Position</th>
+                                <th>Division</th>
+                            </tr>
                         </thead>
                         <tbody>
                             <?php foreach ($members as $m): ?>
                             <tr>
-                                <td><?= sanitize($m['jersey_number'] ?: '-') ?></td>
+                                <td><?= sanitize($m['jersey_number'] ?: '—') ?></td>
+                                <td><?= sanitize($m['student_id']) ?></td>
                                 <td><a href="<?= BASE_URL ?>/intramurals/athletes/view.php?id=<?= $m['id'] ?>"><?= sanitize(athleteFullName($m)) ?></a></td>
-                                <td><?= sanitize($m['sport_name']) ?> (<?= ucfirst($m['sport_category']) ?>)</td>
+                                <td><?= sanitize(ucfirst($m['gender'] ?: '—')) ?></td>
+                                <td><strong><?= sanitize($m['sport_name']) ?></strong></td>
+                                <td><span class="badge bg-secondary"><?= sanitize(ucfirst($m['sport_category'])) ?></span></td>
                                 <td><?= $m['coach_first'] ? sanitize($m['coach_first'] . ' ' . $m['coach_last']) : '<span class="text-muted">Unassigned</span>' ?></td>
-                                <td><?= sanitize($m['position'] ?: '-') ?></td>
-                                <td><?= sanitize($m['event_category'] ?: '-') ?></td>
+                                <td><?= sanitize($m['position'] ?: '—') ?></td>
+                                <td><?= sanitize($m['event_category'] ?: '—') ?></td>
                             </tr>
                             <?php endforeach; ?>
                             <?php if (empty($members)): ?>
-                            <tr><td colspan="6" class="text-muted p-3">No sport registrations for this team yet.</td></tr>
+                            <tr><td colspan="9" class="text-muted p-3">No sport registrations for this team yet.</td></tr>
                             <?php endif; ?>
                         </tbody>
                     </table>

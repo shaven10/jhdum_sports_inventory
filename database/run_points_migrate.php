@@ -69,25 +69,32 @@ if (!columnExists($db, 'intramural_sports', 'point_scheme_id')) {
     }
 }
 
-// Ensure event list exists (upsert by name+category)
-$events = [
-    ['Basketball 5x5', 'mixed', 'Major Team Sports'],
-    ['Basketball 3x3', 'mixed', 'Major Team Sports'],
-    ['Volleyball', 'mixed', 'Major Team Sports'],
-    ['Sepak Takraw', 'mixed', 'Major Team Sports'],
-    ['MLBB/CODM', 'mixed', 'Major Team Sports'],
-    ['Badminton', 'mixed', 'Racket & Dance Sports'],
-    ['Table Tennis', 'mixed', 'Racket & Dance Sports'],
-    ['Pickleball', 'mixed', 'Racket & Dance Sports'],
-    ['Lawn Tennis', 'mixed', 'Racket & Dance Sports'],
-    ['Athletics', 'mixed', 'Athletics & Chess'],
-    ['Chess', 'mixed', 'Athletics & Chess'],
-    ['Baseball', 'mixed', 'Major Team Sports'],
-    ['Softball', 'mixed', 'Major Team Sports'],
-    ['Frisbee', 'mixed', 'Major Team Sports'],
-    ['Dance Sports', 'mixed', 'Racket & Dance Sports'],
-    ['Mass Power Dance', 'mixed', 'Major Team Sports'],
+// Ensure event list exists (upsert by name+category — men and women for each sport)
+$eventNames = [
+    ['Basketball 5x5', 'Major Team Sports'],
+    ['Basketball 3x3', 'Major Team Sports'],
+    ['Volleyball', 'Major Team Sports'],
+    ['Sepak Takraw', 'Major Team Sports'],
+    ['MLBB/CODM', 'Major Team Sports'],
+    ['Badminton', 'Racket & Dance Sports'],
+    ['Table Tennis', 'Racket & Dance Sports'],
+    ['Pickleball', 'Racket & Dance Sports'],
+    ['Lawn Tennis', 'Racket & Dance Sports'],
+    ['Athletics', 'Athletics & Chess'],
+    ['Chess', 'Athletics & Chess'],
+    ['Baseball', 'Major Team Sports'],
+    ['Softball', 'Major Team Sports'],
+    ['Frisbee', 'Major Team Sports'],
+    ['Dance Sports', 'Racket & Dance Sports'],
+    ['Mass Power Dance', 'Major Team Sports'],
 ];
+
+$events = [];
+foreach ($eventNames as [$name, $schemeName]) {
+    foreach (['men', 'women'] as $category) {
+        $events[] = [$name, $category, $schemeName];
+    }
+}
 
 foreach ($events as [$name, $category, $schemeName]) {
     $schemeId = $schemeIds[$schemeName];
@@ -95,7 +102,7 @@ foreach ($events as [$name, $category, $schemeName]) {
     $find->execute([$name, $category]);
     $sportId = $find->fetchColumn();
     if ($sportId) {
-        $db->prepare('UPDATE intramural_sports SET point_scheme_id = ?, is_active = 1 WHERE id = ?')->execute([$schemeId, $sportId]);
+        $db->prepare('UPDATE intramural_sports SET point_scheme_id = ? WHERE id = ?')->execute([$schemeId, $sportId]);
         echo "Linked sport: $name\n";
     } else {
         // Try match by name only (any category)
@@ -103,7 +110,7 @@ foreach ($events as [$name, $category, $schemeName]) {
         $find2->execute([$name]);
         $sportId = $find2->fetchColumn();
         if ($sportId) {
-            $db->prepare('UPDATE intramural_sports SET point_scheme_id = ?, is_active = 1 WHERE id = ?')->execute([$schemeId, $sportId]);
+            $db->prepare('UPDATE intramural_sports SET point_scheme_id = ? WHERE id = ?')->execute([$schemeId, $sportId]);
             echo "Linked existing sport: $name\n";
         } else {
             $db->prepare('INSERT INTO intramural_sports (name, description, category, scoring_method, point_scheme_id, win_points, draw_points, loss_points) VALUES (?, ?, ?, ?, ?, 3, 1, 0)')

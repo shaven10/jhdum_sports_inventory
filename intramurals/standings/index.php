@@ -5,7 +5,7 @@ requireLogin();
 $db = getDB();
 $sportId = (int) get('sport');
 $export = get('export');
-$sports = $db->query('SELECT * FROM intramural_sports WHERE is_active = 1 ORDER BY name, category')->fetchAll();
+$sports = $db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll();
 
 if (!$sportId && $sports) {
     $sportId = (int) $sports[0]['id'];
@@ -42,6 +42,10 @@ require __DIR__ . '/../_season_bar.php';
         <?php endif; ?>
     </div>
 </div>
+
+<?= renderReportHeader('Result Tabulation', [
+    'meta' => $block ? ('Event: ' . sportLabel($block['sport'])) : '',
+]) ?>
 
 <div class="filter-bar no-print">
     <form method="GET" class="row g-2 align-items-end">
@@ -116,7 +120,8 @@ require __DIR__ . '/../_season_bar.php';
         </div>
     </div>
 </div>
-<p class="text-muted small">Event Pts (Champion → 5th Runner Up) feed the <a href="<?= BASE_URL ?>/intramurals/standings/overall.php">Overall Standing</a>. Manage values in <a href="<?= BASE_URL ?>/intramurals/points/index.php">Point System</a>.</p>
+<p class="text-muted small no-print">Event Pts (Champion → 5th Runner Up) feed the <a href="<?= BASE_URL ?>/intramurals/standings/overall.php">Overall Standing</a>. Manage values in <a href="<?= BASE_URL ?>/intramurals/points/index.php">Point System</a>.</p>
+<?= renderReportFooter($block ? sportLabel($block['sport']) : 'Result Tabulation') ?>
 <?php endif; ?>
 
 <?php require_once __DIR__ . '/../../includes/footer.php'; ?>

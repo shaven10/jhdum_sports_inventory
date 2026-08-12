@@ -22,6 +22,8 @@ require_once __DIR__ . '/../includes/header.php';
     <button onclick="printReport()" class="btn btn-outline-secondary no-print"><i class="bi bi-printer"></i> Print</button>
 </div>
 
+<?= renderReportHeader('Overdue Borrowings Report') ?>
+
 <div class="card">
     <div class="card-body p-0">
         <table class="table table-bordered mb-0">
@@ -47,5 +49,7 @@ require_once __DIR__ . '/../includes/header.php';
         </table>
     </div>
 </div>
+
+<?= renderReportFooter('Overdue Report') ?>
 
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>

@@ -46,7 +46,9 @@ require __DIR__ . '/_season_bar.php';
     <div class="d-flex gap-2 flex-wrap">
         <?php if (canManageTeamAthletes()): ?>
         <a href="<?= BASE_URL ?>/intramurals/athletes/add.php" class="btn btn-primary"><i class="bi bi-person-plus"></i> Register Athlete</a>
-        <a href="<?= BASE_URL ?>/intramurals/athletes/import.php" class="btn btn-success"><i class="bi bi-file-earmark-arrow-up"></i> Import Athletes</a>
+        <?php endif; ?>
+        <?php if (canManageTeamAthletes() || canManageTeamRoster()): ?>
+        <a href="<?= BASE_URL ?>/intramurals/roster/import.php" class="btn btn-success"><i class="bi bi-file-earmark-arrow-up"></i> Import Roster</a>
         <?php endif; ?>
         <?php if (canManageMatches()): ?>
         <a href="<?= BASE_URL ?>/intramurals/matches/generate.php" class="btn btn-primary"><i class="bi bi-magic"></i> Generate Matches</a>

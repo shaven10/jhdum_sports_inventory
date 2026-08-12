@@ -22,10 +22,10 @@ $flash = getFlash();
 <?php if (isLoggedIn()): ?>
 <nav class="navbar navbar-expand-lg navbar-dark bg-primary sticky-top shadow-sm">
     <div class="container-fluid px-3 px-lg-4">
-        <a class="navbar-brand fw-bold" href="<?= getHomeUrl() ?>">
-            <i class="bi bi-trophy"></i>
-            <span class="brand-full"> JHCSC Sports</span>
-            <span class="brand-short"> JHCSC</span>
+        <a class="navbar-brand fw-bold d-flex align-items-center gap-2" href="<?= getHomeUrl() ?>">
+            <img src="<?= sanitize(appLogoUrl()) ?>" alt="JHCSC" class="app-brand-logo">
+            <span class="brand-full"><?= sanitize(APP_SHORT_NAME) ?></span>
+            <span class="brand-short"><?= sanitize(APP_SHORT_NAME) ?></span>
         </a>
         <div class="d-flex align-items-center gap-1 d-lg-none">
             <?php if ($unreadCount > 0): ?>
@@ -84,9 +84,6 @@ $flash = getFlash();
                         <li><hr class="dropdown-divider"></li>
                         <li><h6 class="dropdown-header">Participants</h6></li>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/athletes/index.php">Athletes</a></li>
-                        <?php if (canManageTeamAthletes()): ?>
-                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/athletes/import.php"><i class="bi bi-file-earmark-arrow-up"></i> Import Athletes</a></li>
-                        <?php endif; ?>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/teams/index.php">Teams</a></li>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/sports/index.php">Sports / Events</a></li>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/roster/index.php">Rosters</a></li>

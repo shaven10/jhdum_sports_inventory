@@ -41,7 +41,29 @@ document.addEventListener('DOMContentLoaded', function() {
     initMobileNav();
     initResponsiveTables();
     initResponsiveBtnGroups();
+    initPasswordToggle();
 });
+
+function initPasswordToggle() {
+    document.querySelectorAll('[data-toggle-password]').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            const input = document.querySelector(this.dataset.togglePassword);
+            if (!input) return;
+
+            const show = input.type === 'password';
+            input.type = show ? 'text' : 'password';
+
+            const icon = this.querySelector('i');
+            if (icon) {
+                icon.classList.toggle('bi-eye', !show);
+                icon.classList.toggle('bi-eye-slash', show);
+            }
+
+            this.title = show ? 'Hide password' : 'Show password';
+            this.setAttribute('aria-label', this.title);
+        });
+    });
+}
 
 function initMobileNav() {
     const navCollapse = document.getElementById('navbarNav');
@@ -104,5 +126,20 @@ function debounce(fn, delay) {
 }
 
 function printReport() {
+    const mobileWrappers = document.querySelectorAll('.table-responsive-mobile');
+    mobileWrappers.forEach(function(wrapper) {
+        wrapper.classList.remove('table-responsive-mobile');
+        wrapper.dataset.wasMobileTable = '1';
+    });
+
+    const restore = function() {
+        document.querySelectorAll('.table-responsive[data-was-mobile-table="1"]').forEach(function(wrapper) {
+            wrapper.classList.add('table-responsive-mobile');
+            delete wrapper.dataset.wasMobileTable;
+        });
+        window.removeEventListener('afterprint', restore);
+    };
+
+    window.addEventListener('afterprint', restore);
     window.print();
 }

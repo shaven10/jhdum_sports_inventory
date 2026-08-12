@@ -17,7 +17,7 @@ if (!$match) {
     redirect(BASE_URL . '/intramurals/matches/index.php');
 }
 
-$sports = $db->query('SELECT * FROM intramural_sports WHERE is_active = 1 ORDER BY name, category')->fetchAll();
+$sports = $db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll();
 $teams = $db->query('SELECT * FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll();
 $errors = [];
 

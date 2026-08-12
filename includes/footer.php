@@ -2,7 +2,7 @@
 
 <footer class="footer mt-auto py-3 bg-light border-top">
     <div class="container-fluid px-3 px-sm-4 text-center">
-        <span class="text-muted footer-text">&copy; <?= date('Y') ?> <?= APP_CAMPUS ?> - Sports Equipment Inventory System v<?= APP_VERSION ?></span>
+        <span class="text-muted footer-text">&copy; <?= date('Y') ?> <?= sanitize(APP_CAMPUS) ?> — <?= sanitize(APP_NAME) ?> v<?= APP_VERSION ?></span>
     </div>
 </footer>
 

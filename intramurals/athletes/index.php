@@ -80,7 +80,7 @@ $stmt->execute($params);
 $athletes = $stmt->fetchAll();
 
 $teams = $db->query('SELECT id, name FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll();
-$sports = $db->query('SELECT id, name, category FROM intramural_sports WHERE is_active = 1 ORDER BY name, category')->fetchAll();
+$sports = $db->query('SELECT id, name, category FROM intramural_sports ORDER BY name, category')->fetchAll();
 
 $pageTitle = 'Athlete Management';
 require_once __DIR__ . '/../../includes/header.php';
@@ -90,11 +90,13 @@ require __DIR__ . '/../_season_bar.php';
 <div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2">
     <div>
         <h1><i class="bi bi-person-badge"></i> Athletes</h1>
-        <p class="text-muted mb-0">Register and manage intramural athletes</p>
+        <p class="text-muted mb-0">Athletes are added via roster import or manual registration</p>
     </div>
     <div class="d-flex gap-2">
+        <?php if (canManageTeamAthletes() || canManageTeamRoster()): ?>
+        <a href="<?= BASE_URL ?>/intramurals/roster/import.php" class="btn btn-success"><i class="bi bi-file-earmark-arrow-up"></i> Import Roster</a>
+        <?php endif; ?>
         <?php if (canManageTeamAthletes()): ?>
-        <a href="<?= BASE_URL ?>/intramurals/athletes/import.php" class="btn btn-success"><i class="bi bi-file-earmark-arrow-up"></i> Import Athletes</a>
         <a href="<?= BASE_URL ?>/intramurals/athletes/add.php" class="btn btn-primary"><i class="bi bi-person-plus"></i> Register Athlete</a>
         <?php endif; ?>
         <a href="<?= BASE_URL ?>/intramurals/index.php" class="btn btn-outline-secondary">Back</a>
@@ -121,9 +123,9 @@ require __DIR__ . '/../_season_bar.php';
             <?php endif; ?>
         </div>
         <div class="col-md-3">
-            <label class="form-label">Sport</label>
+            <label class="form-label">Event</label>
             <select name="sport" class="form-select">
-                <option value="">All Sports</option>
+                <option value="">All Events</option>
                 <?php foreach ($sports as $s): ?>
                 <option value="<?= $s['id'] ?>" <?= $sportId === (string) $s['id'] ? 'selected' : '' ?>><?= sanitize(sportLabel($s)) ?></option>
                 <?php endforeach; ?>
@@ -136,17 +138,18 @@ require __DIR__ . '/../_season_bar.php';
 <div class="card">
     <div class="card-body p-0">
         <div class="table-responsive">
-            <table class="table table-hover mb-0">
+            <table class="table table-hover mb-0 align-middle">
                 <thead class="table-light">
                     <tr>
-                        <th></th>
-                        <th>Code</th>
-                        <th>Name</th>
+                        <th style="width:3rem;"></th>
                         <th>Student ID</th>
+                        <th>Name</th>
+                        <th>Gender</th>
                         <th>Team</th>
                         <th>Department</th>
-                        <th>Sports</th>
-                        <th></th>
+                        <th>Year Level</th>
+                        <th>Events</th>
+                        <th class="text-end" style="width:9rem;">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -159,17 +162,21 @@ require __DIR__ . '/../_season_bar.php';
                             <div class="rounded-circle bg-secondary bg-opacity-25 d-inline-flex align-items-center justify-content-center" style="width:36px;height:36px"><i class="bi bi-person"></i></div>
                             <?php endif; ?>
                         </td>
-                        <td><?= sanitize($a['athlete_code']) ?></td>
-                        <td><strong><?= sanitize(athleteFullName($a)) ?></strong></td>
                         <td><?= sanitize($a['student_id']) ?></td>
+                        <td>
+                            <strong><?= sanitize(athleteFullName($a)) ?></strong>
+                            <br><small class="text-muted"><?= sanitize($a['athlete_code']) ?></small>
+                        </td>
+                        <td><?= sanitize(ucfirst($a['gender'] ?: '—')) ?></td>
                         <td>
                             <?php if ($a['team_name']): ?>
                             <span style="color:<?= sanitize($a['team_color']) ?>"><?= sanitize($a['team_name']) ?></span>
-                            <?php else: ?>-<?php endif; ?>
+                            <?php else: ?>—<?php endif; ?>
                         </td>
-                        <td><?= sanitize($a['department'] ?: '-') ?></td>
+                        <td><?= sanitize($a['department'] ?: '—') ?></td>
+                        <td><?= sanitize($a['year_level'] ?: '—') ?></td>
                         <td><?= (int) $a['sport_count'] ?></td>
-                        <td class="text-nowrap">
+                        <td class="text-end text-nowrap">
                             <a href="<?= BASE_URL ?>/intramurals/athletes/view.php?id=<?= $a['id'] ?>" class="btn btn-sm btn-outline-primary">View</a>
                             <?php
                             $athTeam = !empty($a['team_id']) ? (int) $a['team_id'] : null;
@@ -181,7 +188,7 @@ require __DIR__ . '/../_season_bar.php';
                     </tr>
                     <?php endforeach; ?>
                     <?php if (empty($athletes)): ?>
-                    <tr><td colspan="8" class="text-muted p-3">No athletes found.</td></tr>
+                    <tr><td colspan="9" class="text-muted p-3">No athletes found.</td></tr>
                     <?php endif; ?>
                 </tbody>
             </table>

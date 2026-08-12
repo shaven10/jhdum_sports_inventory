@@ -44,7 +44,7 @@ if (canManageIntramurals()) {
     $teams = [];
 }
 
-$allSports = $db->query('SELECT * FROM intramural_sports WHERE is_active = 1 ORDER BY name, category')->fetchAll();
+$allSports = $db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll();
 // Coaches may only assign their coached events
 $sports = $allSports;
 if ($isCoach && $athleteTeamId) {

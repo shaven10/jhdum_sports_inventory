@@ -28,7 +28,7 @@ if (!tableExists($db, 'intramural_event_coaches')) {
 
 // Migrate legacy single team coach to all active sports for that team
 $legacy = $db->query('SELECT id, coach_user_id FROM intramural_teams WHERE coach_user_id IS NOT NULL')->fetchAll();
-$sports = $db->query('SELECT id FROM intramural_sports WHERE is_active = 1')->fetchAll(PDO::FETCH_COLUMN);
+$sports = $db->query('SELECT id FROM intramural_sports')->fetchAll(PDO::FETCH_COLUMN);
 $insert = $db->prepare('INSERT IGNORE INTO intramural_event_coaches (team_id, sport_id, coach_user_id) VALUES (?, ?, ?)');
 
 foreach ($legacy as $team) {

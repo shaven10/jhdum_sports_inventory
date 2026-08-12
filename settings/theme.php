@@ -118,7 +118,7 @@ require_once __DIR__ . '/../includes/header.php';
             <div class="card-body p-0">
                 <div class="theme-live-preview">
                     <div class="preview-navbar" style="background:<?= sanitize($activeTheme['primary']) ?>;">
-                        <span><i class="bi bi-trophy"></i> JHCSC Sports</span>
+                        <span><img src="<?= sanitize(appLogoUrl()) ?>" alt="" style="height:18px;width:auto;margin-right:6px;vertical-align:middle;background:#fff;border-radius:50%"> <?= sanitize(APP_SHORT_NAME) ?></span>
                     </div>
                     <div class="preview-body" style="background:<?= sanitize($activeTheme['body_bg']) ?>; color:<?= sanitize($activeTheme['text']) ?>;">
                         <div class="preview-card" style="background:<?= sanitize($activeTheme['card_bg']) ?>;">

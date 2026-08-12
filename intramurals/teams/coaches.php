@@ -20,7 +20,7 @@ if (!canEditOwnTeam($id) && !canManageIntramurals()) {
 }
 
 $seasonId = getCurrentSeasonId();
-$sports = $db->query('SELECT * FROM intramural_sports WHERE is_active = 1 ORDER BY name, category')->fetchAll();
+$sports = $db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll();
 $coaches = $db->query("SELECT id, first_name, last_name, username, team_id FROM users WHERE role = 'coach' AND is_active = 1 ORDER BY first_name, last_name")->fetchAll();
 
 $current = [];

@@ -1,4 +1,5 @@
--- JHCSC Dumingag Campus Sports Equipment Inventory System
+-- J.H. Cerilles State College — Sports Development MIS
+-- Database schema (inventory + intramurals)
 -- Database Schema
 
 CREATE DATABASE IF NOT EXISTS jhcsc_sports_inventory
@@ -264,9 +265,7 @@ CREATE TABLE IF NOT EXISTS intramural_teams (
     is_active TINYINT(1) NOT NULL DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY uq_team_name (name),
-    FOREIGN KEY (unit_manager_id) REFERENCES users(id) ON DELETE SET NULL,
-    FOREIGN KEY (coach_user_id) REFERENCES users(id) ON DELETE SET NULL
+    UNIQUE KEY uq_team_name (name)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS intramural_point_schemes (
@@ -288,7 +287,8 @@ CREATE TABLE IF NOT EXISTS intramural_sports (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
     description TEXT,
-    category ENUM('men', 'women', 'mixed') NOT NULL DEFAULT 'mixed',
+    category ENUM('men', 'women', 'mixed') NOT NULL DEFAULT 'men',
+    players_per_event INT DEFAULT NULL,
     scoring_method ENUM('points', 'sets', 'games', 'time') NOT NULL DEFAULT 'points',
     rules TEXT,
     schedule_notes TEXT,
@@ -298,7 +298,6 @@ CREATE TABLE IF NOT EXISTS intramural_sports (
     draw_points INT NOT NULL DEFAULT 1,
     loss_points INT NOT NULL DEFAULT 0,
     point_scheme_id INT DEFAULT NULL,
-    is_active TINYINT(1) NOT NULL DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uq_sport_name_category (name, category),
@@ -405,28 +404,39 @@ INSERT INTO intramural_point_schemes (name, description, points_1, points_2, poi
 ('Racket & Dance Sports', 'Badminton, Table Tennis, Pickleball, Lawn Tennis, Dance Sports', 8, 6, 4, 3, 2, 1),
 ('Athletics & Chess', 'Athletics and Chess', 6, 5, 4, 3, 2, 1);
 
-INSERT INTO intramural_sports (name, description, category, scoring_method, point_scheme_id, win_points) VALUES
-('Basketball 5x5', '5-on-5 basketball', 'mixed', 'points', 1, 3),
-('Basketball 3x3', '3-on-3 basketball', 'mixed', 'points', 1, 3),
-('Volleyball', 'Indoor volleyball', 'mixed', 'sets', 1, 3),
-('Sepak Takraw', 'Sepak takraw tournament', 'mixed', 'sets', 1, 3),
-('MLBB/CODM', 'Mobile Legends / Call of Duty Mobile', 'mixed', 'games', 1, 3),
-('Badminton', 'Badminton singles/doubles', 'mixed', 'games', 2, 3),
-('Table Tennis', 'Table tennis', 'mixed', 'games', 2, 3),
-('Pickleball', 'Pickleball', 'mixed', 'games', 2, 3),
-('Lawn Tennis', 'Lawn tennis', 'mixed', 'games', 2, 3),
-('Athletics', 'Track and field', 'mixed', 'points', 3, 3),
-('Chess', 'Chess', 'mixed', 'games', 3, 3),
-('Baseball', 'Baseball', 'mixed', 'points', 1, 3),
-('Softball', 'Softball', 'mixed', 'points', 1, 3),
-('Frisbee', 'Ultimate frisbee', 'mixed', 'points', 1, 3),
-('Dance Sports', 'Dance sports', 'mixed', 'points', 2, 3),
-('Mass Power Dance', 'Mass power dance', 'mixed', 'points', 1, 3);
-
-UPDATE intramural_sports
-SET tournament_format = 'team_play_sds',
-    format_notes = 'Team Play SDS — single elimination; each team tie is Singles, Doubles, Singles (best of 3)'
-WHERE name IN ('Badminton', 'Table Tennis', 'Lawn Tennis');
+INSERT INTO intramural_sports (name, description, category, scoring_method, point_scheme_id, win_points, players_per_event, tournament_format, format_notes) VALUES
+('Basketball 5x5', '5-on-5 basketball', 'men', 'points', 1, 3, 12, 'round_robin', NULL),
+('Basketball 5x5', '5-on-5 basketball', 'women', 'points', 1, 3, 12, 'round_robin', NULL),
+('Basketball 3x3', '3-on-3 basketball', 'men', 'points', 1, 3, 4, 'round_robin', NULL),
+('Basketball 3x3', '3-on-3 basketball', 'women', 'points', 1, 3, 4, 'round_robin', NULL),
+('Volleyball', 'Indoor volleyball', 'men', 'sets', 1, 3, 12, 'round_robin', NULL),
+('Volleyball', 'Indoor volleyball', 'women', 'sets', 1, 3, 12, 'round_robin', NULL),
+('Sepak Takraw', 'Sepak takraw tournament', 'men', 'sets', 1, 3, 6, 'round_robin', NULL),
+('Sepak Takraw', 'Sepak takraw tournament', 'women', 'sets', 1, 3, 6, 'round_robin', NULL),
+('MLBB/CODM', 'Mobile Legends / Call of Duty Mobile', 'men', 'games', 1, 3, 5, 'round_robin', NULL),
+('MLBB/CODM', 'Mobile Legends / Call of Duty Mobile', 'women', 'games', 1, 3, 5, 'round_robin', NULL),
+('Badminton', 'Badminton singles/doubles', 'men', 'games', 2, 3, 6, 'team_play_sds', 'Team Play SDS — single elimination, each team tie is Singles, Doubles, Singles (best of 3)'),
+('Badminton', 'Badminton singles/doubles', 'women', 'games', 2, 3, 6, 'team_play_sds', 'Team Play SDS — single elimination, each team tie is Singles, Doubles, Singles (best of 3)'),
+('Table Tennis', 'Table tennis', 'men', 'games', 2, 3, 4, 'team_play_sds', 'Team Play SDS — single elimination, each team tie is Singles, Doubles, Singles (best of 3)'),
+('Table Tennis', 'Table tennis', 'women', 'games', 2, 3, 4, 'team_play_sds', 'Team Play SDS — single elimination, each team tie is Singles, Doubles, Singles (best of 3)'),
+('Pickleball', 'Pickleball', 'men', 'games', 2, 3, 4, 'round_robin', NULL),
+('Pickleball', 'Pickleball', 'women', 'games', 2, 3, 4, 'round_robin', NULL),
+('Lawn Tennis', 'Lawn tennis', 'men', 'games', 2, 3, 4, 'team_play_sds', 'Team Play SDS — single elimination, each team tie is Singles, Doubles, Singles (best of 3)'),
+('Lawn Tennis', 'Lawn tennis', 'women', 'games', 2, 3, 4, 'team_play_sds', 'Team Play SDS — single elimination, each team tie is Singles, Doubles, Singles (best of 3)'),
+('Athletics', 'Track and field', 'men', 'points', 3, 3, 25, 'round_robin', NULL),
+('Athletics', 'Track and field', 'women', 'points', 3, 3, 25, 'round_robin', NULL),
+('Chess', 'Chess', 'men', 'games', 3, 3, 4, 'round_robin', NULL),
+('Chess', 'Chess', 'women', 'games', 3, 3, 4, 'round_robin', NULL),
+('Baseball', 'Baseball', 'men', 'points', 1, 3, 15, 'round_robin', NULL),
+('Baseball', 'Baseball', 'women', 'points', 1, 3, 15, 'round_robin', NULL),
+('Softball', 'Softball', 'men', 'points', 1, 3, 15, 'round_robin', NULL),
+('Softball', 'Softball', 'women', 'points', 1, 3, 15, 'round_robin', NULL),
+('Frisbee', 'Ultimate frisbee', 'men', 'points', 1, 3, 10, 'round_robin', NULL),
+('Frisbee', 'Ultimate frisbee', 'women', 'points', 1, 3, 10, 'round_robin', NULL),
+('Dance Sports', 'Dance sports', 'men', 'points', 2, 3, 8, 'round_robin', NULL),
+('Dance Sports', 'Dance sports', 'women', 'points', 2, 3, 8, 'round_robin', NULL),
+('Mass Power Dance', 'Mass power dance', 'men', 'points', 1, 3, 20, 'round_robin', NULL),
+('Mass Power Dance', 'Mass power dance', 'women', 'points', 1, 3, 20, 'round_robin', NULL);
 
 -- Link users.team_id after teams exist
 ALTER TABLE users
@@ -447,3 +457,7 @@ UPDATE intramural_teams SET unit_manager_id = (SELECT id FROM users WHERE userna
 UPDATE intramural_teams SET unit_manager_id = (SELECT id FROM users WHERE username = 'um_red'), coach_user_id = (SELECT id FROM users WHERE username = 'coach_red'), coach_name = 'Coach Red' WHERE id = 2;
 UPDATE intramural_teams SET unit_manager_id = (SELECT id FROM users WHERE username = 'um_green'), coach_user_id = (SELECT id FROM users WHERE username = 'coach_green'), coach_name = 'Coach Green' WHERE id = 3;
 UPDATE intramural_teams SET unit_manager_id = (SELECT id FROM users WHERE username = 'um_gold'), coach_user_id = (SELECT id FROM users WHERE username = 'coach_gold'), coach_name = 'Coach Gold' WHERE id = 4;
+
+ALTER TABLE intramural_teams
+    ADD CONSTRAINT fk_team_unit_manager FOREIGN KEY (unit_manager_id) REFERENCES users(id) ON DELETE SET NULL,
+    ADD CONSTRAINT fk_team_coach_user FOREIGN KEY (coach_user_id) REFERENCES users(id) ON DELETE SET NULL;

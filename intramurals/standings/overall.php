@@ -50,8 +50,14 @@ require __DIR__ . '/../_season_bar.php';
     </div>
 </div>
 
+<?= renderReportHeader('Overall Intramurals Standing', [
+    'meta' => (function_exists('getCurrentSeason') && getCurrentSeason())
+        ? ('Season: ' . seasonLabel(getCurrentSeason()))
+        : '',
+]) ?>
+
 <?php if ($champion): ?>
-<div class="alert alert-success">
+<div class="alert alert-success no-print">
     <i class="bi bi-trophy-fill"></i> Current Overall Champion:
     <strong style="color:<?= sanitize($champion['color']) ?>"><?= sanitize($champion['team_name']) ?></strong>
     with <strong><?= $champion['total'] ?></strong> points
@@ -97,5 +103,7 @@ require __DIR__ . '/../_season_bar.php';
         </div>
     </div>
 </div>
+
+<?= renderReportFooter('Overall Standing') ?>
 
 <?php require_once __DIR__ . '/../../includes/footer.php'; ?>

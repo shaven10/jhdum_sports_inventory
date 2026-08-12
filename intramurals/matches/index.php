@@ -55,7 +55,7 @@ $stmt = $db->prepare($sql);
 $stmt->execute($params);
 $matches = $stmt->fetchAll();
 
-$sports = $db->query('SELECT id, name, category, tournament_format FROM intramural_sports WHERE is_active = 1 ORDER BY name')->fetchAll();
+$sports = $db->query('SELECT id, name, category, tournament_format FROM intramural_sports ORDER BY name')->fetchAll();
 
 $pendingCount = 0;
 if ($seasonId) {

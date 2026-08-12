@@ -1,13 +1,17 @@
 <?php
 /**
- * JHCSC Dumingag Campus - Sports Equipment Inventory System
+ * J.H. Cerilles State College - Sports Development MIS
  * Main Configuration
  */
 
-define('APP_NAME', 'JHCSC Sports Inventory');
-define('APP_CAMPUS', 'JHCSC Dumingag Campus');
+define('APP_NAME', 'JHCSC Sports Development MIS');
+define('APP_SHORT_NAME', 'JHCSC SDMIS');
+define('APP_CAMPUS', 'J.H. Cerilles State College');
+define('APP_TAGLINE', 'Sports Development Management Information System');
 define('APP_VERSION', '1.0.0');
 define('BASE_URL', '/sports_inventory');
+define('APP_LOGO', BASE_URL . '/assets/img/jhcsc-logo.png');
+define('APP_LOGO_PATH', __DIR__ . '/../assets/img/jhcsc-logo.png');
 define('UPLOAD_PATH', __DIR__ . '/../uploads/equipment/');
 define('UPLOAD_URL', BASE_URL . '/uploads/equipment/');
 define('UPLOAD_PATH_ATHLETES', __DIR__ . '/../uploads/athletes/');

@@ -354,3 +354,82 @@ function paginationLinks(array $pagination, string $baseUrl): string
     $html .= '</ul></nav>';
     return $html;
 }
+
+function ensurePasswordPlainColumn(): void
+{
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    $db = getDB();
+    $stmt = $db->prepare('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
+    $stmt->execute(['users', 'password_plain']);
+    if ((int) $stmt->fetchColumn() === 0) {
+        $db->exec('ALTER TABLE users ADD COLUMN password_plain VARCHAR(255) DEFAULT NULL AFTER password');
+    }
+}
+
+/** Absolute URL to the official JHCSC logo. */
+function appLogoUrl(): string
+{
+    return defined('APP_LOGO') ? APP_LOGO : (BASE_URL . '/assets/img/jhcsc-logo.png');
+}
+
+/**
+ * Official branded header for printable reports / PDF.
+ *
+ * @param array{subtitle?:string,meta?:string,show_on_screen?:bool} $options
+ */
+function renderReportHeader(string $title, array $options = []): string
+{
+    $subtitle = $options['subtitle'] ?? (defined('APP_TAGLINE') ? APP_TAGLINE : '');
+    $meta = $options['meta'] ?? '';
+    $showOnScreen = !empty($options['show_on_screen']);
+    $visibility = $showOnScreen ? '' : ' d-none d-print-block';
+    $logo = sanitize(appLogoUrl());
+    $appName = sanitize(defined('APP_NAME') ? APP_NAME : 'JHCSC Sports Development MIS');
+    $campus = sanitize(defined('APP_CAMPUS') ? APP_CAMPUS : 'J.H. Cerilles State College');
+    $titleSafe = sanitize($title);
+    $subtitleSafe = sanitize((string) $subtitle);
+    $metaSafe = sanitize((string) $meta);
+    $generated = sanitize(date('F j, Y g:i A'));
+
+    $metaHtml = $metaSafe !== ''
+        ? '<p class="report-header-meta mb-0">' . $metaSafe . '</p>'
+        : '';
+
+    return <<<HTML
+<div class="report-brand-header{$visibility}">
+    <div class="report-brand-inner">
+        <img src="{$logo}" alt="JHCSC Logo" class="report-brand-logo">
+        <div class="report-brand-text">
+            <div class="report-brand-campus">{$campus}</div>
+            <div class="report-brand-app">{$appName}</div>
+            <h2 class="report-brand-title">{$titleSafe}</h2>
+            <p class="report-brand-subtitle mb-0">{$subtitleSafe}</p>
+            {$metaHtml}
+            <p class="report-brand-generated mb-0">Generated: {$generated}</p>
+        </div>
+    </div>
+    <hr class="report-brand-rule">
+</div>
+HTML;
+}
+
+/** Official branded footer for printable reports / PDF. */
+function renderReportFooter(?string $extra = null): string
+{
+    $appName = sanitize(defined('APP_NAME') ? APP_NAME : 'JHCSC Sports Development MIS');
+    $campus = sanitize(defined('APP_CAMPUS') ? APP_CAMPUS : 'J.H. Cerilles State College');
+    $extraSafe = $extra !== null && $extra !== '' ? ' · ' . sanitize($extra) : '';
+    $when = sanitize(date('F j, Y g:i A'));
+
+    return <<<HTML
+<div class="report-brand-footer d-none d-print-block">
+    <hr class="report-brand-rule">
+    <p class="mb-0 text-center small">{$campus} · {$appName}{$extraSafe} · Printed {$when}</p>
+</div>
+HTML;
+}

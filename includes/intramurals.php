@@ -29,6 +29,201 @@ function tournamentFormatLabel(?string $format): string
     return $labels[$key] ?? ucfirst(str_replace('_', ' ', $key));
 }
 
+function ensurePlayersPerEventColumn(): void
+{
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    $db = getDB();
+    $stmt = $db->prepare('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
+    $stmt->execute(['intramural_sports', 'players_per_event']);
+    if ((int) $stmt->fetchColumn() === 0) {
+        $db->exec('ALTER TABLE intramural_sports ADD COLUMN players_per_event INT DEFAULT NULL AFTER category');
+        seedSportPlayersPerEvent($db);
+    }
+}
+
+/** Default max players per team for known intramural sports. */
+function sportPlayersPerEventDefaults(): array
+{
+    return [
+        'Basketball 5x5' => 12,
+        'Basketball 3x3' => 4,
+        'Basketball' => 12,
+        'Volleyball' => 12,
+        'Sepak Takraw' => 6,
+        'MLBB/CODM' => 5,
+        'Badminton' => 6,
+        'Table Tennis' => 4,
+        'Pickleball' => 4,
+        'Lawn Tennis' => 4,
+        'Athletics' => 25,
+        'Chess' => 4,
+        'Baseball' => 15,
+        'Softball' => 15,
+        'Frisbee' => 10,
+        'Dance Sports' => 8,
+        'Mass Power Dance' => 20,
+    ];
+}
+
+/** Backfill players_per_event for sports that match known names. */
+function seedSportPlayersPerEvent(PDO $db, bool $onlyNull = true): int
+{
+    $sql = $onlyNull
+        ? 'UPDATE intramural_sports SET players_per_event = ? WHERE name = ? AND players_per_event IS NULL'
+        : 'UPDATE intramural_sports SET players_per_event = ? WHERE name = ?';
+    $stmt = $db->prepare($sql);
+    $updated = 0;
+
+    foreach (sportPlayersPerEventDefaults() as $name => $count) {
+        $stmt->execute([(int) $count, $name]);
+        $updated += $stmt->rowCount();
+    }
+
+    return $updated;
+}
+
+function sportCategoryOptions(): array
+{
+    return ['men' => 'Men', 'women' => 'Women', 'mixed' => 'Mixed'];
+}
+
+function ensureSportCategoryEnum(): void
+{
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    $db = getDB();
+    $col = $db->query("SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'intramural_sports' AND COLUMN_NAME = 'category'")->fetchColumn();
+    if ($col && stripos((string) $col, 'mixed') === false) {
+        $db->exec("ALTER TABLE intramural_sports MODIFY COLUMN category ENUM('men', 'women', 'mixed') NOT NULL DEFAULT 'men'");
+    }
+
+    removeInactiveSports();
+}
+
+/** Remove soft-deactivated sports and drop legacy is_active column. */
+function removeInactiveSports(): void
+{
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    $db = getDB();
+    $stmt = $db->prepare('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
+    $stmt->execute(['intramural_sports', 'is_active']);
+    if ((int) $stmt->fetchColumn() === 0) {
+        return;
+    }
+
+    $db->exec('DELETE FROM intramural_sports WHERE is_active = 0');
+    $db->exec('ALTER TABLE intramural_sports DROP COLUMN is_active');
+}
+
+/** Canonical intramural sport list (seeded for both Men and Women categories). */
+function intramuralSportDefinitions(): array
+{
+    $sdsNotes = 'Team Play SDS — single elimination, each team tie is Singles, Doubles, Singles (best of 3)';
+
+    return [
+        ['name' => 'Basketball 5x5', 'description' => '5-on-5 basketball', 'scoring_method' => 'points', 'scheme' => 'Major Team Sports', 'win_points' => 3, 'players_per_event' => 12, 'tournament_format' => 'round_robin', 'format_notes' => null],
+        ['name' => 'Basketball 3x3', 'description' => '3-on-3 basketball', 'scoring_method' => 'points', 'scheme' => 'Major Team Sports', 'win_points' => 3, 'players_per_event' => 4, 'tournament_format' => 'round_robin', 'format_notes' => null],
+        ['name' => 'Volleyball', 'description' => 'Indoor volleyball', 'scoring_method' => 'sets', 'scheme' => 'Major Team Sports', 'win_points' => 3, 'players_per_event' => 12, 'tournament_format' => 'round_robin', 'format_notes' => null],
+        ['name' => 'Sepak Takraw', 'description' => 'Sepak takraw tournament', 'scoring_method' => 'sets', 'scheme' => 'Major Team Sports', 'win_points' => 3, 'players_per_event' => 6, 'tournament_format' => 'round_robin', 'format_notes' => null],
+        ['name' => 'MLBB/CODM', 'description' => 'Mobile Legends / Call of Duty Mobile', 'scoring_method' => 'games', 'scheme' => 'Major Team Sports', 'win_points' => 3, 'players_per_event' => 5, 'tournament_format' => 'round_robin', 'format_notes' => null],
+        ['name' => 'Badminton', 'description' => 'Badminton singles/doubles', 'scoring_method' => 'games', 'scheme' => 'Racket & Dance Sports', 'win_points' => 3, 'players_per_event' => 6, 'tournament_format' => 'team_play_sds', 'format_notes' => $sdsNotes],
+        ['name' => 'Table Tennis', 'description' => 'Table tennis', 'scoring_method' => 'games', 'scheme' => 'Racket & Dance Sports', 'win_points' => 3, 'players_per_event' => 4, 'tournament_format' => 'team_play_sds', 'format_notes' => $sdsNotes],
+        ['name' => 'Pickleball', 'description' => 'Pickleball', 'scoring_method' => 'games', 'scheme' => 'Racket & Dance Sports', 'win_points' => 3, 'players_per_event' => 4, 'tournament_format' => 'round_robin', 'format_notes' => null],
+        ['name' => 'Lawn Tennis', 'description' => 'Lawn tennis', 'scoring_method' => 'games', 'scheme' => 'Racket & Dance Sports', 'win_points' => 3, 'players_per_event' => 4, 'tournament_format' => 'team_play_sds', 'format_notes' => $sdsNotes],
+        ['name' => 'Athletics', 'description' => 'Track and field', 'scoring_method' => 'points', 'scheme' => 'Athletics & Chess', 'win_points' => 3, 'players_per_event' => 25, 'tournament_format' => 'round_robin', 'format_notes' => null],
+        ['name' => 'Chess', 'description' => 'Chess', 'scoring_method' => 'games', 'scheme' => 'Athletics & Chess', 'win_points' => 3, 'players_per_event' => 4, 'tournament_format' => 'round_robin', 'format_notes' => null],
+        ['name' => 'Baseball', 'description' => 'Baseball', 'scoring_method' => 'points', 'scheme' => 'Major Team Sports', 'win_points' => 3, 'players_per_event' => 15, 'tournament_format' => 'round_robin', 'format_notes' => null],
+        ['name' => 'Softball', 'description' => 'Softball', 'scoring_method' => 'points', 'scheme' => 'Major Team Sports', 'win_points' => 3, 'players_per_event' => 15, 'tournament_format' => 'round_robin', 'format_notes' => null],
+        ['name' => 'Frisbee', 'description' => 'Ultimate frisbee', 'scoring_method' => 'points', 'scheme' => 'Major Team Sports', 'win_points' => 3, 'players_per_event' => 10, 'tournament_format' => 'round_robin', 'format_notes' => null],
+        ['name' => 'Dance Sports', 'description' => 'Dance sports', 'scoring_method' => 'points', 'scheme' => 'Racket & Dance Sports', 'win_points' => 3, 'players_per_event' => 8, 'tournament_format' => 'round_robin', 'format_notes' => null],
+        ['name' => 'Mass Power Dance', 'description' => 'Mass power dance', 'scoring_method' => 'points', 'scheme' => 'Major Team Sports', 'win_points' => 3, 'players_per_event' => 20, 'tournament_format' => 'round_robin', 'format_notes' => null],
+    ];
+}
+
+/** Ensure men and women rows exist for all canonical sports. */
+function seedIntramuralSports(PDO $db, bool $onlyMissing = true): int
+{
+    $schemeMap = [];
+    foreach ($db->query('SELECT id, name FROM intramural_point_schemes')->fetchAll() as $row) {
+        $schemeMap[$row['name']] = (int) $row['id'];
+    }
+
+    $find = $db->prepare('SELECT id FROM intramural_sports WHERE name = ? AND category = ?');
+    $insert = $db->prepare('INSERT INTO intramural_sports (name, description, category, players_per_event, scoring_method, tournament_format, format_notes, win_points, draw_points, loss_points, point_scheme_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?)');
+    $update = $db->prepare('UPDATE intramural_sports SET description=?, players_per_event=?, scoring_method=?, tournament_format=?, format_notes=?, win_points=?, point_scheme_id=? WHERE id=?');
+    $created = 0;
+
+    foreach (intramuralSportDefinitions() as $def) {
+        $schemeId = $schemeMap[$def['scheme']] ?? null;
+
+        foreach (array_keys(sportCategoryOptions()) as $category) {
+            $find->execute([$def['name'], $category]);
+            $existingId = $find->fetchColumn();
+
+            if ($existingId) {
+                if (!$onlyMissing) {
+                    $update->execute([
+                        $def['description'],
+                        $def['players_per_event'],
+                        $def['scoring_method'],
+                        $def['tournament_format'],
+                        $def['format_notes'],
+                        $def['win_points'],
+                        $schemeId,
+                        $existingId,
+                    ]);
+                }
+                continue;
+            }
+
+            $insert->execute([
+                $def['name'],
+                $def['description'],
+                $category,
+                $def['players_per_event'],
+                $def['scoring_method'],
+                $def['tournament_format'],
+                $def['format_notes'],
+                $def['win_points'],
+                $schemeId,
+            ]);
+            $created++;
+        }
+    }
+
+    return $created;
+}
+
+/** Convert legacy mixed sports to men and add women counterparts. */
+function migrateMixedSportCategories(PDO $db): void
+{
+    $mixed = $db->query("SELECT * FROM intramural_sports WHERE category = 'mixed'")->fetchAll();
+    foreach ($mixed as $sport) {
+        $db->prepare("UPDATE intramural_sports SET category = 'men' WHERE id = ?")->execute([$sport['id']]);
+    }
+
+    seedIntramuralSports($db);
+
+    $col = $db->query("SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'intramural_sports' AND COLUMN_NAME = 'category'")->fetchColumn();
+    if ($col && stripos((string) $col, 'mixed') !== false) {
+        $db->exec("ALTER TABLE intramural_sports MODIFY COLUMN category ENUM('men', 'women', 'mixed') NOT NULL DEFAULT 'men'");
+    }
+}
+
 /**
  * Build fixture list for a tournament format.
  * Each fixture: ['team_a_id'=>?int, 'team_b_id'=>?int, 'round_number'=>int, 'round_label'=>string, 'match_order'=>int, 'notes'=>?string]
@@ -553,7 +748,7 @@ function getHouseTeamLabels(array $teams): array
 function generateMatchesForSport(int $sportId, int $seasonId, array $teamIds, ?int $createdBy = null, bool $replaceUnscheduled = false, ?array $scheduleSlots = null, ?int &$scheduleSlotIndex = null): array
 {
     $db = getDB();
-    $stmt = $db->prepare('SELECT * FROM intramural_sports WHERE id = ? AND is_active = 1');
+    $stmt = $db->prepare('SELECT * FROM intramural_sports WHERE id = ?');
     $stmt->execute([$sportId]);
     $sport = $stmt->fetch();
     if (!$sport) {
@@ -651,7 +846,7 @@ function generateMatchesForSports(array $sportIds, int $seasonId, ?array $shared
         $totalScheduled += $sportScheduled;
         $sportStmt = $db->prepare('SELECT * FROM intramural_sports WHERE id = ?');
         $sportStmt->execute([$sportId]);
-        $sport = $sportStmt->fetch() ?: ['name' => 'Sport #' . $sportId, 'category' => 'mixed'];
+        $sport = $sportStmt->fetch() ?: ['name' => 'Sport #' . $sportId, 'category' => 'men'];
 
         if (!empty($result['error'])) {
             $errors[] = sportLabel($sport) . ': ' . $result['error'];
@@ -885,7 +1080,7 @@ function getIntramuralsStats(?int $seasonId = null): array
     try {
         $stats['total_athletes'] = (int) $db->query('SELECT COUNT(*) FROM intramural_athletes WHERE is_active = 1')->fetchColumn();
         $stats['total_teams'] = (int) $db->query('SELECT COUNT(*) FROM intramural_teams WHERE is_active = 1')->fetchColumn();
-        $stats['total_sports'] = (int) $db->query('SELECT COUNT(*) FROM intramural_sports WHERE is_active = 1')->fetchColumn();
+        $stats['total_sports'] = (int) $db->query('SELECT COUNT(*) FROM intramural_sports')->fetchColumn();
 
         if ($seasonId) {
             $stmt = $db->prepare("SELECT COUNT(*) FROM intramural_matches WHERE status = 'scheduled' AND season_id = ?");
@@ -1015,22 +1210,22 @@ function computeSportStandings(?int $sportId = null, ?int $seasonId = null): arr
             $sports = $db->prepare('SELECT s.*, ps.name as scheme_name, ps.points_1, ps.points_2, ps.points_3, ps.points_4, ps.points_5, ps.points_6
                 FROM intramural_sports s
                 LEFT JOIN intramural_point_schemes ps ON s.point_scheme_id = ps.id
-                WHERE s.id = ? AND s.is_active = 1');
+                WHERE s.id = ?');
             $sports->execute([$sportId]);
             $sports = $sports->fetchAll();
         } else {
             $sports = $db->query('SELECT s.*, ps.name as scheme_name, ps.points_1, ps.points_2, ps.points_3, ps.points_4, ps.points_5, ps.points_6
                 FROM intramural_sports s
                 LEFT JOIN intramural_point_schemes ps ON s.point_scheme_id = ps.id
-                WHERE s.is_active = 1 ORDER BY s.name, s.category')->fetchAll();
+                ORDER BY s.name, s.category')->fetchAll();
         }
     } catch (Throwable $e) {
         if ($sportId) {
-            $sports = $db->prepare('SELECT * FROM intramural_sports WHERE id = ? AND is_active = 1');
+            $sports = $db->prepare('SELECT * FROM intramural_sports WHERE id = ?');
             $sports->execute([$sportId]);
             $sports = $sports->fetchAll();
         } else {
-            $sports = $db->query('SELECT * FROM intramural_sports WHERE is_active = 1 ORDER BY name, category')->fetchAll();
+            $sports = $db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll();
         }
     }
 
@@ -1279,9 +1474,87 @@ function rosterImportHeaders(): array
 function rosterImportSampleRows(): array
 {
     return [
-        ['2024-0001', 'Juan', 'Dela Cruz', 'male', '2004-05-12', 'College of Education', '2nd Year', 'Blue Eagles', 'juan@example.com', '09171234567', 'Basketball 5x5', 'mixed', '7', 'Guard', ''],
-        ['2024-0002', 'Maria', 'Santos', 'female', '2005-01-20', 'College of Arts and Sciences', '1st Year', 'Red Lions', '', '', 'Volleyball', 'mixed', '10', 'Setter', ''],
+        ['2024-0001', 'Juan', 'Dela Cruz', 'male', '2004-05-12', 'College of Education', '2nd Year', 'Blue Eagles', 'juan@example.com', '09171234567', 'Basketball 5x5', 'men', '7', 'Guard', ''],
+        ['2024-0002', 'Maria', 'Santos', 'female', '2005-01-20', 'College of Arts and Sciences', '1st Year', 'Red Lions', '', '', 'Volleyball', 'women', '10', 'Setter', ''],
     ];
+}
+
+/**
+ * Build roster template rows from active sports (events) and players_per_event limits.
+ *
+ * @return list<list<string>>
+ */
+function buildRosterImportTemplateRows(?int $scopedTeamId = null): array
+{
+    $db = getDB();
+    $rows = [];
+
+    $teams = [];
+    if ($scopedTeamId) {
+        $stmt = $db->prepare('SELECT name FROM intramural_teams WHERE id = ? AND is_active = 1');
+        $stmt->execute([$scopedTeamId]);
+        $team = $stmt->fetch();
+        if ($team) {
+            $teams[] = $team;
+        }
+    } else {
+        $teams = $db->query('SELECT name FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll();
+    }
+
+    $sports = $db->query('SELECT name, category, players_per_event FROM intramural_sports ORDER BY name, category')->fetchAll();
+
+    foreach ($teams as $team) {
+        foreach ($sports as $sport) {
+            $slots = (int) ($sport['players_per_event'] ?? 0);
+            if ($slots < 1) {
+                $slots = 1;
+            }
+
+            for ($slot = 1; $slot <= $slots; $slot++) {
+                $rows[] = [
+                    '',
+                    '',
+                    '',
+                    '',
+                    '',
+                    '',
+                    '',
+                    $team['name'],
+                    '',
+                    '',
+                    $sport['name'],
+                    $sport['category'],
+                    (string) $slot,
+                    '',
+                    '',
+                ];
+            }
+        }
+    }
+
+    return $rows ?: rosterImportSampleRows();
+}
+
+function getActiveSportEventRows(): array
+{
+    $db = getDB();
+    $eventRows = [];
+
+    try {
+        foreach ($db->query('SELECT name, category, players_per_event, scoring_method, tournament_format FROM intramural_sports ORDER BY name, category')->fetchAll() as $s) {
+            $eventRows[] = [
+                $s['name'],
+                $s['category'],
+                (int) ($s['players_per_event'] ?? 0) ?: '',
+                ucfirst($s['scoring_method']),
+                tournamentFormatLabel($s['tournament_format'] ?? 'round_robin'),
+            ];
+        }
+    } catch (Throwable $e) {
+        $eventRows = [];
+    }
+
+    return $eventRows;
 }
 
 /**
@@ -1315,8 +1588,8 @@ function athleteImportSampleRows(?string $teamName = null): array
 {
     $team = $teamName ?: 'Blue Eagles';
     return [
-        ['2024-0001', 'Juan', 'Dela Cruz', 'male', '2004-05-12', 'College of Education', '2nd Year', $team, 'juan@example.com', '09171234567', 'Basketball 5x5', 'mixed', '7', 'Guard', ''],
-        ['2024-0002', 'Maria', 'Santos', 'female', '2005-01-20', 'College of Arts and Sciences', '1st Year', $team, '', '', 'Volleyball', 'mixed', '10', 'Setter', ''],
+        ['2024-0001', 'Juan', 'Dela Cruz', 'male', '2004-05-12', 'College of Education', '2nd Year', $team, 'juan@example.com', '09171234567', 'Basketball 5x5', 'men', '7', 'Guard', ''],
+        ['2024-0002', 'Maria', 'Santos', 'female', '2005-01-20', 'College of Arts and Sciences', '1st Year', $team, '', '', 'Volleyball', 'women', '10', 'Setter', ''],
         ['2024-0003', 'Pedro', 'Reyes', 'male', '2004-08-03', 'College of Business', '3rd Year', $team, '', '', '', '', '', '', ''],
     ];
 }
@@ -1444,7 +1717,7 @@ function downloadAthleteImportTemplate(string $format = 'xlsx', ?int $scopedTeam
 
     $sportRows = [];
     try {
-        foreach ($db->query('SELECT name, category FROM intramural_sports WHERE is_active = 1 ORDER BY name, category')->fetchAll() as $s) {
+        foreach ($db->query('SELECT name, category FROM intramural_sports ORDER BY name, category')->fetchAll() as $s) {
             $sportRows[] = [$s['name'], $s['category']];
         }
     } catch (Throwable $e) {
@@ -1828,63 +2101,72 @@ function readXlsxRows(string $tmpPath): array
 /**
  * Download Excel (.xlsx) import template with Roster + Instructions + reference sheets.
  */
-function downloadRosterImportTemplate(string $format = 'xlsx'): void
+function downloadRosterImportTemplate(string $format = 'xlsx', ?int $scopedTeamId = null): void
 {
     $headers = rosterImportHeaders();
-    $sampleRows = rosterImportSampleRows();
+    $templateRows = buildRosterImportTemplateRows($scopedTeamId);
 
     if ($format === 'csv') {
-        exportCsv('athlete-roster-import-template.csv', $headers, $sampleRows);
+        exportCsv('athlete-roster-import-template.csv', $headers, $templateRows);
     }
 
     $db = getDB();
     $teamRows = [];
     try {
-        foreach ($db->query('SELECT name, short_name FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll() as $t) {
-            $teamRows[] = [$t['name'], $t['short_name'] ?: ''];
+        if ($scopedTeamId) {
+            $stmt = $db->prepare('SELECT name, short_name FROM intramural_teams WHERE id = ? AND is_active = 1');
+            $stmt->execute([$scopedTeamId]);
+            $t = $stmt->fetch();
+            if ($t) {
+                $teamRows[] = [$t['name'], $t['short_name'] ?: ''];
+            }
+        } else {
+            foreach ($db->query('SELECT name, short_name FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll() as $t) {
+                $teamRows[] = [$t['name'], $t['short_name'] ?: ''];
+            }
         }
     } catch (Throwable $e) {
         $teamRows = [];
     }
 
-    $sportRows = [];
-    try {
-        foreach ($db->query('SELECT name, category FROM intramural_sports WHERE is_active = 1 ORDER BY name, category')->fetchAll() as $s) {
-            $sportRows[] = [$s['name'], $s['category']];
-        }
-    } catch (Throwable $e) {
-        $sportRows = [];
-    }
+    $eventRows = getActiveSportEventRows();
+    $totalSlots = count($templateRows);
 
     $season = function_exists('getCurrentSeason') ? getCurrentSeason() : null;
     $seasonLabel = $season ? seasonLabel($season) : 'Active season';
+    $teamNote = $scopedTeamId && !empty($teamRows[0][0])
+        ? 'Template rows are limited to your assigned team (' . $teamRows[0][0] . ').'
+        : 'Each team has pre-filled rows for every event in Sports Management.';
 
     $instructionRows = [
         ['Athlete Roster Import Template'],
         ['Season', $seasonLabel],
+        ['Template rows', (string) $totalSlots],
         [''],
         ['How to use'],
         ['1', 'Fill the Roster sheet only. Do not rename or reorder header columns.'],
-        ['2', 'Replace the sample rows with real athlete data.'],
-        ['3', 'Use exact Team and Sport names from the Teams and Sports sheets.'],
-        ['4', 'Save the file, then upload this .xlsx (or Save As CSV UTF-8) on the Import page.'],
+        ['2', 'Each row is one athlete slot for a team + event + category. Team, sport, and sport_category are pre-filled.'],
+        ['3', 'Enter student_id, first_name, last_name (and optional profile fields) on rows you need. Leave unused slots blank — blank rows are skipped on import.'],
+        ['4', $teamNote],
+        ['5', 'Use the Events sheet for events and players_per_event limits from Sports Management.'],
+        ['6', 'Save the file, then upload this .xlsx (or Save As CSV UTF-8) on Import Roster.'],
         [''],
         ['Required columns', 'student_id, first_name, last_name, team, sport'],
         ['Optional columns', 'gender, birthdate, department, year_level, email, phone, sport_category, jersey_number, position, event_category'],
         ['gender values', 'male | female | other'],
         ['birthdate format', 'YYYY-MM-DD (example: 2004-05-12)'],
-        ['sport_category', 'men | women | mixed (use when a sport name exists in more than one category)'],
+        ['sport_category', 'men | women | mixed — must match the Events sheet for that sport'],
         [''],
         ['Notes'],
+        ['-', 'Athlete records are created or updated from roster import (admin and unit managers).'],
         ['-', 'Existing Student IDs are updated and registered for the sport in the active season.'],
-        ['-', 'One row = one athlete + one sport assignment. Add another row for a second sport.'],
-        ['-', 'Unit managers / coaches can only import for their assigned team or events.'],
+        ['-', 'Row count per event follows players_per_event set under Sports Management.'],
     ];
 
     exportSimpleXlsx('athlete-roster-import-template.xlsx', [
         'Roster' => [
             'headers' => $headers,
-            'rows' => $sampleRows,
+            'rows' => $templateRows,
         ],
         'Instructions' => [
             'headers' => ['Item', 'Details'],
@@ -1894,9 +2176,9 @@ function downloadRosterImportTemplate(string $format = 'xlsx'): void
             'headers' => ['team_name', 'short_name'],
             'rows' => $teamRows,
         ],
-        'Sports' => [
-            'headers' => ['sport_name', 'sport_category'],
-            'rows' => $sportRows,
+        'Events' => [
+            'headers' => ['sport_name', 'sport_category', 'players_per_event', 'scoring_method', 'tournament_style'],
+            'rows' => $eventRows,
         ],
     ]);
 }
@@ -1918,7 +2200,7 @@ function buildRosterImportLookups(): array
     }
 
     $sports = [];
-    foreach ($db->query('SELECT * FROM intramural_sports WHERE is_active = 1')->fetchAll() as $s) {
+    foreach ($db->query('SELECT * FROM intramural_sports')->fetchAll() as $s) {
         $key = strtolower(trim($s['name']));
         $sports[$key . '|' . strtolower($s['category'])] = $s;
         // First match by name alone (if unique enough, resolve later)
@@ -1951,7 +2233,7 @@ function resolveImportSport(array $lookups, string $sportName, string $category 
 
     // Try matching any category when category omitted
     if ($category === '') {
-        foreach (['mixed', 'men', 'women'] as $cat) {
+        foreach (['men', 'women', 'mixed'] as $cat) {
             $key = $name . '|' . $cat;
             if (isset($lookups['sports'][$key]) && empty($lookups['sports'][$key]['_ambiguous'])) {
                 return $lookups['sports'][$key];

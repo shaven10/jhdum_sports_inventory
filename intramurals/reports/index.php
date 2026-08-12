@@ -10,7 +10,7 @@ $sportId = get('sport');
 $teamId = get('team');
 $export = get('export');
 
-$sports = $db->query('SELECT * FROM intramural_sports WHERE is_active = 1 ORDER BY name, category')->fetchAll();
+$sports = $db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll();
 $teams = $db->query('SELECT * FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll();
 
 $titleMap = [
@@ -172,10 +172,16 @@ require __DIR__ . '/../_season_bar.php';
     </form>
 </div>
 
+<?= renderReportHeader($reportTitle, [
+    'meta' => (function_exists('getCurrentSeason') && getCurrentSeason())
+        ? ('Season: ' . seasonLabel(getCurrentSeason()))
+        : '',
+]) ?>
+
 <div class="card">
     <div class="card-header d-flex justify-content-between">
         <span><?= sanitize($reportTitle) ?></span>
-        <small class="text-muted"><?= APP_CAMPUS ?> · <?= date('M d, Y h:i A') ?></small>
+        <small class="text-muted"><?= sanitize(APP_CAMPUS) ?> · <?= date('M d, Y h:i A') ?></small>
     </div>
     <div class="card-body p-0">
         <div class="table-responsive">
@@ -197,5 +203,6 @@ require __DIR__ . '/../_season_bar.php';
 </div>
 
 <p class="text-muted small mt-2 no-print">For PDF: click Print / PDF and choose “Save as PDF”.</p>
+<?= renderReportFooter($reportTitle) ?>
 
 <?php require_once __DIR__ . '/../../includes/footer.php'; ?>

@@ -35,6 +35,8 @@ require_once __DIR__ . '/../includes/header.php';
     <button onclick="printReport()" class="btn btn-outline-secondary no-print"><i class="bi bi-printer"></i> Print</button>
 </div>
 
+<?= renderReportHeader('Borrowing Report', ['meta' => 'Period: ' . formatDate($from) . ' – ' . formatDate($to)]) ?>
+
 <div class="filter-bar no-print mb-4">
     <form method="GET" class="row g-2 align-items-end">
         <div class="col-md-3"><label class="form-label">From</label><input type="date" name="from" class="form-control" value="<?= sanitize($from) ?>"></div>
@@ -73,6 +75,7 @@ require_once __DIR__ . '/../includes/header.php';
         </table>
     </div>
 </div>
-<p class="text-muted mt-3 small">Total records: <?= count($requests) ?> | Period: <?= formatDate($from) ?> - <?= formatDate($to) ?></p>
+<p class="text-muted mt-3 small no-print">Total records: <?= count($requests) ?> | Period: <?= formatDate($from) ?> - <?= formatDate($to) ?></p>
+<?= renderReportFooter('Borrowing Report') ?>
 
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>

@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
 requireLogin();
+ensureSportCategoryEnum();
 
 if (!canManageTeamAthletes() && !canManageTeamRoster()) {
     flash('error', 'You do not have permission to import athlete rosters.');
@@ -8,11 +9,15 @@ if (!canManageTeamAthletes() && !canManageTeamRoster()) {
 }
 
 $download = get('download');
+$scopedTeamId = null;
+if (isTeamScopedRole() && getUserTeamId()) {
+    $scopedTeamId = (int) getUserTeamId();
+}
 if ($download === 'template' || $download === 'xlsx') {
-    downloadRosterImportTemplate('xlsx');
+    downloadRosterImportTemplate('xlsx', $scopedTeamId);
 }
 if ($download === 'csv') {
-    downloadRosterImportTemplate('csv');
+    downloadRosterImportTemplate('csv', $scopedTeamId);
 }
 
 requireWritableSeason();
@@ -26,7 +31,7 @@ $isCoach = hasRole('coach') && !canManageIntramurals();
 
 $lookups = buildRosterImportLookups();
 $teams = $db->query('SELECT id, name, short_name FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll();
-$sports = $db->query('SELECT id, name, category FROM intramural_sports WHERE is_active = 1 ORDER BY name, category')->fetchAll();
+$sports = $db->query('SELECT id, name, category, players_per_event FROM intramural_sports ORDER BY name, category')->fetchAll();
 
 $results = null;
 $errors = [];
@@ -256,8 +261,8 @@ require __DIR__ . '/../_season_bar.php';
     <div>
         <h1><i class="bi bi-file-earmark-arrow-up"></i> Import Athlete Roster</h1>
         <p class="text-muted mb-0">
-            Bulk-register athletes and sport assignments for
-            <?= $season ? sanitize(seasonLabel($season)) : 'the current season' ?>
+            Bulk-register athletes for the active season. Athlete records are created from this roster import.
+            <?= $season ? sanitize(seasonLabel($season)) : '' ?>
         </p>
     </div>
     <div class="d-flex gap-2 flex-wrap">
@@ -302,9 +307,10 @@ require __DIR__ . '/../_season_bar.php';
             <div class="card-header"><strong>1. Download &amp; fill template</strong></div>
             <div class="card-body">
                 <ol class="mb-3">
-                    <li>Download the <strong>Excel template</strong> (.xlsx).</li>
+                    <li>Download the <strong>Excel template</strong> (.xlsx) — rows are pre-filled per team, event, category, and <strong>players per event</strong> from Sports Management.</li>
                     <li>Open it in Microsoft Excel or Google Sheets.</li>
-                    <li>Fill the <strong>Roster</strong> sheet (keep the header row). Use <strong>Teams</strong> and <strong>Sports</strong> sheets for valid names.</li>
+                    <li>Fill athlete details on the <strong>Roster</strong> sheet (keep the header row). Use <strong>Teams</strong> and <strong>Events</strong> sheets for reference.</li>
+                    <li>Leave unused slots blank. Only rows with student_id, first name, and last name are imported.</li>
                     <li>Save the file, then upload it here (Excel .xlsx or CSV UTF-8).</li>
                 </ol>
                 <div class="d-flex gap-2 flex-wrap">
@@ -342,8 +348,8 @@ require __DIR__ . '/../_season_bar.php';
 
 <div class="card mt-4">
     <div class="card-header d-flex justify-content-between align-items-center">
-        <strong>Valid team &amp; sport names</strong>
-        <span class="text-muted small">Use these exact names in the template</span>
+        <strong>Valid teams &amp; events</strong>
+        <span class="text-muted small">Template rows follow players_per_event from Sports Management</span>
     </div>
     <div class="card-body">
         <div class="row g-4">
@@ -361,15 +367,16 @@ require __DIR__ . '/../_season_bar.php';
                 </ul>
             </div>
             <div class="col-md-7">
-                <h6 class="text-muted">Sports</h6>
+                <h6 class="text-muted">Events</h6>
                 <div class="table-responsive" style="max-height:260px;overflow:auto">
                     <table class="table table-sm mb-0">
-                        <thead class="table-light"><tr><th>Sport</th><th>Category</th></tr></thead>
+                        <thead class="table-light"><tr><th>Sport</th><th>Category</th><th>Players/Event</th></tr></thead>
                         <tbody>
                             <?php foreach ($sports as $s): ?>
                             <tr>
                                 <td><?= sanitize($s['name']) ?></td>
                                 <td><?= sanitize($s['category']) ?></td>
+                                <td><?= !empty($s['players_per_event']) ? (int) $s['players_per_event'] : '—' ?></td>
                             </tr>
                             <?php endforeach; ?>
                         </tbody>

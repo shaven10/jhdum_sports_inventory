@@ -40,9 +40,10 @@ $pageTitle = 'Login';
 <div class="login-page">
     <div class="login-card mx-auto">
         <div class="login-header">
-            <i class="bi bi-trophy" style="font-size: 3rem;"></i>
-            <h2 class="mt-2"><?= APP_NAME ?></h2>
-            <p><?= APP_CAMPUS ?></p>
+            <img src="<?= sanitize(appLogoUrl()) ?>" alt="JHCSC Logo" class="login-brand-logo">
+            <h2 class="mt-3"><?= sanitize(APP_NAME) ?></h2>
+            <p class="mb-0"><?= sanitize(APP_CAMPUS) ?></p>
+            <p class="login-tagline"><?= sanitize(APP_TAGLINE) ?></p>
         </div>
         <div class="p-4">
             <?php if ($error): ?>
