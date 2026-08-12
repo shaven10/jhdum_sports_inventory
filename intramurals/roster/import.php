@@ -31,7 +31,7 @@ $isCoach = hasRole('coach') && !canManageIntramurals();
 
 $lookups = buildRosterImportLookups();
 $teams = $db->query('SELECT id, name, short_name FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll();
-$sports = $db->query('SELECT id, name, category, players_per_event FROM intramural_sports ORDER BY name, category')->fetchAll();
+$sports = $db->query('SELECT id, name, category, players_per_event, venue FROM intramural_sports ORDER BY name, category')->fetchAll();
 
 $results = null;
 $errors = [];
@@ -370,13 +370,14 @@ require __DIR__ . '/../_season_bar.php';
                 <h6 class="text-muted">Events</h6>
                 <div class="table-responsive" style="max-height:260px;overflow:auto">
                     <table class="table table-sm mb-0">
-                        <thead class="table-light"><tr><th>Sport</th><th>Category</th><th>Players/Event</th></tr></thead>
+                        <thead class="table-light"><tr><th>Sport</th><th>Category</th><th>Players/Event</th><th>Venue</th></tr></thead>
                         <tbody>
                             <?php foreach ($sports as $s): ?>
                             <tr>
                                 <td><?= sanitize($s['name']) ?></td>
                                 <td><?= sanitize($s['category']) ?></td>
                                 <td><?= !empty($s['players_per_event']) ? (int) $s['players_per_event'] : '—' ?></td>
+                                <td><?= sanitize($s['venue'] ?: '—') ?></td>
                             </tr>
                             <?php endforeach; ?>
                         </tbody>

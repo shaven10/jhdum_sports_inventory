@@ -171,9 +171,14 @@ foreach ($teams as $t) {
 $errors = $slotErrors;
 $previewBySport = [];
 $previewTotal = 0;
+// Checkbox: absent on POST means unchecked; default on for first visit
+$smartVenue = $_SERVER['REQUEST_METHOD'] === 'POST'
+    ? post('smart_venue') === '1'
+    : true;
 
 $regTeamsStmt = $db->prepare('SELECT DISTINCT team_id FROM intramural_registrations WHERE sport_id = ? AND season_id = ?');
-$previewSlotIndex = $scheduleSlotPreview;
+$fixturesBySportPreview = [];
+$sportsByIdPreview = [];
 
 foreach ($selectedSportIds as $sid) {
     if (!isset($sportMap[$sid])) {
@@ -197,16 +202,32 @@ foreach ($selectedSportIds as $sid) {
     $fixtures = count($teamIds) >= 2
         ? buildTournamentFixtures($sport['tournament_format'] ?? 'round_robin', $teamIds)
         : [];
-    if ($fixtures && $scheduleSlots) {
-        applyAutoScheduleToFixtures($fixtures, $scheduleSlots, $previewSlotIndex);
-    }
     $previewBySport[$sid] = [
         'sport' => $sport,
         'team_ids' => $teamIds,
         'slots' => $slotMap,
         'fixtures' => $fixtures,
     ];
+    if ($fixtures) {
+        $fixturesBySportPreview[$sid] = $fixtures;
+        $sportsByIdPreview[$sid] = $sport;
+    }
     $previewTotal += count($fixtures);
+}
+
+if ($fixturesBySportPreview && $scheduleSlots) {
+    if ($smartVenue) {
+        applySmartVenueSchedule($fixturesBySportPreview, $sportsByIdPreview, $scheduleSlots, (int) ($seasonId ?: 0));
+    } else {
+        $previewSlotIndex = $scheduleSlotPreview;
+        foreach ($fixturesBySportPreview as $sid => &$fx) {
+            applyAutoScheduleToFixtures($fx, $scheduleSlots, $previewSlotIndex);
+        }
+        unset($fx);
+    }
+    foreach ($fixturesBySportPreview as $sid => $fx) {
+        $previewBySport[$sid]['fixtures'] = $fx;
+    }
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && post('action') === 'generate') {
@@ -243,6 +264,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && post('action') === 'generate') {
             'end_date' => $scheduleEndDate ?: null,
             'start_hour' => $scheduleStartHour,
             'end_hour' => $scheduleEndHour,
+            'smart_venue' => post('smart_venue') === '1',
         ];
         $result = generateMatchesForSports($selectedSportIds, $seasonId, $shared, (int) $_SESSION['user_id'], $replace, $perSport, $scheduleOptions);
 
@@ -260,7 +282,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && post('action') === 'generate') {
         if ($result['created'] > 0) {
             $msg = $result['created'] . ' matches generated across ' . $result['sports'] . ' sport' . ($result['sports'] === 1 ? '' : 's');
             if ($result['scheduled'] > 0) {
-                $msg .= ', ' . $result['scheduled'] . ' auto-scheduled (you can edit any date/time afterward)';
+                $msg .= ', ' . $result['scheduled'] . ' auto-scheduled';
+                if (!empty($result['smart_venue'])) {
+                    $msg .= ' with smart same-venue alternating (no overlapping times)';
+                }
+                $msg .= ' (you can edit any date/time afterward)';
             }
             if ($result['errors']) {
                 $msg .= '. Some sports skipped: ' . implode('; ', $result['errors']);
@@ -311,6 +337,12 @@ $renderSlotSelects = static function (string $namePrefix, array $slotMap, array 
     <a href="<?= BASE_URL ?>/intramurals/matches/index.php" class="btn btn-outline-secondary">Back to Matches</a>
 </div>
 
+<div class="alert alert-secondary py-2">
+    <i class="bi bi-info-circle"></i>
+    After scores are recorded, use <strong>Update Bracket</strong> on the Matches page (filter by event) to fill TBD teams from previous-round winners/losers.
+    Bracket updates also run automatically when a match is marked completed.
+</div>
+
 <?php if ($scheduleStartDate && $scheduleEndDate): ?>
 <div class="alert alert-info py-2">
     <i class="bi bi-calendar-range"></i>
@@ -356,6 +388,11 @@ $renderSlotSelects = static function (string $namePrefix, array $slotMap, array 
                                 <label class="form-check-label" for="sport<?= $s['id'] ?>">
                                     <?= sanitize(sportLabel($s)) ?>
                                     <span class="badge bg-info text-dark ms-1"><?= sanitize(tournamentFormatLabel($s['tournament_format'] ?? 'round_robin')) ?></span>
+                                    <?php if (!empty($s['venue'])): ?>
+                                    <span class="badge bg-secondary ms-1" title="Venue"><i class="bi bi-geo-alt"></i> <?= sanitize($s['venue']) ?></span>
+                                    <?php else: ?>
+                                    <span class="text-muted small ms-1">No venue</span>
+                                    <?php endif; ?>
                                 </label>
                             </div>
                             <?php endforeach; ?>
@@ -469,6 +506,17 @@ $renderSlotSelects = static function (string $namePrefix, array $slotMap, array 
                         </div>
                     </div>
 
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" name="smart_venue" value="1" id="smartVenue" <?= $smartVenue ? 'checked' : '' ?> onchange="updatePreview()">
+                        <label class="form-check-label" for="smartVenue">
+                            <strong>Smart same-venue scheduling</strong>
+                        </label>
+                        <div class="form-text">
+                            Events that share a venue alternate games (Event A → Event B → Event A…) and never overlap on that venue.
+                            Different venues can run at the same time. Existing bookings at the venue are skipped.
+                        </div>
+                    </div>
+
                     <div class="form-check mb-3">
                         <input class="form-check-input" type="checkbox" name="replace_unscheduled" value="1" id="replaceUnscheduled">
                         <label class="form-check-label" for="replaceUnscheduled">
@@ -494,7 +542,11 @@ $renderSlotSelects = static function (string $namePrefix, array $slotMap, array 
                     <strong>2. Preview by event</strong>
                     <span class="text-muted small">
                         <span id="previewTotalLabel"><?= (int) $previewTotal ?></span> total
-                        <?php if ($scheduleSlots): ?> · auto times (editable later)<?php else: ?> · set schedule window for auto times<?php endif; ?>
+                        <?php if ($scheduleSlots): ?>
+                            · <?= $smartVenue ? 'smart same-venue times' : 'auto times' ?> (editable later)
+                        <?php else: ?>
+                            · set schedule window for auto times
+                        <?php endif; ?>
                     </span>
                 </div>
                 <div class="card-body p-0" id="previewPanel">
@@ -519,6 +571,9 @@ $renderSlotSelects = static function (string $namePrefix, array $slotMap, array 
                                 <div>
                                     <strong><?= sanitize(sportLabel($block['sport'])) ?></strong>
                                     <span class="badge bg-info text-dark ms-1"><?= sanitize(tournamentFormatLabel($block['sport']['tournament_format'] ?? 'round_robin')) ?></span>
+                                    <?php if (!empty($block['sport']['venue'])): ?>
+                                    <span class="badge bg-secondary ms-1"><i class="bi bi-geo-alt"></i> <?= sanitize($block['sport']['venue']) ?></span>
+                                    <?php endif; ?>
                                     <?php if ($participantLabels): ?>
                                     <div class="small text-muted mt-1"><?= sanitize(implode(' · ', $participantLabels)) ?></div>
                                     <?php endif; ?>
@@ -528,7 +583,7 @@ $renderSlotSelects = static function (string $namePrefix, array $slotMap, array 
                             <div class="table-responsive" style="max-height:220px;overflow:auto">
                                 <table class="table table-sm mb-0">
                                     <thead class="table-light sticky-top">
-                                        <tr><th>#</th><th>Round</th><th>Schedule</th><th>Side 1</th><th>Side 2</th></tr>
+                                        <tr><th>#</th><th>Round</th><th>Schedule</th><th>Venue</th><th>Side 1</th><th>Side 2</th></tr>
                                     </thead>
                                     <tbody>
                                         <?php foreach ($block['fixtures'] as $f): ?>
@@ -542,6 +597,7 @@ $renderSlotSelects = static function (string $namePrefix, array $slotMap, array 
                                                 <span class="text-muted">TBD</span>
                                                 <?php endif; ?>
                                             </td>
+                                            <td class="small"><?= sanitize($f['venue'] ?? ($block['sport']['venue'] ?? '—') ?: '—') ?></td>
                                             <td><?= $f['team_a_id'] && isset($teamMap[$f['team_a_id']]) ? sanitize($teamMap[$f['team_a_id']]['name']) : '<span class="text-muted">TBD</span>' ?></td>
                                             <td><?= $f['team_b_id'] && isset($teamMap[$f['team_b_id']]) ? sanitize($teamMap[$f['team_b_id']]['name']) : '<span class="text-muted">TBD</span>' ?></td>
                                         </tr>

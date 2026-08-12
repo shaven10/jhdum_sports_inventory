@@ -79,6 +79,16 @@ $queryBase = BASE_URL . '/intramurals/matches/index.php?search=' . urlencode($se
     <div class="d-flex gap-2 flex-wrap">
         <?php if (canManageMatches()): ?>
         <a href="<?= BASE_URL ?>/intramurals/matches/generate.php<?= $sportId !== '' ? '?sport=' . (int) $sportId : '' ?>" class="btn btn-primary"><i class="bi bi-magic"></i> Generate Matches</a>
+        <?php if ($sportId !== ''): ?>
+        <form method="POST" action="<?= BASE_URL ?>/intramurals/matches/advance.php" class="d-inline">
+            <?= csrfField() ?>
+            <input type="hidden" name="sport_id" value="<?= (int) $sportId ?>">
+            <input type="hidden" name="return_to" value="<?= sanitize($queryBase) ?>">
+            <button type="submit" class="btn btn-outline-success" data-confirm="Update TBD teams for this event from completed match results?">
+                <i class="bi bi-diagram-3"></i> Update Bracket
+            </button>
+        </form>
+        <?php endif; ?>
         <?php if (canManageIntramurals()): ?>
         <a href="<?= BASE_URL ?>/intramurals/matches/add.php" class="btn btn-outline-primary"><i class="bi bi-plus-lg"></i> Single Match</a>
         <?php endif; ?>

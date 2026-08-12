@@ -44,6 +44,25 @@ function ensurePlayersPerEventColumn(): void
         $db->exec('ALTER TABLE intramural_sports ADD COLUMN players_per_event INT DEFAULT NULL AFTER category');
         seedSportPlayersPerEvent($db);
     }
+
+    ensureSportVenueColumn();
+}
+
+/** Ensure intramural_sports.venue exists for default event venues. */
+function ensureSportVenueColumn(): void
+{
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    $db = getDB();
+    $stmt = $db->prepare('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
+    $stmt->execute(['intramural_sports', 'venue']);
+    if ((int) $stmt->fetchColumn() === 0) {
+        $db->exec('ALTER TABLE intramural_sports ADD COLUMN venue VARCHAR(150) DEFAULT NULL AFTER schedule_notes');
+    }
 }
 
 /** Default max players per team for known intramural sports. */
@@ -483,15 +502,18 @@ function buildSingleEliminationFixtures(array $teamIds): array
 
 /**
  * Single elimination championship bracket plus consolation matches.
- * - 3rd Place Playoff between championship semi-final losers (4+ teams)
- * - First-round loser consolation bracket for 8+ team draws (5th–8th place)
+ * Sequence (match_order):
+ *  1) Championship rounds except the Final
+ *  2) First-round loser consolation bracket (8+ teams; 5th–8th place)
+ *  3) Consolation Final (3rd Place)
+ *  4) Championship Final (always last)
  *
  * @param list<int> $teamIds
  * @return list<array<string, mixed>>
  */
 function buildSingleEliminationConsolationFixtures(array $teamIds): array
 {
-    $fixtures = buildSingleEliminationFixtures($teamIds);
+    $championship = buildSingleEliminationFixtures($teamIds);
 
     $n = count($teamIds);
     $size = 1;
@@ -500,12 +522,36 @@ function buildSingleEliminationConsolationFixtures(array $teamIds): array
     }
     $rounds = (int) log($size, 2);
 
-    $order = 0;
-    foreach ($fixtures as $f) {
-        $order = max($order, (int) $f['match_order']);
+    $preFinal = [];
+    $finals = [];
+    foreach ($championship as $f) {
+        $label = strtolower(trim((string) ($f['round_label'] ?? '')));
+        $isFinal = $label === 'final' || (int) ($f['round_number'] ?? 0) === $rounds;
+        if ($isFinal) {
+            $finals[] = $f;
+        } else {
+            $preFinal[] = $f;
+        }
     }
 
-    foreach ($fixtures as &$f) {
+    // Fallback: if labels differ, treat the last championship round as the Final.
+    if (empty($finals) && !empty($preFinal)) {
+        $maxRound = 0;
+        foreach ($preFinal as $f) {
+            $maxRound = max($maxRound, (int) ($f['round_number'] ?? 0));
+        }
+        $kept = [];
+        foreach ($preFinal as $f) {
+            if ((int) ($f['round_number'] ?? 0) === $maxRound) {
+                $finals[] = $f;
+            } else {
+                $kept[] = $f;
+            }
+        }
+        $preFinal = $kept;
+    }
+
+    foreach ($preFinal as &$f) {
         $existing = (string) ($f['notes'] ?? '');
         if ($existing === 'TBD — fill teams after previous round results') {
             $f['notes'] = 'TBD — championship bracket';
@@ -515,18 +561,16 @@ function buildSingleEliminationConsolationFixtures(array $teamIds): array
     }
     unset($f);
 
-    if ($rounds >= 2) {
-        $order++;
-        $fixtures[] = [
-            'team_a_id' => null,
-            'team_b_id' => null,
-            'round_number' => $rounds + 1,
-            'round_label' => 'Consolation Final (3rd Place)',
-            'match_order' => $order,
-            'notes' => 'TBD — losers of championship semi-finals',
-        ];
+    foreach ($finals as &$f) {
+        $f['round_label'] = 'Final';
+        $f['notes'] = 'Championship Final — scheduled last after consolation games';
     }
+    unset($f);
 
+    $consolation = [];
+    $order = 0;
+
+    // 5th–8th place bracket (first-round losers) before 3rd-place game
     if ($size >= 8) {
         $slots = $teamIds;
         while (count($slots) < $size) {
@@ -539,11 +583,43 @@ function buildSingleEliminationConsolationFixtures(array $teamIds): array
             }
         }
         if ($r1Losers >= 2) {
-            $fixtures = array_merge($fixtures, buildConsolationBracketShells($r1Losers, $order));
+            $consolation = array_merge($consolation, buildConsolationBracketShells($r1Losers, $order));
         }
     }
 
-    return $fixtures;
+    // 3rd Place after consolation bracket, still before championship Final
+    if ($rounds >= 2) {
+        $order++;
+        $consolation[] = [
+            'team_a_id' => null,
+            'team_b_id' => null,
+            'round_number' => $rounds + 50,
+            'round_label' => 'Consolation Final (3rd Place)',
+            'match_order' => $order,
+            'notes' => 'TBD — losers of championship semi-finals',
+        ];
+    }
+
+    // Rebuild in playable sequence and renumber match_order / round_number for sorting
+    $sequence = array_merge($preFinal, $consolation, $finals);
+    $matchOrder = 0;
+    $roundCursor = 0;
+    $lastLabel = null;
+    $resequenced = [];
+
+    foreach ($sequence as $f) {
+        $label = (string) ($f['round_label'] ?? '');
+        if ($label !== $lastLabel) {
+            $roundCursor++;
+            $lastLabel = $label;
+        }
+        $matchOrder++;
+        $f['round_number'] = $roundCursor;
+        $f['match_order'] = $matchOrder;
+        $resequenced[] = $f;
+    }
+
+    return $resequenced;
 }
 
 /**
@@ -703,6 +779,124 @@ function applyAutoScheduleToFixtures(array &$fixtures, array $slots, int &$slotI
     return $scheduled;
 }
 
+/** Normalize venue names for grouping (case/spacing insensitive). */
+function normalizeVenueKey(?string $venue): string
+{
+    $v = strtolower(trim(preg_replace('/\s+/', ' ', (string) $venue)));
+    return $v !== '' ? $v : '';
+}
+
+/**
+ * Occupied datetimes for a venue in a season (existing scheduled matches).
+ *
+ * @return array<string, true>
+ */
+function getOccupiedVenueSlots(int $seasonId, string $venueKey): array
+{
+    if ($venueKey === '' || $seasonId <= 0) {
+        return [];
+    }
+
+    $db = getDB();
+    $stmt = $db->prepare('SELECT m.scheduled_at, m.venue AS match_venue, s.venue AS sport_venue
+        FROM intramural_matches m
+        JOIN intramural_sports s ON m.sport_id = s.id
+        WHERE m.season_id = ?
+          AND m.scheduled_at IS NOT NULL
+          AND m.status NOT IN (\'cancelled\')');
+    $stmt->execute([$seasonId]);
+    $occupied = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $rowVenue = trim((string) ($row['match_venue'] ?? '')) !== ''
+            ? $row['match_venue']
+            : ($row['sport_venue'] ?? '');
+        if (normalizeVenueKey($rowVenue) !== $venueKey) {
+            continue;
+        }
+        $occupied[(string) $row['scheduled_at']] = true;
+    }
+
+    return $occupied;
+}
+
+/**
+ * Smart schedule: group selected events by venue, alternate their games, and
+ * avoid overlapping times on the same venue. Different venues may share times.
+ *
+ * @param array<int, list<array<string,mixed>>> $fixturesBySport
+ * @param array<int, array> $sportsById
+ * @return int Number of fixtures scheduled
+ */
+function applySmartVenueSchedule(array &$fixturesBySport, array $sportsById, array $slots, int $seasonId): int
+{
+    if (empty($slots) || empty($fixturesBySport)) {
+        return 0;
+    }
+
+    // venueKey => list of sport ids (stable order)
+    $venueGroups = [];
+    foreach ($fixturesBySport as $sportId => $fixtures) {
+        if (empty($fixtures)) {
+            continue;
+        }
+        $sport = $sportsById[$sportId] ?? [];
+        $key = normalizeVenueKey($sport['venue'] ?? null);
+        if (!isset($venueGroups[$key])) {
+            $venueGroups[$key] = [];
+        }
+        $venueGroups[$key][] = (int) $sportId;
+    }
+
+    $scheduled = 0;
+
+    foreach ($venueGroups as $venueKey => $groupSportIds) {
+        // No venue set: schedule each sport independently (no cross-sport blocking)
+        if ($venueKey === '') {
+            $slotIndex = 0;
+            foreach ($groupSportIds as $sportId) {
+                $scheduled += applyAutoScheduleToFixtures($fixturesBySport[$sportId], $slots, $slotIndex);
+            }
+            continue;
+        }
+
+        $occupied = getOccupiedVenueSlots($seasonId, $venueKey);
+        $queues = [];
+        foreach ($groupSportIds as $sportId) {
+            $queues[$sportId] = array_keys($fixturesBySport[$sportId]); // fixture indices
+        }
+
+        $slotPos = 0;
+        $active = true;
+        while ($active) {
+            $active = false;
+            foreach ($groupSportIds as $sportId) {
+                if (empty($queues[$sportId])) {
+                    continue;
+                }
+                $active = true;
+
+                // Find next free slot for this venue
+                while (isset($slots[$slotPos]) && !empty($occupied[$slots[$slotPos]])) {
+                    $slotPos++;
+                }
+                if (!isset($slots[$slotPos])) {
+                    break 2;
+                }
+
+                $idx = array_shift($queues[$sportId]);
+                $when = $slots[$slotPos];
+                $fixturesBySport[$sportId][$idx]['scheduled_at'] = $when;
+                $fixturesBySport[$sportId][$idx]['venue'] = $sportsById[$sportId]['venue'] ?? null;
+                $occupied[$when] = true;
+                $slotPos++;
+                $scheduled++;
+            }
+        }
+    }
+
+    return $scheduled;
+}
+
 /**
  * Map house teams to Team A, B, C, D labels for the generate-matches UI.
  * Prefers Blue/Red/Green/Gold order when short names match; otherwise uses id order.
@@ -745,7 +939,7 @@ function getHouseTeamLabels(array $teams): array
  * @param list<int> $teamIds
  * @return array{created: int, format: string, error?: string}
  */
-function generateMatchesForSport(int $sportId, int $seasonId, array $teamIds, ?int $createdBy = null, bool $replaceUnscheduled = false, ?array $scheduleSlots = null, ?int &$scheduleSlotIndex = null): array
+function generateMatchesForSport(int $sportId, int $seasonId, array $teamIds, ?int $createdBy = null, bool $replaceUnscheduled = false, ?array $scheduleSlots = null, ?int &$scheduleSlotIndex = null, ?array $prebuiltFixtures = null): array
 {
     $db = getDB();
     $stmt = $db->prepare('SELECT * FROM intramural_sports WHERE id = ?');
@@ -759,13 +953,21 @@ function generateMatchesForSport(int $sportId, int $seasonId, array $teamIds, ?i
     if ($format === 'rank_first_to_last' && count($teamIds) % 2 !== 0) {
         return ['created' => 0, 'format' => $format, 'error' => 'Rank from First to Last requires an even number of teams (each team plays one match).'];
     }
-    $fixtures = buildTournamentFixtures($format, $teamIds);
-    if (empty($fixtures)) {
-        return ['created' => 0, 'format' => $format, 'error' => 'Select at least 2 teams to generate matches.'];
+
+    if ($prebuiltFixtures !== null) {
+        $fixtures = $prebuiltFixtures;
+    } else {
+        $fixtures = buildTournamentFixtures($format, $teamIds);
+        if (empty($fixtures)) {
+            return ['created' => 0, 'format' => $format, 'error' => 'Select at least 2 teams to generate matches.'];
+        }
+        if ($scheduleSlots !== null && $scheduleSlotIndex !== null) {
+            applyAutoScheduleToFixtures($fixtures, $scheduleSlots, $scheduleSlotIndex);
+        }
     }
 
-    if ($scheduleSlots !== null && $scheduleSlotIndex !== null) {
-        applyAutoScheduleToFixtures($fixtures, $scheduleSlots, $scheduleSlotIndex);
+    if (empty($fixtures)) {
+        return ['created' => 0, 'format' => $format, 'error' => 'Select at least 2 teams to generate matches.'];
     }
 
     if ($replaceUnscheduled) {
@@ -777,9 +979,11 @@ function generateMatchesForSport(int $sportId, int $seasonId, array $teamIds, ?i
             ->execute([$seasonId, $sportId]);
     }
 
+    $defaultVenue = trim((string) ($sport['venue'] ?? '')) ?: null;
+
     $insert = $db->prepare('INSERT INTO intramural_matches
-        (season_id, sport_id, round_number, round_label, match_order, is_generated, team_a_id, team_b_id, scheduled_at, status, notes, created_by)
-        VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, \'scheduled\', ?, ?)');
+        (season_id, sport_id, round_number, round_label, match_order, is_generated, team_a_id, team_b_id, scheduled_at, venue, status, notes, created_by)
+        VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, \'scheduled\', ?, ?)');
 
     $created = 0;
     foreach ($fixtures as $f) {
@@ -792,6 +996,7 @@ function generateMatchesForSport(int $sportId, int $seasonId, array $teamIds, ?i
             $f['team_a_id'],
             $f['team_b_id'],
             $f['scheduled_at'] ?? null,
+            $f['venue'] ?? $defaultVenue,
             $f['notes'],
             $createdBy,
         ]);
@@ -825,12 +1030,25 @@ function generateMatchesForSports(array $sportIds, int $seasonId, ?array $shared
     $endHour = (int) ($scheduleOptions['end_hour'] ?? 17);
     $startDate = $scheduleOptions['start_date'] ?? ($season['start_date'] ?? null);
     $endDate = $scheduleOptions['end_date'] ?? ($season['end_date'] ?? null);
+    $smartVenue = !empty($scheduleOptions['smart_venue']);
     $scheduleSlots = buildScheduleSlots($startDate, $endDate, $startHour, $endHour);
     $scheduleSlotIndex = getNextScheduleSlotIndex($seasonId, $scheduleSlots);
 
     $regTeamsStmt = $db->prepare('SELECT DISTINCT team_id FROM intramural_registrations WHERE sport_id = ? AND season_id = ?');
+    $sportsById = [];
+    $teamIdsBySport = [];
+    $fixturesBySport = [];
 
     foreach ($sportIds as $sportId) {
+        $sportStmt = $db->prepare('SELECT * FROM intramural_sports WHERE id = ?');
+        $sportStmt->execute([$sportId]);
+        $sport = $sportStmt->fetch();
+        if (!$sport) {
+            $errors[] = 'Sport #' . $sportId . ': not found.';
+            continue;
+        }
+        $sportsById[$sportId] = $sport;
+
         if ($teamsBySport !== null && isset($teamsBySport[$sportId])) {
             $teamIds = array_values(array_unique(array_map('intval', $teamsBySport[$sportId])));
         } elseif ($sharedTeamIds !== null) {
@@ -839,14 +1057,50 @@ function generateMatchesForSports(array $sportIds, int $seasonId, ?array $shared
             $regTeamsStmt->execute([$sportId, $seasonId]);
             $teamIds = array_map('intval', $regTeamsStmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
         }
+        $teamIdsBySport[$sportId] = $teamIds;
 
-        $beforeIndex = $scheduleSlotIndex;
-        $result = generateMatchesForSport($sportId, $seasonId, $teamIds, $createdBy, $replaceUnscheduled, $scheduleSlots, $scheduleSlotIndex);
-        $sportScheduled = $scheduleSlotIndex - $beforeIndex;
-        $totalScheduled += $sportScheduled;
-        $sportStmt = $db->prepare('SELECT * FROM intramural_sports WHERE id = ?');
-        $sportStmt->execute([$sportId]);
-        $sport = $sportStmt->fetch() ?: ['name' => 'Sport #' . $sportId, 'category' => 'men'];
+        if (count($teamIds) < 2) {
+            $errors[] = sportLabel($sport) . ': select at least 2 teams.';
+            continue;
+        }
+
+        $format = $sport['tournament_format'] ?? 'round_robin';
+        if ($format === 'rank_first_to_last' && count($teamIds) % 2 !== 0) {
+            $errors[] = sportLabel($sport) . ': Rank from First to Last requires an even number of teams.';
+            continue;
+        }
+
+        $fixtures = buildTournamentFixtures($format, $teamIds);
+        if (empty($fixtures)) {
+            $errors[] = sportLabel($sport) . ': no fixtures to generate.';
+            continue;
+        }
+        $fixturesBySport[$sportId] = $fixtures;
+    }
+
+    if ($smartVenue && $scheduleSlots && $fixturesBySport) {
+        $totalScheduled = applySmartVenueSchedule($fixturesBySport, $sportsById, $scheduleSlots, $seasonId);
+    } elseif ($scheduleSlots && $fixturesBySport) {
+        foreach ($fixturesBySport as $sportId => &$fixtures) {
+            $before = $scheduleSlotIndex;
+            applyAutoScheduleToFixtures($fixtures, $scheduleSlots, $scheduleSlotIndex);
+            $totalScheduled += ($scheduleSlotIndex - $before);
+        }
+        unset($fixtures);
+    }
+
+    foreach ($fixturesBySport as $sportId => $fixtures) {
+        $sport = $sportsById[$sportId];
+        $result = generateMatchesForSport(
+            $sportId,
+            $seasonId,
+            $teamIdsBySport[$sportId],
+            $createdBy,
+            $replaceUnscheduled,
+            null,
+            $scheduleSlotIndex,
+            $fixtures
+        );
 
         if (!empty($result['error'])) {
             $errors[] = sportLabel($sport) . ': ' . $result['error'];
@@ -877,6 +1131,7 @@ function generateMatchesForSports(array $sportIds, int $seasonId, ?array $shared
         'details' => $details,
         'errors' => $errors,
         'scheduled' => $totalScheduled,
+        'smart_venue' => $smartVenue,
     ];
 }
 
@@ -1061,6 +1316,465 @@ function determineMatchWinner(?int $scoreA, ?int $scoreB, int $teamAId, int $tea
     }
 
     return null; // draw
+}
+
+/**
+ * Winner / loser for a finished match.
+ *
+ * @return array{winner:?int,loser:?int}|null
+ */
+function getMatchOutcome(array $match): ?array
+{
+    $teamA = (int) ($match['team_a_id'] ?? 0);
+    $teamB = (int) ($match['team_b_id'] ?? 0);
+    if ($teamA <= 0 || $teamB <= 0) {
+        return null;
+    }
+
+    $status = (string) ($match['status'] ?? '');
+    $winner = !empty($match['winner_team_id'])
+        ? (int) $match['winner_team_id']
+        : determineMatchWinner(
+            $match['score_a'] !== null ? (int) $match['score_a'] : null,
+            $match['score_b'] !== null ? (int) $match['score_b'] : null,
+            $teamA,
+            $teamB,
+            $status,
+            !empty($match['forfeit_team_id']) ? (int) $match['forfeit_team_id'] : null
+        );
+
+    if (!$winner) {
+        return null;
+    }
+
+    return [
+        'winner' => $winner,
+        'loser' => $winner === $teamA ? $teamB : $teamA,
+    ];
+}
+
+function isConsolationMatch(array $match): bool
+{
+    $label = strtolower((string) ($match['round_label'] ?? ''));
+    $notes = strtolower((string) ($match['notes'] ?? ''));
+    return str_contains($label, 'consolation') || str_contains($notes, 'consolation');
+}
+
+function isChampionshipFinalMatch(array $match): bool
+{
+    $label = strtolower(trim((string) ($match['round_label'] ?? '')));
+    return $label === 'final' && !isConsolationMatch($match);
+}
+
+/**
+ * Whether a generated match slot can still receive bracket teams.
+ */
+function canUpdateBracketTeams(array $match): bool
+{
+    if (empty($match['is_generated'])) {
+        return false;
+    }
+    $status = (string) ($match['status'] ?? 'scheduled');
+    if (in_array($status, ['completed', 'forfeit', 'ongoing'], true)) {
+        return false;
+    }
+    if ($match['score_a'] !== null || $match['score_b'] !== null) {
+        return false;
+    }
+    return true;
+}
+
+/**
+ * Assign team into team_a or team_b of a TBD/generated match.
+ *
+ * @return bool true when a change was written
+ */
+function assignTeamToBracketSlot(PDO $db, array &$match, int $teamId, string $side): bool
+{
+    if ($teamId <= 0 || !canUpdateBracketTeams($match)) {
+        return false;
+    }
+
+    $field = $side === 'b' ? 'team_b_id' : 'team_a_id';
+    $current = (int) ($match[$field] ?? 0);
+    if ($current === $teamId) {
+        return false;
+    }
+
+    // Avoid putting the same team on both sides
+    $otherField = $field === 'team_a_id' ? 'team_b_id' : 'team_a_id';
+    if ((int) ($match[$otherField] ?? 0) === $teamId) {
+        return false;
+    }
+
+    $db->prepare("UPDATE intramural_matches SET {$field} = ? WHERE id = ?")->execute([$teamId, (int) $match['id']]);
+    $match[$field] = $teamId;
+    return true;
+}
+
+/**
+ * Fill next-round slots from ordered previous-round winners (classic bracket pairing).
+ *
+ * @param list<array> $sourceMatches
+ * @param list<array> $targetMatches
+ * @return int updates count
+ */
+function fillNextRoundFromWinners(PDO $db, array $sourceMatches, array &$targetMatches, string $use = 'winner'): int
+{
+    $outcomes = [];
+    foreach ($sourceMatches as $m) {
+        $out = getMatchOutcome($m);
+        if (!$out || empty($out[$use])) {
+            return 0; // wait until the whole prior round is decided
+        }
+        $outcomes[] = (int) $out[$use];
+    }
+
+    $needed = count($targetMatches) * 2;
+    if (count($outcomes) < $needed) {
+        return 0;
+    }
+
+    $updated = 0;
+    foreach ($targetMatches as $i => &$target) {
+        $a = $outcomes[$i * 2] ?? 0;
+        $b = $outcomes[$i * 2 + 1] ?? 0;
+        if ($a && assignTeamToBracketSlot($db, $target, $a, 'a')) {
+            $updated++;
+        }
+        if ($b && assignTeamToBracketSlot($db, $target, $b, 'b')) {
+            $updated++;
+        }
+    }
+    unset($target);
+
+    return $updated;
+}
+
+/**
+ * Collapse SDS rubber triples into virtual ties with a team winner/loser.
+ *
+ * @param list<array> $matches
+ * @return list<array{winner:int,loser:int,matches:list<array>}>
+ */
+function collapseSdsTies(array $matches): array
+{
+    $ties = [];
+    $buffer = [];
+
+    $flush = static function () use (&$ties, &$buffer): void {
+        if (count($buffer) < 1) {
+            return;
+        }
+        $wins = [];
+        foreach ($buffer as $m) {
+            $out = getMatchOutcome($m);
+            if (!$out) {
+                $buffer = [];
+                return;
+            }
+            $w = (int) $out['winner'];
+            $wins[$w] = ($wins[$w] ?? 0) + 1;
+        }
+        arsort($wins);
+        $winner = (int) array_key_first($wins);
+        $teamA = (int) ($buffer[0]['team_a_id'] ?? 0);
+        $teamB = (int) ($buffer[0]['team_b_id'] ?? 0);
+        $loser = $winner === $teamA ? $teamB : $teamA;
+        if ($winner > 0 && $loser > 0) {
+            $ties[] = ['winner' => $winner, 'loser' => $loser, 'matches' => $buffer];
+        }
+        $buffer = [];
+    };
+
+    foreach ($matches as $m) {
+        $label = (string) ($m['round_label'] ?? '');
+        if (!str_contains($label, 'SDS')) {
+            $flush();
+            continue;
+        }
+        if ($buffer && (
+            (int) ($buffer[0]['team_a_id'] ?? 0) !== (int) ($m['team_a_id'] ?? 0)
+            || (int) ($buffer[0]['team_b_id'] ?? 0) !== (int) ($m['team_b_id'] ?? 0)
+            || preg_replace('/\s*—\s*SDS.*/', '', (string) ($buffer[0]['round_label'] ?? ''))
+                !== preg_replace('/\s*—\s*SDS.*/', '', $label)
+        )) {
+            $flush();
+        }
+        $buffer[] = $m;
+        if (count($buffer) >= 3) {
+            $flush();
+        }
+    }
+    $flush();
+
+    return $ties;
+}
+
+/**
+ * Update generated TBD matches from completed previous-round results.
+ *
+ * @return array{updated:int,details:list<string>,error?:string}
+ */
+function advanceBracketFromResults(int $sportId, int $seasonId): array
+{
+    $db = getDB();
+    $sportStmt = $db->prepare('SELECT * FROM intramural_sports WHERE id = ?');
+    $sportStmt->execute([$sportId]);
+    $sport = $sportStmt->fetch();
+    if (!$sport) {
+        return ['updated' => 0, 'details' => [], 'error' => 'Sport not found.'];
+    }
+
+    $format = (string) ($sport['tournament_format'] ?? 'round_robin');
+    $bracketFormats = [
+        'single_elimination',
+        'single_elimination_consolation',
+        'double_elimination',
+        'team_play_sds',
+    ];
+    if (!in_array($format, $bracketFormats, true)) {
+        return [
+            'updated' => 0,
+            'details' => [],
+            'error' => 'Bracket update applies to elimination / SDS formats only.',
+        ];
+    }
+
+    $stmt = $db->prepare('SELECT * FROM intramural_matches
+        WHERE season_id = ? AND sport_id = ? AND is_generated = 1
+        ORDER BY match_order ASC, id ASC');
+    $stmt->execute([$seasonId, $sportId]);
+    $matches = $stmt->fetchAll();
+    if (!$matches) {
+        return ['updated' => 0, 'details' => ['No generated matches found.']];
+    }
+
+    $updated = 0;
+    $details = [];
+
+    if ($format === 'team_play_sds') {
+        $updated += advanceSdsBracket($db, $matches, $details);
+        return ['updated' => $updated, 'details' => $details];
+    }
+
+    $championship = [];
+    $consolation = [];
+    foreach ($matches as $m) {
+        if (isConsolationMatch($m)) {
+            $consolation[] = $m;
+        } else {
+            $championship[] = $m;
+        }
+    }
+
+    // Group championship matches by round label (preserving match_order)
+    $champRounds = [];
+    foreach ($championship as $m) {
+        $label = (string) ($m['round_label'] ?: ('Round ' . (int) $m['round_number']));
+        if (!isset($champRounds[$label])) {
+            $champRounds[$label] = [];
+        }
+        $champRounds[$label][] = $m;
+    }
+    $champLabels = array_keys($champRounds);
+
+    for ($i = 0; $i < count($champLabels) - 1; $i++) {
+        $srcLabel = $champLabels[$i];
+        $dstLabel = $champLabels[$i + 1];
+        // Skip pairing into Final from non-semi when consolation exists between — labels are already championship-only
+        $src = $champRounds[$srcLabel];
+        $dst = $champRounds[$dstLabel];
+        $count = fillNextRoundFromWinners($db, $src, $dst, 'winner');
+        if ($count > 0) {
+            $updated += $count;
+            $details[] = "Advanced {$count} team slot(s) from {$srcLabel} → {$dstLabel}.";
+            $champRounds[$dstLabel] = $dst;
+        }
+    }
+
+    // 3rd-place game: losers of championship Semi-finals
+    if ($format === 'single_elimination_consolation') {
+        $semiLabel = null;
+        foreach ($champLabels as $label) {
+            if (stripos($label, 'semi') !== false) {
+                $semiLabel = $label;
+                break;
+            }
+        }
+        $thirdIdx = null;
+        foreach ($consolation as $idx => $cm) {
+            if (stripos((string) $cm['round_label'], '3rd') !== false) {
+                $thirdIdx = $idx;
+                break;
+            }
+        }
+
+        if ($semiLabel && $thirdIdx !== null) {
+            $semis = $champRounds[$semiLabel];
+            if (count($semis) >= 2) {
+                $losers = [];
+                foreach (array_slice($semis, 0, 2) as $semi) {
+                    $out = getMatchOutcome($semi);
+                    if ($out) {
+                        $losers[] = (int) $out['loser'];
+                    }
+                }
+                if (count($losers) === 2) {
+                    $before = $updated;
+                    if (assignTeamToBracketSlot($db, $consolation[$thirdIdx], $losers[0], 'a')) {
+                        $updated++;
+                    }
+                    if (assignTeamToBracketSlot($db, $consolation[$thirdIdx], $losers[1], 'b')) {
+                        $updated++;
+                    }
+                    if ($updated > $before) {
+                        $details[] = 'Filled Consolation Final (3rd Place) from semi-final losers.';
+                    }
+                }
+            }
+        }
+
+        // First-round losers → first consolation round (excluding 3rd place)
+        $consolationRounds = [];
+        foreach ($consolation as $cm) {
+            if (stripos((string) $cm['round_label'], '3rd') !== false) {
+                continue;
+            }
+            $label = (string) ($cm['round_label'] ?: ('Consolation ' . (int) $cm['round_number']));
+            if (!isset($consolationRounds[$label])) {
+                $consolationRounds[$label] = [];
+            }
+            $consolationRounds[$label][] = $cm;
+        }
+        $consolationLabels = array_keys($consolationRounds);
+
+        if (!empty($champLabels) && !empty($consolationLabels)) {
+            $firstChamp = $champRounds[$champLabels[0]];
+            $firstConsolation = $consolationRounds[$consolationLabels[0]];
+            $count = fillNextRoundFromWinners($db, $firstChamp, $firstConsolation, 'loser');
+            if ($count > 0) {
+                $updated += $count;
+                $details[] = "Filled {$count} consolation slot(s) from first-round losers.";
+                $consolationRounds[$consolationLabels[0]] = $firstConsolation;
+            }
+        }
+
+        for ($i = 0; $i < count($consolationLabels) - 1; $i++) {
+            $srcLabel = $consolationLabels[$i];
+            $dstLabel = $consolationLabels[$i + 1];
+            $src = $consolationRounds[$srcLabel];
+            $dst = $consolationRounds[$dstLabel];
+            $count = fillNextRoundFromWinners($db, $src, $dst, 'winner');
+            if ($count > 0) {
+                $updated += $count;
+                $details[] = "Advanced {$count} consolation slot(s) from {$srcLabel} → {$dstLabel}.";
+                $consolationRounds[$dstLabel] = $dst;
+            }
+        }
+    }
+
+    if ($updated === 0 && empty($details)) {
+        $details[] = 'No TBD slots were ready to update. Complete previous round matches first.';
+    }
+
+    return ['updated' => $updated, 'details' => $details];
+}
+
+/**
+ * Advance SDS single-elim ties (best of 3 rubbers) into later TBD ties.
+ *
+ * @param list<array> $matches
+ * @param list<string> $details
+ */
+function advanceSdsBracket(PDO $db, array $matches, array &$details): int
+{
+    // Group by base round label (strip SDS suffix)
+    $rounds = [];
+    foreach ($matches as $m) {
+        $base = trim(preg_replace('/\s*—\s*SDS.*$/i', '', (string) ($m['round_label'] ?? '')));
+        if ($base === '') {
+            $base = 'Round ' . (int) ($m['round_number'] ?? 1);
+        }
+        if (!isset($rounds[$base])) {
+            $rounds[$base] = [];
+        }
+        $rounds[$base][] = $m;
+    }
+
+    $labels = array_keys($rounds);
+    $updated = 0;
+
+    for ($i = 0; $i < count($labels) - 1; $i++) {
+        $srcTies = collapseSdsTies($rounds[$labels[$i]]);
+        if (empty($srcTies)) {
+            continue;
+        }
+
+        // Build next-round tie shells: unique team-pair slots among TBD SDS Singles 1 rows
+        $dstMatches = $rounds[$labels[$i + 1]];
+        $dstTies = [];
+        foreach ($dstMatches as $m) {
+            $label = (string) ($m['round_label'] ?? '');
+            if (!str_contains($label, 'SDS Singles 1') && !preg_match('/SDS Singles 1/i', $label)) {
+                // group all three rubbers by order blocks of 3
+                continue;
+            }
+            $dstTies[] = ['anchor' => $m, 'all' => []];
+        }
+
+        // Fallback: chunk destination matches into groups of 3
+        if (empty($dstTies)) {
+            $chunks = array_chunk($dstMatches, 3);
+            foreach ($chunks as $chunk) {
+                $dstTies[] = ['anchor' => $chunk[0], 'all' => $chunk];
+            }
+        } else {
+            // Attach sibling SDS legs for each Singles 1 anchor (next 2 match_orders)
+            foreach ($dstTies as &$tie) {
+                $anchorOrder = (int) $tie['anchor']['match_order'];
+                $tie['all'] = array_values(array_filter($dstMatches, static function ($m) use ($anchorOrder) {
+                    $mo = (int) $m['match_order'];
+                    return $mo >= $anchorOrder && $mo <= $anchorOrder + 2;
+                }));
+            }
+            unset($tie);
+        }
+
+        if (count($srcTies) < count($dstTies) * 1) {
+            // need pairs of source ties per destination tie
+        }
+
+        $winners = array_map(static fn($t) => (int) $t['winner'], $srcTies);
+        $needed = count($dstTies) * 2;
+        if (count($winners) < $needed) {
+            continue;
+        }
+
+        foreach ($dstTies as $ti => $dstTie) {
+            $a = $winners[$ti * 2] ?? 0;
+            $b = $winners[$ti * 2 + 1] ?? 0;
+            foreach ($dstTie['all'] as $slot) {
+                $row = $slot;
+                if ($a && assignTeamToBracketSlot($db, $row, $a, 'a')) {
+                    $updated++;
+                }
+                if ($b && assignTeamToBracketSlot($db, $row, $b, 'b')) {
+                    $updated++;
+                }
+            }
+        }
+
+        if ($updated > 0) {
+            $details[] = 'Advanced SDS winners from ' . $labels[$i] . ' → ' . $labels[$i + 1] . '.';
+        }
+    }
+
+    if ($updated === 0) {
+        $details[] = 'No SDS TBD ties were ready to update.';
+    }
+
+    return $updated;
 }
 
 function getIntramuralsStats(?int $seasonId = null): array
@@ -1541,13 +2255,14 @@ function getActiveSportEventRows(): array
     $eventRows = [];
 
     try {
-        foreach ($db->query('SELECT name, category, players_per_event, scoring_method, tournament_format FROM intramural_sports ORDER BY name, category')->fetchAll() as $s) {
+        foreach ($db->query('SELECT name, category, players_per_event, scoring_method, tournament_format, venue FROM intramural_sports ORDER BY name, category')->fetchAll() as $s) {
             $eventRows[] = [
                 $s['name'],
                 $s['category'],
                 (int) ($s['players_per_event'] ?? 0) ?: '',
                 ucfirst($s['scoring_method']),
                 tournamentFormatLabel($s['tournament_format'] ?? 'round_robin'),
+                $s['venue'] ?? '',
             ];
         }
     } catch (Throwable $e) {
@@ -2177,7 +2892,7 @@ function downloadRosterImportTemplate(string $format = 'xlsx', ?int $scopedTeamI
             'rows' => $teamRows,
         ],
         'Events' => [
-            'headers' => ['sport_name', 'sport_category', 'players_per_event', 'scoring_method', 'tournament_style'],
+            'headers' => ['sport_name', 'sport_category', 'players_per_event', 'scoring_method', 'tournament_style', 'venue'],
             'rows' => $eventRows,
         ],
     ]);

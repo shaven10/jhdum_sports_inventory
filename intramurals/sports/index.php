@@ -3,6 +3,7 @@ require_once __DIR__ . '/../../includes/auth.php';
 requireLogin();
 ensurePlayersPerEventColumn();
 ensureSportCategoryEnum();
+ensureSportVenueColumn();
 
 $db = getDB();
 $formState = null;
@@ -27,6 +28,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && canManageIntramurals()) {
         $scoring = post('scoring_method', 'points');
         $rules = post('rules');
         $scheduleNotes = post('schedule_notes');
+        $venue = post('venue');
         $tournamentFormat = post('tournament_format', 'round_robin');
         $formatNotes = post('format_notes');
         $winPoints = max(0, (int) post('win_points', '3'));
@@ -52,9 +54,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && canManageIntramurals()) {
         if (empty($errors)) {
             if ($action === 'add') {
                 try {
-                    $stmt = $db->prepare('INSERT INTO intramural_sports (name, description, category, players_per_event, scoring_method, rules, schedule_notes, tournament_format, format_notes, win_points, draw_points, loss_points, point_scheme_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-                    $stmt->execute([$name, $description, $category, $playersPerEvent, $scoring, $rules, $scheduleNotes, $tournamentFormat, $formatNotes ?: null, $winPoints, $drawPoints, $lossPoints, $pointSchemeId]);
-                    auditLog($_SESSION['user_id'], 'create', 'intramural_sport', (int) $db->lastInsertId(), null, ['name' => $name, 'category' => $category, 'tournament_format' => $tournamentFormat]);
+                    $stmt = $db->prepare('INSERT INTO intramural_sports (name, description, category, players_per_event, scoring_method, rules, schedule_notes, venue, tournament_format, format_notes, win_points, draw_points, loss_points, point_scheme_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+                    $stmt->execute([$name, $description, $category, $playersPerEvent, $scoring, $rules, $scheduleNotes, $venue ?: null, $tournamentFormat, $formatNotes ?: null, $winPoints, $drawPoints, $lossPoints, $pointSchemeId]);
+                    auditLog($_SESSION['user_id'], 'create', 'intramural_sport', (int) $db->lastInsertId(), null, ['name' => $name, 'category' => $category, 'tournament_format' => $tournamentFormat, 'venue' => $venue]);
                     flash('success', 'Sport added successfully.');
                     redirect(BASE_URL . '/intramurals/sports/index.php');
                 } catch (PDOException $e) {
@@ -62,9 +64,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && canManageIntramurals()) {
                 }
             } else {
                 try {
-                    $stmt = $db->prepare('UPDATE intramural_sports SET name=?, description=?, category=?, players_per_event=?, scoring_method=?, rules=?, schedule_notes=?, tournament_format=?, format_notes=?, win_points=?, draw_points=?, loss_points=?, point_scheme_id=? WHERE id=?');
-                    $stmt->execute([$name, $description, $category, $playersPerEvent, $scoring, $rules, $scheduleNotes, $tournamentFormat, $formatNotes ?: null, $winPoints, $drawPoints, $lossPoints, $pointSchemeId, $id]);
-                    auditLog($_SESSION['user_id'], 'update', 'intramural_sport', $id, null, ['name' => $name, 'tournament_format' => $tournamentFormat]);
+                    $stmt = $db->prepare('UPDATE intramural_sports SET name=?, description=?, category=?, players_per_event=?, scoring_method=?, rules=?, schedule_notes=?, venue=?, tournament_format=?, format_notes=?, win_points=?, draw_points=?, loss_points=?, point_scheme_id=? WHERE id=?');
+                    $stmt->execute([$name, $description, $category, $playersPerEvent, $scoring, $rules, $scheduleNotes, $venue ?: null, $tournamentFormat, $formatNotes ?: null, $winPoints, $drawPoints, $lossPoints, $pointSchemeId, $id]);
+                    auditLog($_SESSION['user_id'], 'update', 'intramural_sport', $id, null, ['name' => $name, 'tournament_format' => $tournamentFormat, 'venue' => $venue]);
                     flash('success', 'Sport updated successfully.');
                     redirect(BASE_URL . '/intramurals/sports/index.php');
                 } catch (PDOException $e) {
@@ -85,6 +87,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && canManageIntramurals()) {
                     'scoring_method' => $scoring,
                     'rules' => $rules,
                     'schedule_notes' => $scheduleNotes,
+                    'venue' => $venue,
                     'tournament_format' => $tournamentFormat,
                     'format_notes' => $formatNotes,
                     'win_points' => $winPoints,
@@ -130,6 +133,7 @@ $formDefaults = [
     'scoring_method' => 'points',
     'rules' => '',
     'schedule_notes' => '',
+    'venue' => '',
     'tournament_format' => 'round_robin',
     'format_notes' => '',
     'win_points' => 3,
@@ -160,6 +164,7 @@ if ($formState) {
                 'scoring_method' => $sport['scoring_method'],
                 'rules' => $sport['rules'] ?? '',
                 'schedule_notes' => $sport['schedule_notes'] ?? '',
+                'venue' => $sport['venue'] ?? '',
                 'tournament_format' => $sport['tournament_format'] ?? 'round_robin',
                 'format_notes' => $sport['format_notes'] ?? '',
                 'win_points' => (int) $sport['win_points'],
@@ -203,6 +208,7 @@ require __DIR__ . '/../_season_bar.php';
                         <th>Sport</th>
                         <th>Category</th>
                         <th>Players/Event</th>
+                        <th>Venue</th>
                         <th>Tournament Style</th>
                         <th>Placement Scheme</th>
                         <th>Match W/D/L</th>
@@ -213,7 +219,7 @@ require __DIR__ . '/../_season_bar.php';
                 </thead>
                 <tbody>
                     <?php if (empty($sports)): ?>
-                    <tr><td colspan="<?= canManageIntramurals() ? 9 : 8 ?>" class="text-center text-muted py-4">No sports yet.</td></tr>
+                    <tr><td colspan="<?= canManageIntramurals() ? 10 : 9 ?>" class="text-center text-muted py-4">No sports yet.</td></tr>
                     <?php else: ?>
                     <?php foreach ($sports as $s): ?>
                     <?php
@@ -225,6 +231,7 @@ require __DIR__ . '/../_season_bar.php';
                         'scoring_method' => $s['scoring_method'],
                         'rules' => $s['rules'] ?? '',
                         'schedule_notes' => $s['schedule_notes'] ?? '',
+                        'venue' => $s['venue'] ?? '',
                         'tournament_format' => $s['tournament_format'] ?? 'round_robin',
                         'format_notes' => $s['format_notes'] ?? '',
                         'win_points' => (int) $s['win_points'],
@@ -247,6 +254,7 @@ require __DIR__ . '/../_season_bar.php';
                             <span class="text-muted">—</span>
                             <?php endif; ?>
                         </td>
+                        <td><?= sanitize($s['venue'] ?: '—') ?></td>
                         <td>
                             <span class="badge bg-info text-dark"><?= sanitize(tournamentFormatLabel($s['tournament_format'] ?? 'round_robin')) ?></span>
                             <?php if (!empty($s['format_notes'])): ?>
@@ -361,7 +369,12 @@ require __DIR__ . '/../_season_bar.php';
                             <label class="form-label" for="sportRules">Game Rules</label>
                             <textarea name="rules" id="sportRules" class="form-control" rows="3"></textarea>
                         </div>
-                        <div class="col-12">
+                        <div class="col-md-6">
+                            <label class="form-label" for="sportVenue">Venue</label>
+                            <input type="text" name="venue" id="sportVenue" class="form-control" placeholder="e.g. Gymnasium Court A">
+                            <div class="form-text">Default venue used when generating matches for this event.</div>
+                        </div>
+                        <div class="col-md-6">
                             <label class="form-label" for="scheduleNotes">Event Schedule Notes</label>
                             <textarea name="schedule_notes" id="scheduleNotes" class="form-control" rows="2"></textarea>
                         </div>
@@ -458,6 +471,7 @@ require __DIR__ . '/../_season_bar.php';
         document.getElementById('sportDescription').value = data.description || '';
         document.getElementById('sportRules').value = data.rules || '';
         document.getElementById('scheduleNotes').value = data.schedule_notes || '';
+        document.getElementById('sportVenue').value = data.venue || '';
         formatSelect.value = data.tournament_format || 'round_robin';
         document.getElementById('formatNotes').value = data.format_notes || '';
 

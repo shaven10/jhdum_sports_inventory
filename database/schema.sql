@@ -222,16 +222,16 @@ INSERT INTO system_settings (setting_key, setting_value, setting_type, descripti
 ('require_approval', '1', 'boolean', 'Require coordinator approval for borrowing requests'),
 ('notification_email', '1', 'boolean', 'Enable email notifications'),
 ('overdue_reminder_days', '1', 'integer', 'Days before due date to send reminder'),
-('campus_name', 'JHCSC Dumingag Campus', 'string', 'Campus name'),
+('campus_name', 'J.H. Cerilles State College', 'string', 'Campus name'),
 ('borrowing_policy', 'All borrowed equipment must be returned in the same condition. Late returns may result in borrowing privileges being suspended.', 'string', 'Borrowing policy text'),
-('theme_preset', 'jhcsc_blue', 'string', 'Active theme preset'),
-('theme_primary', '#1a5276', 'string', 'Custom primary color'),
-('theme_secondary', '#2e86c1', 'string', 'Custom secondary color'),
-('theme_accent', '#f39c12', 'string', 'Custom accent color'),
-('theme_body_bg', '#f4f6f9', 'string', 'Custom body background'),
+('theme_preset', 'jhcsc_official', 'string', 'Active theme preset'),
+('theme_primary', '#1b5e20', 'string', 'Custom primary color'),
+('theme_secondary', '#2e7d32', 'string', 'Custom secondary color'),
+('theme_accent', '#c62828', 'string', 'Custom accent color'),
+('theme_body_bg', '#f3f7f4', 'string', 'Custom body background'),
 ('theme_card_bg', '#ffffff', 'string', 'Custom card background'),
-('theme_text', '#2c3e50', 'string', 'Custom text color'),
-('theme_login_gradient', 'linear-gradient(135deg, #1a5276 0%, #2e86c1 50%, #3498db 100%)', 'string', 'Login page gradient');
+('theme_text', '#1b2e1d', 'string', 'Custom text color'),
+('theme_login_gradient', 'linear-gradient(135deg, #1b5e20 0%, #2e7d32 45%, #c62828 100%)', 'string', 'Login page gradient');
 
 -- =====================
 -- Intramurals Module
@@ -292,6 +292,7 @@ CREATE TABLE IF NOT EXISTS intramural_sports (
     scoring_method ENUM('points', 'sets', 'games', 'time') NOT NULL DEFAULT 'points',
     rules TEXT,
     schedule_notes TEXT,
+    venue VARCHAR(150) DEFAULT NULL,
     tournament_format ENUM('round_robin', 'single_elimination', 'single_elimination_consolation', 'double_elimination', 'group_knockout', 'rank_first_to_last', 'team_play_sds', 'custom') NOT NULL DEFAULT 'round_robin',
     format_notes TEXT,
     win_points INT NOT NULL DEFAULT 3,

@@ -39,7 +39,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && canRecordScores() && verifyCsrf(pos
         $db->prepare('UPDATE intramural_matches SET score_a=?, score_b=?, status=?, winner_team_id=? WHERE id=?')
             ->execute([$scoreA, $scoreB, $status, $winner, $id]);
         auditLog($_SESSION['user_id'], 'score_update', 'intramural_match', $id, null, ['score_a' => $scoreA, 'score_b' => $scoreB, 'status' => $status]);
-        flash('success', 'Score updated.');
+
+        $advanceMsg = '';
+        if (in_array($status, ['completed', 'forfeit'], true) && $seasonId = getCurrentSeasonId()) {
+            $adv = advanceBracketFromResults((int) $match['sport_id'], (int) $seasonId);
+            if ((int) ($adv['updated'] ?? 0) > 0) {
+                $advanceMsg = ' Bracket updated: ' . (int) $adv['updated'] . ' TBD slot(s) filled.';
+            }
+        }
+
+        flash('success', 'Score updated.' . $advanceMsg);
         redirect(BASE_URL . '/intramurals/matches/view.php?id=' . $id);
     }
 }
@@ -59,6 +68,19 @@ require __DIR__ . '/../_season_bar.php';
         <a href="<?= BASE_URL ?>/intramurals/matches/schedule.php?id=<?= $id ?>" class="btn btn-<?= empty($match['scheduled_at']) ? 'warning' : 'outline-primary' ?>">
             <?= empty($match['scheduled_at']) ? 'Set Date/Time' : 'Reschedule' ?>
         </a>
+        <?php
+        $bracketFormats = ['single_elimination', 'single_elimination_consolation', 'double_elimination', 'team_play_sds'];
+        if (in_array($match['tournament_format'] ?? '', $bracketFormats, true)):
+        ?>
+        <form method="POST" action="<?= BASE_URL ?>/intramurals/matches/advance.php" class="d-inline">
+            <?= csrfField() ?>
+            <input type="hidden" name="sport_id" value="<?= (int) $match['sport_id'] ?>">
+            <input type="hidden" name="return_to" value="<?= BASE_URL ?>/intramurals/matches/view.php?id=<?= $id ?>">
+            <button type="submit" class="btn btn-outline-success" title="Fill TBD teams from previous results">
+                <i class="bi bi-diagram-3"></i> Update Bracket
+            </button>
+        </form>
+        <?php endif; ?>
         <?php if (canManageIntramurals()): ?>
         <a href="<?= BASE_URL ?>/intramurals/matches/edit.php?id=<?= $id ?>" class="btn btn-primary">Edit / Record Score</a>
         <?php elseif (canRecordScores()): ?>

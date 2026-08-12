@@ -91,7 +91,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $venue, $referee, $status, $scoreA, $scoreB, $winner, $forfeitTeam, $notes, $id
         ]);
         auditLog($_SESSION['user_id'], 'update', 'intramural_match', $id, null, ['status' => $status, 'score_a' => $scoreA, 'score_b' => $scoreB]);
-        flash('success', 'Match updated.');
+
+        $advanceMsg = '';
+        if (in_array($status, ['completed', 'forfeit'], true)) {
+            $activeSeasonId = getCurrentSeasonId();
+            if ($activeSeasonId) {
+                $adv = advanceBracketFromResults((int) $sportId, (int) $activeSeasonId);
+                if ((int) ($adv['updated'] ?? 0) > 0) {
+                    $advanceMsg = ' Bracket updated: ' . (int) $adv['updated'] . ' TBD slot(s) filled.';
+                }
+            }
+        }
+
+        flash('success', 'Match updated.' . $advanceMsg);
         redirect(BASE_URL . '/intramurals/matches/view.php?id=' . $id);
     }
 }
