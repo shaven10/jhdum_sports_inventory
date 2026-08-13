@@ -1592,7 +1592,7 @@ function getHouseTeamLabels(array $teams): array
  * @param list<int> $teamIds
  * @return array{created: int, format: string, error?: string}
  */
-function generateMatchesForSport(int $sportId, int $seasonId, array $teamIds, ?int $createdBy = null, bool $replaceUnscheduled = false, ?array $scheduleWindow = null, ?DateTime &$scheduleCursor = null, ?array $prebuiltFixtures = null): array
+function generateMatchesForSport(int $sportId, int $seasonId, array $teamIds, ?int $createdBy = null, bool $replaceUnscheduled = false, ?array $scheduleWindow = null, ?DateTime $scheduleCursor = null, ?array $prebuiltFixtures = null): array
 {
     $db = getDB();
     $stmt = $db->prepare('SELECT * FROM intramural_sports WHERE id = ?');
@@ -1615,7 +1615,8 @@ function generateMatchesForSport(int $sportId, int $seasonId, array $teamIds, ?i
             return ['created' => 0, 'format' => $format, 'error' => 'Select at least 2 teams to generate matches.'];
         }
         if ($scheduleWindow !== null && $scheduleCursor !== null && scheduleWindowIsValid($scheduleWindow)) {
-            applyDurationScheduleToFixtures($fixtures, $sport, $scheduleWindow, $scheduleCursor);
+            $cursor = clone $scheduleCursor;
+            applyDurationScheduleToFixtures($fixtures, $sport, $scheduleWindow, $cursor);
         }
     }
 
