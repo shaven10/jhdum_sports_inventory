@@ -11,7 +11,8 @@ $db = getDB();
 $id = (int) get('id');
 
 $stmt = $db->prepare("SELECT m.*, s.name as sport_name, s.category as sport_category, s.tournament_format, s.format_notes,
-    ta.name as team_a_name, tb.name as team_b_name
+    ta.name as team_a_name, ta.color as team_a_color,
+    tb.name as team_b_name, tb.color as team_b_color
     FROM intramural_matches m
     JOIN intramural_sports s ON m.sport_id = s.id
     LEFT JOIN intramural_teams ta ON m.team_a_id = ta.id
@@ -87,6 +88,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $dtLocal = $match['scheduled_at'] ? date('Y-m-d\TH:i', strtotime($match['scheduled_at'])) : '';
 $season = getCurrentSeason();
+$seasonId = getCurrentSeasonId();
+$sportId = (int) $match['sport_id'];
+$rosterA = !empty($match['team_a_id']) ? getOfficialEventRoster($sportId, (int) $match['team_a_id'], $seasonId ? (int) $seasonId : null) : [];
+$rosterB = !empty($match['team_b_id']) ? getOfficialEventRoster($sportId, (int) $match['team_b_id'], $seasonId ? (int) $seasonId : null) : [];
+$canOpenAthlete = true;
 
 $pageTitle = 'Assign Match Schedule';
 require_once __DIR__ . '/../../includes/header.php';
@@ -109,9 +115,10 @@ require __DIR__ . '/../_season_bar.php';
     <?php endif; ?>
 
     <div class="alert alert-light border mb-3">
-        <strong><?= sanitize($match['team_a_name'] ?: 'TBD') ?></strong>
+        <?= matchTeamRosterTrigger($match, 'a') ?>
         vs
-        <strong><?= sanitize($match['team_b_name'] ?: 'TBD') ?></strong>
+        <?= matchTeamRosterTrigger($match, 'b') ?>
+        <div class="small text-muted mt-1">Click a team name to view the official player list for this match.</div>
         <?php if (!empty($match['format_notes'])): ?>
         <div class="small text-muted mt-1"><?= sanitize($match['format_notes']) ?></div>
         <?php endif; ?>
@@ -188,9 +195,36 @@ require __DIR__ . '/../_season_bar.php';
         </div>
         <div class="mt-4 d-flex gap-2">
             <button class="btn btn-primary">Save Schedule</button>
+            <a href="<?= BASE_URL ?>/intramurals/matches/view.php?id=<?= $id ?>#match-rosters" class="btn btn-outline-info">View official rosters</a>
             <a href="<?= BASE_URL ?>/intramurals/matches/view.php?id=<?= $id ?>" class="btn btn-outline-secondary">Cancel</a>
         </div>
     </form>
 </div></div></div></div>
 
+<?php if (!empty($match['team_a_id']) || !empty($match['team_b_id'])): ?>
+<div class="row mt-4" id="match-rosters">
+    <div class="col-12 mb-2">
+        <h2 class="h5 mb-1"><i class="bi bi-clipboard-check"></i> Official rosters for this match</h2>
+        <p class="text-muted small mb-0">Check that only listed players will suit up for <?= sanitize($match['sport_name']) ?>.</p>
+    </div>
+    <div class="col-lg-6 mb-3">
+        <?php
+        $team = ['name' => $match['team_a_name'] ?: 'TBD', 'color' => '#666'];
+        $sideLabel = 'Team A';
+        $players = $rosterA;
+        require __DIR__ . '/_official_roster.php';
+        ?>
+    </div>
+    <div class="col-lg-6 mb-3">
+        <?php
+        $team = ['name' => $match['team_b_name'] ?: 'TBD', 'color' => '#666'];
+        $sideLabel = 'Team B';
+        $players = $rosterB;
+        require __DIR__ . '/_official_roster.php';
+        ?>
+    </div>
+</div>
+<?php endif; ?>
+
+<?php require __DIR__ . '/_roster_dialog.php'; ?>
 <?php require_once __DIR__ . '/../../includes/footer.php'; ?>

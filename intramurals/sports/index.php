@@ -6,6 +6,7 @@ ensureSportCategoryEnum();
 ensureSportVenueColumn();
 ensureSportGuidelinesColumn();
 ensureSportGameDurationColumn();
+ensureTournamentFormatEnum();
 ensureEventManagersTable();
 
 $db = getDB();
@@ -447,8 +448,9 @@ require __DIR__ . '/../_season_bar.php';
                                 <?php endforeach; ?>
                             </select>
                             <div class="form-text" id="sdsFormatHint" style="display:none">
-                                <strong>Team Play SDS (Single Elimination)</strong> — single-elim team bracket;
-                                each tie is Singles → Doubles → Singles (best of 3).
+                                <strong>Team Play SDS</strong> — each team tie is Singles → Doubles → Singles (best of 3).
+                                Single elimination advances the tie winner. <em>With Consolation</em> also schedules
+                                first-round-loser and 3rd-place SDS ties (championship Final last).
                                 Recommended for Badminton, Table Tennis, and Lawn Tennis.
                             </div>
                             <div class="form-text">Tournament managers use this when generating match fixtures.</div>
@@ -540,7 +542,7 @@ require __DIR__ . '/../_season_bar.php';
     function syncSdsUi() {
         const name = (nameInput.value || '').trim();
         const isRacket = racketSports.some(function (s) { return s.toLowerCase() === name.toLowerCase(); });
-        const isSds = formatSelect.value === 'team_play_sds';
+        const isSds = formatSelect.value === 'team_play_sds' || formatSelect.value === 'team_play_sds_consolation';
         if (sdsHint) sdsHint.style.display = isSds ? '' : 'none';
         if (allowAutoSds && isRacket && formatSelect.value === 'round_robin') {
             formatSelect.value = 'team_play_sds';

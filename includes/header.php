@@ -78,6 +78,9 @@ $flash = getFlash();
                     <ul class="dropdown-menu">
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/matches/index.php"><i class="bi bi-list-check"></i> Match Results</a></li>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/standings/overall.php"><i class="bi bi-award"></i> Overall Standing</a></li>
+                        <?php if (canManageMatches()): ?>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/rankings/index.php"><i class="bi bi-list-ol"></i> Event Rankings</a></li>
+                        <?php endif; ?>
                         <?php if (canManageIntramurals()): ?>
                         <li><hr class="dropdown-divider"></li>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/standings/index.php">Per-Sport Standings</a></li>
@@ -134,6 +137,9 @@ $flash = getFlash();
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/standings/index.php">Standings</a></li>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/standings/overall.php">Overall Standing</a></li>
                         <?php endif; ?>
+                        <?php if (canManageMatches()): ?>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/rankings/index.php"><i class="bi bi-list-ol"></i> Event Rankings</a></li>
+                        <?php endif; ?>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/points/index.php">Point System</a></li>
                         <li><hr class="dropdown-divider"></li>
                         <li><h6 class="dropdown-header">Reports</h6></li>
@@ -152,9 +158,11 @@ $flash = getFlash();
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/matches/index.php">All Matches & Results</a></li>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/matches/generate.php"><i class="bi bi-magic"></i> Generate Matches</a></li>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/matches/calendar.php">Calendar</a></li>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/roster/index.php"><i class="bi bi-person-lines-fill"></i> Official Rosters</a></li>
                         <li><hr class="dropdown-divider"></li>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/standings/index.php">Team Standings</a></li>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/standings/overall.php">Overall Standing</a></li>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/rankings/index.php"><i class="bi bi-list-ol"></i> Event Rankings</a></li>
                         <li><hr class="dropdown-divider"></li>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/reports/index.php">Reports</a></li>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/sports/guidelines.php"><i class="bi bi-journal-text"></i> Sport Guidelines</a></li>
@@ -171,9 +179,11 @@ $flash = getFlash();
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/matches/generate.php"><i class="bi bi-magic"></i> Generate Matches</a></li>
                         <?php endif; ?>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/matches/calendar.php">Calendar</a></li>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/roster/index.php"><i class="bi bi-person-lines-fill"></i> Official Rosters</a></li>
                         <li><hr class="dropdown-divider"></li>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/standings/index.php">Per-Sport Standings</a></li>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/standings/overall.php">Overall Standing</a></li>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/rankings/index.php"><i class="bi bi-list-ol"></i> Event Rankings</a></li>
                         <li><hr class="dropdown-divider"></li>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/reports/index.php?type=results">Match Results</a></li>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/reports/index.php?type=standings">Team Standings</a></li>

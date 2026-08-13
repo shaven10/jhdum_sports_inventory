@@ -44,7 +44,7 @@ $intramuralsSubtitle = isSecretariat()
         ? 'Manage rosters for your assigned team and event combinations'
         : 'No event assignments yet — ask your unit manager to assign you under Teams → Event Coaches')
     : (isTournamentManager() && !canManageIntramurals()
-    ? 'Generate fixtures, record scores, and view standings for your assigned events'
+    ? 'Generate fixtures, record scores, verify official rosters, and view standings for your assigned events'
     : 'Athlete, team, match, and standings management'));
 
 $intramuralsActions = '';
@@ -64,6 +64,7 @@ if (canGenerateMatches() && !isSecretariat()) {
     $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/matches/generate.php" class="btn btn-light"><i class="bi bi-magic"></i> Generate Matches</a>';
 }
 if (isTournamentManager() && !canManageIntramurals() && canViewStandings()) {
+    $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/roster/index.php" class="btn btn-outline-light"><i class="bi bi-person-lines-fill"></i> Official Rosters</a>';
     $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/standings/overall.php" class="btn btn-outline-light"><i class="bi bi-award"></i> Overall Standing</a>';
     $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/reports/index.php?type=results" class="btn btn-outline-light"><i class="bi bi-list-check"></i> Match Results</a>';
 }
@@ -205,6 +206,9 @@ if ($coachAssignments) {
     <?php if (canViewStandings()): ?>
     <div class="col-lg-3 col-6"><a class="btn btn-outline-primary w-100" href="<?= BASE_URL ?>/intramurals/standings/index.php"><i class="bi bi-bar-chart-steps"></i> Standings</a></div>
     <div class="col-lg-3 col-6"><a class="btn btn-outline-primary w-100" href="<?= BASE_URL ?>/intramurals/standings/overall.php"><i class="bi bi-award"></i> Overall</a></div>
+    <?php endif; ?>
+    <?php if (canManageMatches()): ?>
+    <div class="col-lg-3 col-6"><a class="btn btn-outline-warning w-100" href="<?= BASE_URL ?>/intramurals/rankings/index.php"><i class="bi bi-list-ol"></i> Event Rankings</a></div>
     <?php endif; ?>
     <?php if (canManageIntramurals()): ?>
     <div class="col-lg-3 col-6"><a class="btn btn-outline-primary w-100" href="<?= BASE_URL ?>/intramurals/points/index.php"><i class="bi bi-calculator"></i> Point System</a></div>

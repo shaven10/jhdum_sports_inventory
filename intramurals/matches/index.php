@@ -105,7 +105,7 @@ if ($sportId !== '') {
 <div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2">
     <div>
         <h1><i class="bi bi-calendar3"></i> Match Scheduling</h1>
-        <p class="text-muted mb-0">Generate fixtures by tournament style, auto-schedule, then edit any date/time as needed</p>
+        <p class="text-muted mb-0">Generate fixtures by tournament style, auto-schedule, then edit any date/time as needed. Click a team name to view that match’s official players.</p>
     </div>
     <div class="d-flex gap-2 flex-wrap">
         <?php if (canGenerateMatches()): ?>
@@ -207,9 +207,9 @@ if ($sportId !== '') {
                         <td><span class="badge bg-secondary"><?= ucfirst($m['sport_category']) ?></span></td>
                         <td><?= sanitize($m['round_label'] ?: ('R' . (int) ($m['round_number'] ?? 1))) ?></td>
                         <td>
-                            <span style="color:<?= sanitize($m['team_a_color'] ?: '#666') ?>"><?= sanitize($m['team_a_name'] ?: 'TBD') ?></span>
+                            <?= matchTeamRosterTrigger($m, 'a') ?>
                             vs
-                            <span style="color:<?= sanitize($m['team_b_color'] ?: '#666') ?>"><?= sanitize($m['team_b_name'] ?: 'TBD') ?></span>
+                            <?= matchTeamRosterTrigger($m, 'b') ?>
                         </td>
                         <td>
                             <?php if ($m['score_a'] !== null && $m['score_b'] !== null): ?>
@@ -220,6 +220,9 @@ if ($sportId !== '') {
                         <td><?= statusBadge($m['status']) ?></td>
                         <td class="text-nowrap">
                             <a href="<?= BASE_URL ?>/intramurals/matches/view.php?id=<?= $m['id'] ?>" class="btn btn-sm btn-outline-primary">View</a>
+                            <?php if (!empty($m['team_a_id']) || !empty($m['team_b_id'])): ?>
+                            <a href="<?= BASE_URL ?>/intramurals/matches/view.php?id=<?= $m['id'] ?>#match-rosters" class="btn btn-sm btn-outline-info" title="Verify official roster">Roster</a>
+                            <?php endif; ?>
                             <?php if (canManageMatches()): ?>
                             <a href="<?= BASE_URL ?>/intramurals/matches/schedule.php?id=<?= $m['id'] ?>" class="btn btn-sm btn-<?= empty($m['scheduled_at']) ? 'warning' : 'outline-secondary' ?>">
                                 <?= empty($m['scheduled_at']) ? 'Set Date/Time' : 'Reschedule' ?>
@@ -341,4 +344,5 @@ toggleDeleteScope();
 </script>
 <?php endif; ?>
 
+<?php require __DIR__ . '/_roster_dialog.php'; ?>
 <?php require_once __DIR__ . '/../../includes/footer.php'; ?>

@@ -17,7 +17,7 @@ $teamId = get('team');
 $category = get('category');
 $export = get('export');
 
-$sports = filterSportsForCoach($db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll());
+$sports = filterSportsForUser(filterSportsForCoach($db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll()));
 $teams = filterTeamsForCoach($db->query('SELECT id, name FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll());
 $categoryOptions = sportCategoryOptions();
 
@@ -45,6 +45,11 @@ if ($category !== '' && array_key_exists($category, $categoryOptions)) {
 }
 $whereClause = implode(' AND ', $where);
 appendCoachAssignmentFilter($whereClause, $params);
+appendTmSportFilter($whereClause, $params, 'r.sport_id');
+if ($sportId !== '' && !canViewEvent((int) $sportId)) {
+    flash('error', 'You do not have permission to view this event roster.');
+    redirect(BASE_URL . '/intramurals/roster/index.php');
+}
 
 $sql = "SELECT r.*, a.first_name, a.last_name, a.student_id, a.athlete_code, a.gender, a.department, a.year_level,
                s.id as sport_id, s.name as sport_name, s.category as sport_category,

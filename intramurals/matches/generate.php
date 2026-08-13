@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../../includes/auth.php';
 requireIntramuralsAccess();
 ensureSportGameDurationColumn();
+ensureTournamentFormatEnum();
 if (!canGenerateMatches()) {
     flash('error', 'You do not have permission to generate match fixtures.');
     redirect(BASE_URL . '/intramurals/matches/index.php');
@@ -427,6 +428,7 @@ $renderSlotSelects = static function (string $namePrefix, array $slotMap, array 
     <i class="bi bi-info-circle"></i>
     After scores are recorded, use <strong>Update Bracket</strong> on the Matches page (filter by event) to fill TBD teams from previous-round winners/losers.
     Bracket updates also run automatically when a match is marked completed.
+    SDS with consolation generates championship ties first, then consolation / 3rd-place SDS ties, with the championship Final last.
 </div>
 
 <?php if ($scheduleStartDate && $scheduleEndDate): ?>

@@ -26,6 +26,14 @@ if (!$match) {
 
 requireEventViewAccess((int) $match['sport_id']);
 
+$seasonId = getCurrentSeasonId();
+$sportId = (int) $match['sport_id'];
+$teamAId = (int) ($match['team_a_id'] ?? 0);
+$teamBId = (int) ($match['team_b_id'] ?? 0);
+$rosterA = $teamAId ? getOfficialEventRoster($sportId, $teamAId, $seasonId ? (int) $seasonId : null) : [];
+$rosterB = $teamBId ? getOfficialEventRoster($sportId, $teamBId, $seasonId ? (int) $seasonId : null) : [];
+$canOpenAthlete = canAccessIntramurals();
+
 // Quick live score / status update
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
     if (canRecordScores() && canManageEventMatches((int) $match['sport_id'])) {
@@ -73,8 +81,7 @@ require __DIR__ . '/../_season_bar.php';
             <?= empty($match['scheduled_at']) ? 'Set Date/Time' : 'Reschedule' ?>
         </a>
         <?php
-        $bracketFormats = ['single_elimination', 'single_elimination_consolation', 'double_elimination', 'team_play_sds'];
-        if (in_array($match['tournament_format'] ?? '', $bracketFormats, true)):
+        if (isBracketTournamentFormat($match['tournament_format'] ?? '')):
         ?>
         <form method="POST" action="<?= BASE_URL ?>/intramurals/matches/advance.php" class="d-inline">
             <?= csrfField() ?>
@@ -102,6 +109,10 @@ require __DIR__ . '/../_season_bar.php';
             </button>
         </form>
         <?php endif; ?>
+        <?php if ($teamAId || $teamBId): ?>
+        <a href="#match-rosters" class="btn btn-outline-info"><i class="bi bi-person-lines-fill"></i> Official Rosters</a>
+        <button type="button" class="btn btn-outline-secondary d-print-none" onclick="printReport()"><i class="bi bi-printer"></i> Print</button>
+        <?php endif; ?>
         <a href="<?= BASE_URL ?>/intramurals/matches/index.php" class="btn btn-outline-secondary">Back</a>
     </div>
 </div>
@@ -112,7 +123,7 @@ require __DIR__ . '/../_season_bar.php';
             <div class="card-body text-center py-4">
                 <div class="row align-items-center">
                     <div class="col-5">
-                        <div class="fs-4 fw-bold" style="color:<?= sanitize($match['team_a_color'] ?: '#666') ?>"><?= sanitize($match['team_a_name'] ?: 'TBD') ?></div>
+                        <div class="fs-4 fw-bold"><?= matchTeamRosterTrigger($match, 'a') ?></div>
                     </div>
                     <div class="col-2">
                         <?php if ($match['score_a'] !== null && $match['score_b'] !== null): ?>
@@ -122,7 +133,7 @@ require __DIR__ . '/../_season_bar.php';
                         <?php endif; ?>
                     </div>
                     <div class="col-5">
-                        <div class="fs-4 fw-bold" style="color:<?= sanitize($match['team_b_color'] ?: '#666') ?>"><?= sanitize($match['team_b_name'] ?: 'TBD') ?></div>
+                        <div class="fs-4 fw-bold"><?= matchTeamRosterTrigger($match, 'b') ?></div>
                     </div>
                 </div>
                 <div class="mt-3"><?= statusBadge($match['status']) ?></div>
@@ -184,4 +195,35 @@ require __DIR__ . '/../_season_bar.php';
     </div>
 </div>
 
+<div class="mt-4" id="match-rosters">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+        <h2 class="h5 mb-0"><i class="bi bi-clipboard-check"></i> Official event rosters</h2>
+        <a class="small" href="<?= BASE_URL ?>/intramurals/roster/index.php?sport=<?= $sportId ?>">Open full roster</a>
+    </div>
+    <p class="text-muted small">
+        Verify each player against this list before the game. Only athletes registered for
+        <strong><?= sanitize($match['sport_name']) ?> (<?= sanitize(ucfirst((string) $match['sport_category'])) ?>)</strong>
+        on the official roster are eligible.
+    </p>
+    <div class="row g-3">
+        <div class="col-lg-6">
+            <?php
+            $team = ['name' => $match['team_a_name'] ?: 'TBD', 'color' => $match['team_a_color'] ?: '#666'];
+            $sideLabel = 'Team A';
+            $players = $rosterA;
+            require __DIR__ . '/_official_roster.php';
+            ?>
+        </div>
+        <div class="col-lg-6">
+            <?php
+            $team = ['name' => $match['team_b_name'] ?: 'TBD', 'color' => $match['team_b_color'] ?: '#666'];
+            $sideLabel = 'Team B';
+            $players = $rosterB;
+            require __DIR__ . '/_official_roster.php';
+            ?>
+        </div>
+    </div>
+</div>
+
+<?php require __DIR__ . '/_roster_dialog.php'; ?>
 <?php require_once __DIR__ . '/../../includes/footer.php'; ?>

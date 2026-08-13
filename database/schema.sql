@@ -299,7 +299,7 @@ CREATE TABLE IF NOT EXISTS intramural_sports (
     schedule_notes TEXT,
     venue VARCHAR(150) DEFAULT NULL,
     game_duration_minutes INT NOT NULL DEFAULT 60,
-    tournament_format ENUM('round_robin', 'single_elimination', 'single_elimination_consolation', 'double_elimination', 'group_knockout', 'rank_first_to_last', 'team_play_sds', 'custom') NOT NULL DEFAULT 'round_robin',
+    tournament_format ENUM('round_robin', 'single_elimination', 'single_elimination_consolation', 'double_elimination', 'group_knockout', 'rank_first_to_last', 'team_play_sds', 'team_play_sds_consolation', 'custom') NOT NULL DEFAULT 'round_robin',
     format_notes TEXT,
     win_points INT NOT NULL DEFAULT 3,
     draw_points INT NOT NULL DEFAULT 1,
@@ -408,6 +408,24 @@ CREATE TABLE IF NOT EXISTS intramural_matches (
     FOREIGN KEY (team_b_id) REFERENCES intramural_teams(id) ON DELETE RESTRICT,
     FOREIGN KEY (winner_team_id) REFERENCES intramural_teams(id) ON DELETE SET NULL,
     FOREIGN KEY (forfeit_team_id) REFERENCES intramural_teams(id) ON DELETE SET NULL,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS intramural_event_ranks (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    season_id INT NOT NULL,
+    sport_id INT NOT NULL,
+    team_id INT NOT NULL,
+    place_rank INT NOT NULL,
+    notes VARCHAR(255) DEFAULT NULL,
+    created_by INT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_event_rank_team (season_id, sport_id, team_id),
+    UNIQUE KEY uq_event_rank_place (season_id, sport_id, place_rank),
+    FOREIGN KEY (season_id) REFERENCES intramural_seasons(id) ON DELETE CASCADE,
+    FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE,
+    FOREIGN KEY (team_id) REFERENCES intramural_teams(id) ON DELETE CASCADE,
     FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 

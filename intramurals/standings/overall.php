@@ -96,6 +96,9 @@ require __DIR__ . '/../_season_bar.php';
         <?php if (canManageIntramurals()): ?>
         <a href="<?= BASE_URL ?>/intramurals/points/index.php" class="btn btn-outline-secondary"><i class="bi bi-calculator"></i> Point System</a>
         <?php endif; ?>
+        <?php if (canManageMatches()): ?>
+        <a href="<?= BASE_URL ?>/intramurals/rankings/index.php" class="btn btn-outline-warning"><i class="bi bi-list-ol"></i> Event Rankings</a>
+        <?php endif; ?>
         <a href="<?= BASE_URL ?>/intramurals/standings/index.php" class="btn btn-outline-primary">Per-Sport Standings</a>
         <a href="?export=medals" class="btn btn-outline-warning"><i class="bi bi-trophy"></i> Medal Excel</a>
         <a href="?export=excel" class="btn btn-outline-success"><i class="bi bi-file-earmark-excel"></i> Full Excel</a>

@@ -164,7 +164,7 @@ if ($type === 'athletes') {
     $headers = ['Rank', 'Placement', 'Team', 'Wins', 'Losses', 'Draws', 'Match Pts', 'Event Pts', 'Diff'];
     if ($block) {
         foreach ($block['standings'] as $r) {
-            if ($r['played'] === 0) continue;
+            if ($r['played'] === 0 && empty($r['manual_rank'])) continue;
             $rows[] = [$r['rank'], $r['placement_label'] ?: '', $r['team_name'], $r['wins'], $r['losses'], $r['draws'], $r['points'], $r['placement_points'], $r['diff']];
             $htmlRows[] = $rows[count($rows) - 1];
         }

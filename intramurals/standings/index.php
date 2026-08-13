@@ -22,7 +22,7 @@ if ($export === 'excel' && $block) {
     $headers = ['Rank', 'Placement', 'Team', 'Played', 'Wins', 'Losses', 'Draws', 'Match Pts', 'Event Pts', 'Diff', 'Medal'];
     $rows = [];
     foreach ($block['standings'] as $r) {
-        if ($r['played'] === 0) continue;
+        if ($r['played'] === 0 && empty($r['manual_rank'])) continue;
         $rows[] = [$r['rank'], $r['placement_label'] ?: '', $r['team_name'], $r['played'], $r['wins'], $r['losses'], $r['draws'], $r['points'], $r['placement_points'], $r['diff'], $r['medal'] ?: ''];
     }
     exportCsv('standings-' . date('Ymd') . '.csv', $headers, $rows);
@@ -39,6 +39,9 @@ require __DIR__ . '/../_season_bar.php';
         <p class="text-muted mb-0">Automatic rankings, points, and medals per sport</p>
     </div>
     <div class="d-flex gap-2">
+        <?php if (canManageMatches()): ?>
+        <a href="<?= BASE_URL ?>/intramurals/rankings/index.php<?= $sportId ? '?sport=' . (int) $sportId : '' ?>" class="btn btn-outline-warning"><i class="bi bi-list-ol"></i> Enter Event Ranks</a>
+        <?php endif; ?>
         <a href="<?= BASE_URL ?>/intramurals/standings/overall.php" class="btn btn-outline-primary">Overall Standing</a>
         <?php if ($block): ?>
         <a href="?sport=<?= $sportId ?>&export=excel" class="btn btn-outline-success"><i class="bi bi-file-earmark-excel"></i> Excel</a>
@@ -71,6 +74,9 @@ require __DIR__ . '/../_season_bar.php';
     <?php $scheme = $block['scheme'] ?? getPointSchemeForSport($block['sport']); ?>
     <div class="card-header">
         <?= sanitize(sportLabel($block['sport'])) ?>
+        <?php if (!empty($block['manual_ranks'])): ?>
+        <span class="badge bg-info text-dark ms-1">Manual ranks</span>
+        <?php endif; ?>
         <small class="text-muted ms-2">
             Scheme: <?= sanitize($scheme['name'] ?? 'Default') ?> (<?= sanitize(formatSchemePoints($scheme)) ?>)
             · Match W/D/L <?= (int) $block['sport']['win_points'] ?>/<?= (int) $block['sport']['draw_points'] ?>/<?= (int) $block['sport']['loss_points'] ?>
@@ -96,10 +102,15 @@ require __DIR__ . '/../_season_bar.php';
                 </thead>
                 <tbody>
                     <?php foreach ($block['standings'] as $r): ?>
-                    <?php if ($r['played'] === 0) continue; ?>
+                    <?php if ($r['played'] === 0 && empty($r['manual_rank'])) continue; ?>
                     <tr>
-                        <td><?= $r['rank'] ?></td>
-                        <td><?= sanitize($r['placement_label'] ?: '-') ?></td>
+                        <td><?= $r['rank'] >= 1000 ? '—' : $r['rank'] ?></td>
+                        <td>
+                            <?= sanitize($r['placement_label'] ?: '-') ?>
+                            <?php if (!empty($r['manual_rank'])): ?>
+                            <span class="badge bg-info text-dark ms-1">Manual</span>
+                            <?php endif; ?>
+                        </td>
                         <td>
                             <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:<?= sanitize($r['color']) ?>"></span>
                             <?= sanitize($r['team_name']) ?>
@@ -124,7 +135,9 @@ require __DIR__ . '/../_season_bar.php';
         </div>
     </div>
 </div>
-<p class="text-muted small no-print">Event Pts (Champion → 5th Runner Up) feed the <a href="<?= BASE_URL ?>/intramurals/standings/overall.php">Overall Standing</a>.<?php if (canManageIntramurals()): ?> Manage values in <a href="<?= BASE_URL ?>/intramurals/points/index.php">Point System</a>.<?php endif; ?></p>
+<p class="text-muted small no-print">Event Pts (Champion → 5th Runner Up) feed the <a href="<?= BASE_URL ?>/intramurals/standings/overall.php">Overall Standing</a>.
+Use <a href="<?= BASE_URL ?>/intramurals/rankings/index.php<?= $sportId ? '?sport=' . (int) $sportId : '' ?>">Event Rankings</a> to enter places directly for medal tally.
+<?php if (canManageIntramurals()): ?> Manage point values in <a href="<?= BASE_URL ?>/intramurals/points/index.php">Point System</a>.<?php endif; ?></p>
 <?= renderReportFooter($block ? sportLabel($block['sport']) : 'Result Tabulation') ?>
 <?php endif; ?>
 
