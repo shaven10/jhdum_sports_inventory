@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
 requireIntramuralsAccess();
+ensureSportGameDurationColumn();
 if (!canGenerateMatches()) {
     flash('error', 'You do not have permission to generate match fixtures.');
     redirect(BASE_URL . '/intramurals/matches/index.php');
@@ -24,52 +25,95 @@ $schedulePresets = [
         'label' => 'Use season dates (7:00 AM start)',
         'start_date' => $season['start_date'] ?? '',
         'end_date' => $season['end_date'] ?? '',
-        'start_hour' => 7,
-        'end_hour' => 17,
-    ],
-    'aug24_1pm' => [
-        'label' => 'Start August 24, 2026 at 1:00 PM',
-        'start_date' => '2026-08-24',
-        'end_date' => !empty($season['end_date']) && $season['end_date'] >= '2026-08-24'
-            ? $season['end_date']
-            : '2026-08-31',
-        'start_hour' => 13,
-        'end_hour' => 17,
+        'start_date_start_hour' => 7,
+        'start_date_end_hour' => 17,
+        'end_date_start_hour' => 7,
+        'end_date_end_hour' => 17,
+        'daily_start_hour' => 7,
+        'daily_end_hour' => 17,
     ],
 ];
 
-$schedulePreset = post('schedule_preset', 'aug24_1pm');
+$defaultScheduleHours = [
+    'start_date_start_hour' => 7,
+    'start_date_end_hour' => 17,
+    'end_date_start_hour' => 7,
+    'end_date_end_hour' => 17,
+    'daily_start_hour' => 7,
+    'daily_end_hour' => 17,
+];
+
+$normalizeScheduleHours = static function (array $source) use ($defaultScheduleHours): array {
+    $legacyStart = (int) ($source['start_hour'] ?? $defaultScheduleHours['start_date_start_hour']);
+    $legacyEnd = (int) ($source['end_hour'] ?? $defaultScheduleHours['start_date_end_hour']);
+
+    $startDateStart = max(0, min(23, (int) ($source['start_date_start_hour'] ?? $legacyStart)));
+    $startDateEnd = max($startDateStart + 1, min(24, (int) ($source['start_date_end_hour'] ?? $legacyEnd)));
+    $endDateStart = max(0, min(23, (int) ($source['end_date_start_hour'] ?? $legacyStart)));
+    $endDateEnd = max($endDateStart + 1, min(24, (int) ($source['end_date_end_hour'] ?? $legacyEnd)));
+    $dailyStart = max(0, min(23, (int) ($source['daily_start_hour'] ?? $legacyStart)));
+    $dailyEnd = max($dailyStart + 1, min(24, (int) ($source['daily_end_hour'] ?? $legacyEnd)));
+
+    return [
+        'start_date_start_hour' => $startDateStart,
+        'start_date_end_hour' => $startDateEnd,
+        'end_date_start_hour' => $endDateStart,
+        'end_date_end_hour' => $endDateEnd,
+        'daily_start_hour' => $dailyStart,
+        'daily_end_hour' => $dailyEnd,
+    ];
+};
+
+$schedulePreset = post('schedule_preset', 'season');
 if ($schedulePreset !== 'custom' && !isset($schedulePresets[$schedulePreset])) {
-    $schedulePreset = 'aug24_1pm';
+    $schedulePreset = 'season';
 }
 
 if ($schedulePreset !== 'custom' && isset($schedulePresets[$schedulePreset])) {
     $preset = $schedulePresets[$schedulePreset];
     $scheduleStartDate = $preset['start_date'];
     $scheduleEndDate = $preset['end_date'];
-    $scheduleStartHour = (int) $preset['start_hour'];
-    $scheduleEndHour = (int) $preset['end_hour'];
+    $scheduleHours = $normalizeScheduleHours($preset);
 } else {
     $scheduleStartDate = post('schedule_start_date', $season['start_date'] ?? '');
     $scheduleEndDate = post('schedule_end_date', $season['end_date'] ?? '');
-    $scheduleStartHour = (int) post('schedule_start_hour', '7');
-    $scheduleEndHour = (int) post('schedule_end_hour', '17');
+    $scheduleHours = $normalizeScheduleHours([
+        'start_date_start_hour' => post('schedule_start_date_start_hour', '7'),
+        'start_date_end_hour' => post('schedule_start_date_end_hour', '17'),
+        'end_date_start_hour' => post('schedule_end_date_start_hour', '7'),
+        'end_date_end_hour' => post('schedule_end_date_end_hour', '17'),
+        'daily_start_hour' => post('schedule_daily_start_hour', '7'),
+        'daily_end_hour' => post('schedule_daily_end_hour', '17'),
+    ]);
 }
 
-if ($scheduleStartHour < 0 || $scheduleStartHour > 23) {
-    $scheduleStartHour = 7;
-}
-if ($scheduleEndHour <= $scheduleStartHour || $scheduleEndHour > 24) {
-    $scheduleEndHour = 17;
-}
-
-$scheduleSlots = buildScheduleSlots(
+$scheduleWindow = buildScheduleWindow(
     $scheduleStartDate ?: null,
     $scheduleEndDate ?: null,
-    $scheduleStartHour,
-    $scheduleEndHour
+    $scheduleHours
 );
-$scheduleSlotPreview = getNextScheduleSlotIndex($seasonId ?: 0, $scheduleSlots);
+$scheduleResumeCursor = getScheduleResumeCursor($seasonId ?: 0, $scheduleWindow);
+$scheduleSpansMultipleDays = $scheduleStartDate && $scheduleEndDate && $scheduleStartDate !== $scheduleEndDate;
+
+$renderScheduleFromHourSelect = static function (string $name, int $selected, string $id = ''): void {
+    $idAttr = $id !== '' ? ' id="' . sanitize($id) . '"' : '';
+    echo '<select name="' . sanitize($name) . '"' . $idAttr . ' class="form-select form-select-sm schedule-hour-select" onchange="markCustomSchedule(); syncScheduleHourUi();">';
+    for ($h = 0; $h <= 22; $h++) {
+        $sel = $selected === $h ? ' selected' : '';
+        echo '<option value="' . $h . '"' . $sel . '>' . sprintf('%02d:00', $h) . '</option>';
+    }
+    echo '</select>';
+};
+
+$renderScheduleUntilHourSelect = static function (string $name, int $selected, string $id = ''): void {
+    $idAttr = $id !== '' ? ' id="' . sanitize($id) . '"' : '';
+    echo '<select name="' . sanitize($name) . '"' . $idAttr . ' class="form-select form-select-sm schedule-hour-select" onchange="markCustomSchedule(); syncScheduleHourUi();">';
+    for ($h = 1; $h <= 24; $h++) {
+        $sel = $selected === $h ? ' selected' : '';
+        echo '<option value="' . $h . '"' . $sel . '>' . sprintf('%02d:00', $h) . '</option>';
+    }
+    echo '</select>';
+};
 
 $selectedSportIds = [];
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -177,6 +221,21 @@ $smartVenue = $_SERVER['REQUEST_METHOD'] === 'POST'
     ? post('smart_venue') === '1'
     : true;
 
+$chessBoardsBySport = [];
+foreach ($sports as $s) {
+    $sid = (int) $s['id'];
+    if (!isChessSport((string) $s['name'])) {
+        continue;
+    }
+    $defaultBoards = defaultChessBoardsPerTeam($s);
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $raw = $_POST['chess_boards'][$sid] ?? $defaultBoards;
+        $chessBoardsBySport[$sid] = max(1, min(20, (int) $raw));
+    } else {
+        $chessBoardsBySport[$sid] = $defaultBoards;
+    }
+}
+
 $regTeamsStmt = $db->prepare('SELECT DISTINCT team_id FROM intramural_registrations WHERE sport_id = ? AND season_id = ?');
 $fixturesBySportPreview = [];
 $sportsByIdPreview = [];
@@ -203,6 +262,10 @@ foreach ($selectedSportIds as $sid) {
     $fixtures = count($teamIds) >= 2
         ? buildTournamentFixtures($sport['tournament_format'] ?? 'round_robin', $teamIds)
         : [];
+    if ($fixtures && isChessSport((string) ($sport['name'] ?? ''))) {
+        $boards = $chessBoardsBySport[$sid] ?? defaultChessBoardsPerTeam($sport);
+        $fixtures = expandChessBoardFixtures($fixtures, $boards);
+    }
     $previewBySport[$sid] = [
         'sport' => $sport,
         'team_ids' => $teamIds,
@@ -216,13 +279,13 @@ foreach ($selectedSportIds as $sid) {
     $previewTotal += count($fixtures);
 }
 
-if ($fixturesBySportPreview && $scheduleSlots) {
-    if ($smartVenue) {
-        applySmartVenueSchedule($fixturesBySportPreview, $sportsByIdPreview, $scheduleSlots, (int) ($seasonId ?: 0));
-    } else {
-        $previewSlotIndex = $scheduleSlotPreview;
+if ($fixturesBySportPreview && scheduleWindowIsValid($scheduleWindow)) {
+    $previewCursor = $scheduleResumeCursor ? clone $scheduleResumeCursor : createScheduleCursor($scheduleWindow);
+    if ($smartVenue && $previewCursor) {
+        applySmartVenueSchedule($fixturesBySportPreview, $sportsByIdPreview, $scheduleWindow, (int) ($seasonId ?: 0), $previewCursor);
+    } elseif ($previewCursor) {
         foreach ($fixturesBySportPreview as $sid => &$fx) {
-            applyAutoScheduleToFixtures($fx, $scheduleSlots, $previewSlotIndex);
+            applyDurationScheduleToFixtures($fx, $sportsByIdPreview[$sid] ?? [], $scheduleWindow, $previewCursor);
         }
         unset($fx);
     }
@@ -265,6 +328,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && post('action') === 'generate') {
             }
         }
     }
+    if (!$scheduleStartDate || !$scheduleEndDate) {
+        $errors[] = 'Set both a schedule start date and end date so matches can be auto-scheduled within that range.';
+    } elseif ($scheduleStartDate > $scheduleEndDate) {
+        $errors[] = 'Schedule start date must be on or before the end date.';
+    } elseif (!scheduleWindowIsValid($scheduleWindow)) {
+        $errors[] = 'The auto-schedule date range is invalid.';
+    }
 
     if (empty($errors)) {
         $replace = post('replace_unscheduled') === '1';
@@ -273,9 +343,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && post('action') === 'generate') {
         $scheduleOptions = [
             'start_date' => $scheduleStartDate ?: null,
             'end_date' => $scheduleEndDate ?: null,
-            'start_hour' => $scheduleStartHour,
-            'end_hour' => $scheduleEndHour,
+            'start_date_start_hour' => $scheduleHours['start_date_start_hour'],
+            'start_date_end_hour' => $scheduleHours['start_date_end_hour'],
+            'end_date_start_hour' => $scheduleHours['end_date_start_hour'],
+            'end_date_end_hour' => $scheduleHours['end_date_end_hour'],
+            'daily_start_hour' => $scheduleHours['daily_start_hour'],
+            'daily_end_hour' => $scheduleHours['daily_end_hour'],
             'smart_venue' => post('smart_venue') === '1',
+            'boards_by_sport' => $chessBoardsBySport,
         ];
         $result = generateMatchesForSports($selectedSportIds, $seasonId, $shared, (int) $_SESSION['user_id'], $replace, $perSport, $scheduleOptions);
 
@@ -295,7 +370,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && post('action') === 'generate') {
             if ($result['scheduled'] > 0) {
                 $msg .= ', ' . $result['scheduled'] . ' auto-scheduled';
                 if (!empty($result['smart_venue'])) {
-                    $msg .= ' with smart same-venue alternating (no overlapping times)';
+                    $msg .= ' with smart same-venue alternating (no overlapping times, duration-based spacing)';
                 }
                 $msg .= ' (you can edit any date/time afterward)';
             }
@@ -357,10 +432,11 @@ $renderSlotSelects = static function (string $namePrefix, array $slotMap, array 
 <?php if ($scheduleStartDate && $scheduleEndDate): ?>
 <div class="alert alert-info py-2">
     <i class="bi bi-calendar-range"></i>
-    Auto-schedule window:
-    <strong><?= formatDate($scheduleStartDate) ?></strong> → <strong><?= formatDate($scheduleEndDate) ?></strong>,
-    hourly <strong><?= sprintf('%02d:00', $scheduleStartHour) ?>–<?= sprintf('%02d:00', $scheduleEndHour) ?></strong>
-    (<?= count($scheduleSlots) ?> slot<?= count($scheduleSlots) === 1 ? '' : 's' ?>).
+    Auto-schedule window: <strong><?= sanitize(formatScheduleWindowSummary($scheduleWindow)) ?></strong>.
+    Match times are spaced using each event's <strong>estimated game duration</strong> (set under Sports).
+    <?php if ($scheduleResumeCursor): ?>
+    Resuming after existing matches from <strong><?= formatDateTime($scheduleResumeCursor->format('Y-m-d H:i:s')) ?></strong>.
+    <?php endif; ?>
     You can change this window below, and edit any match date/time later — it does not have to stay within the season dates.
 </div>
 <?php else: ?>
@@ -399,11 +475,15 @@ $renderSlotSelects = static function (string $namePrefix, array $slotMap, array 
                                 <label class="form-check-label" for="sport<?= $s['id'] ?>">
                                     <?= sanitize(sportLabel($s)) ?>
                                     <span class="badge bg-info text-dark ms-1"><?= sanitize(tournamentFormatLabel($s['tournament_format'] ?? 'round_robin')) ?></span>
+                                    <?php if (isChessSport((string) $s['name'])): ?>
+                                    <span class="badge bg-dark ms-1" title="Chess — set boards per team when assigning Team A–D"><i class="bi bi-grid-3x3"></i> Chess</span>
+                                    <?php endif; ?>
                                     <?php if (!empty($s['venue'])): ?>
                                     <span class="badge bg-secondary ms-1" title="Venue"><i class="bi bi-geo-alt"></i> <?= sanitize($s['venue']) ?></span>
                                     <?php else: ?>
                                     <span class="text-muted small ms-1">No venue</span>
                                     <?php endif; ?>
+                                    <span class="badge bg-light text-dark border ms-1" title="Estimated game duration"><i class="bi bi-stopwatch"></i> <?= sanitize(formatGameDurationMinutes(getSportGameDurationMinutes($s))) ?></span>
                                 </label>
                             </div>
                             <?php endforeach; ?>
@@ -436,13 +516,17 @@ $renderSlotSelects = static function (string $namePrefix, array $slotMap, array 
                             <?php
                             $sid = (int) $s['id'];
                             $slotMap = $slotsBySport[$sid] ?? $defaultSlotMap;
+                            $isChess = isChessSport((string) $s['name']);
                             ?>
-                            <div class="sport-teams-panel card mb-2" data-sport-id="<?= $sid ?>" style="display:none">
+                            <div class="sport-teams-panel card mb-2" data-sport-id="<?= $sid ?>" data-is-chess="<?= $isChess ? '1' : '0' ?>" style="display:none">
                                 <div class="card-body py-2 px-3">
                                     <div class="d-flex justify-content-between align-items-center mb-2 gap-2 flex-wrap">
                                         <div>
                                             <div class="fw-semibold"><?= sanitize(sportLabel($s)) ?></div>
                                             <span class="badge bg-info text-dark"><?= sanitize(tournamentFormatLabel($s['tournament_format'] ?? 'round_robin')) ?></span>
+                                            <?php if ($isChess): ?>
+                                            <span class="badge bg-dark ms-1"><i class="bi bi-grid-3x3"></i> Chess</span>
+                                            <?php endif; ?>
                                         </div>
                                         <div class="btn-group btn-group-sm">
                                             <button type="button" class="btn btn-outline-primary" onclick="fillSportSlots(<?= $sid ?>)">Fill A–D</button>
@@ -454,6 +538,24 @@ $renderSlotSelects = static function (string $namePrefix, array $slotMap, array 
                             </div>
                             <?php endforeach; ?>
                             <p class="text-muted small mb-0 border rounded p-3" id="perSportEmptyHint">Select one or more events above to assign Team A–D for each.</p>
+                        </div>
+                    </div>
+
+                    <div class="mb-3" id="chessBoardsBlock" style="display:none">
+                        <label class="form-label mb-1"><i class="bi bi-grid-3x3"></i> Chess — boards per team</label>
+                        <div class="form-text mb-2">Set how many boards each team fields per team-vs-team tie. Applies when generating Chess events.</div>
+                        <div id="chessBoardsList" class="d-flex flex-column gap-2">
+                            <?php foreach ($sports as $s): ?>
+                            <?php if (!isChessSport((string) $s['name'])) continue; ?>
+                            <?php $sid = (int) $s['id']; ?>
+                            <div class="chess-boards-row border rounded p-2 bg-light" data-sport-id="<?= $sid ?>" style="display:none">
+                                <div class="d-flex flex-wrap align-items-center gap-2">
+                                    <span class="fw-semibold small"><?= sanitize(sportLabel($s)) ?></span>
+                                    <input type="number" name="chess_boards[<?= $sid ?>]" class="form-control form-control-sm chess-boards-input" min="1" max="20" value="<?= (int) ($chessBoardsBySport[$sid] ?? defaultChessBoardsPerTeam($s)) ?>" style="max-width:8rem" onchange="syncChessBoards(<?= $sid ?>); updatePreview()">
+                                    <span class="text-muted small">boards per tie</span>
+                                </div>
+                            </div>
+                            <?php endforeach; ?>
                         </div>
                     </div>
 
@@ -476,9 +578,6 @@ $renderSlotSelects = static function (string $namePrefix, array $slotMap, array 
                                     onchange="applySchedulePreset('<?= sanitize($key) ?>')">
                                 <label class="form-check-label" for="preset_<?= sanitize($key) ?>">
                                     <?= sanitize($preset['label']) ?>
-                                    <?php if ($key === 'aug24_1pm'): ?>
-                                    <span class="badge bg-primary ms-1">1:00 PM</span>
-                                    <?php endif; ?>
                                 </label>
                             </div>
                             <?php endforeach; ?>
@@ -492,27 +591,48 @@ $renderSlotSelects = static function (string $namePrefix, array $slotMap, array 
                         <div id="customScheduleFields" class="row g-2">
                             <div class="col-6">
                                 <label class="form-label small mb-0">Start date</label>
-                                <input type="date" name="schedule_start_date" id="scheduleStartDate" class="form-control form-control-sm" value="<?= sanitize($scheduleStartDate) ?>" oninput="markCustomSchedule()">
+                                <input type="date" name="schedule_start_date" id="scheduleStartDate" class="form-control form-control-sm" value="<?= sanitize($scheduleStartDate) ?>" oninput="markCustomSchedule(); syncScheduleHourUi();">
                             </div>
                             <div class="col-6">
                                 <label class="form-label small mb-0">End date</label>
-                                <input type="date" name="schedule_end_date" id="scheduleEndDate" class="form-control form-control-sm" value="<?= sanitize($scheduleEndDate) ?>" oninput="markCustomSchedule()">
+                                <input type="date" name="schedule_end_date" id="scheduleEndDate" class="form-control form-control-sm" value="<?= sanitize($scheduleEndDate) ?>" oninput="markCustomSchedule(); syncScheduleHourUi();">
+                            </div>
+                            <div class="col-12 mt-1">
+                                <div class="small fw-semibold">Start date hours (inclusive)</div>
                             </div>
                             <div class="col-6">
-                                <label class="form-label small mb-0">From hour</label>
-                                <select name="schedule_start_hour" id="scheduleStartHour" class="form-select form-select-sm" onchange="markCustomSchedule()">
-                                    <?php for ($h = 0; $h <= 22; $h++): ?>
-                                    <option value="<?= $h ?>" <?= $scheduleStartHour === $h ? 'selected' : '' ?>><?= sprintf('%02d:00', $h) ?></option>
-                                    <?php endfor; ?>
-                                </select>
+                                <label class="form-label small mb-0">From</label>
+                                <?php $renderScheduleFromHourSelect('schedule_start_date_start_hour', $scheduleHours['start_date_start_hour'], 'scheduleStartDateStartHour'); ?>
                             </div>
                             <div class="col-6">
-                                <label class="form-label small mb-0">Until hour</label>
-                                <select name="schedule_end_hour" id="scheduleEndHour" class="form-select form-select-sm" onchange="markCustomSchedule()">
-                                    <?php for ($h = 1; $h <= 24; $h++): ?>
-                                    <option value="<?= $h ?>" <?= $scheduleEndHour === $h ? 'selected' : '' ?>><?= sprintf('%02d:00', $h) ?></option>
-                                    <?php endfor; ?>
-                                </select>
+                                <label class="form-label small mb-0">Until</label>
+                                <?php $renderScheduleUntilHourSelect('schedule_start_date_end_hour', $scheduleHours['start_date_end_hour'], 'scheduleStartDateEndHour'); ?>
+                            </div>
+                            <div id="endDateHoursBlock" class="col-12 mt-1"<?= $scheduleSpansMultipleDays ? '' : ' style="display:none"' ?>>
+                                <div class="small fw-semibold">End date hours (inclusive)</div>
+                            </div>
+                            <div id="endDateHoursFromCol" class="col-6"<?= $scheduleSpansMultipleDays ? '' : ' style="display:none"' ?>>
+                                <label class="form-label small mb-0">From</label>
+                                <?php $renderScheduleFromHourSelect('schedule_end_date_start_hour', $scheduleHours['end_date_start_hour'], 'scheduleEndDateStartHour'); ?>
+                            </div>
+                            <div id="endDateHoursUntilCol" class="col-6"<?= $scheduleSpansMultipleDays ? '' : ' style="display:none"' ?>>
+                                <label class="form-label small mb-0">Until</label>
+                                <?php $renderScheduleUntilHourSelect('schedule_end_date_end_hour', $scheduleHours['end_date_end_hour'], 'scheduleEndDateEndHour'); ?>
+                            </div>
+                            <div id="regularDayHoursBlock" class="col-12 mt-1"<?= $scheduleSpansMultipleDays ? '' : ' style="display:none"' ?>>
+                                <div class="small fw-semibold">Regular days between (inclusive)</div>
+                                <div class="form-text mb-0">Used for every day after the start date and before the end date.</div>
+                            </div>
+                            <div id="regularDayHoursFromCol" class="col-6"<?= $scheduleSpansMultipleDays ? '' : ' style="display:none"' ?>>
+                                <label class="form-label small mb-0">From</label>
+                                <?php $renderScheduleFromHourSelect('schedule_daily_start_hour', $scheduleHours['daily_start_hour'], 'scheduleDailyStartHour'); ?>
+                            </div>
+                            <div id="regularDayHoursUntilCol" class="col-6"<?= $scheduleSpansMultipleDays ? '' : ' style="display:none"' ?>>
+                                <label class="form-label small mb-0">Until</label>
+                                <?php $renderScheduleUntilHourSelect('schedule_daily_end_hour', $scheduleHours['daily_end_hour'], 'scheduleDailyEndHour'); ?>
+                            </div>
+                            <div id="singleDayHoursHint" class="col-12"<?= $scheduleSpansMultipleDays ? ' style="display:none"' : '' ?>>
+                                <div class="form-text mb-0">When start and end date are the same, only the start date hours apply.</div>
                             </div>
                         </div>
                     </div>
@@ -524,7 +644,7 @@ $renderSlotSelects = static function (string $namePrefix, array $slotMap, array 
                         </label>
                         <div class="form-text">
                             Events that share a venue alternate games (Event A → Event B → Event A…) and never overlap on that venue.
-                            Different venues can run at the same time. Existing bookings at the venue are skipped.
+                            Spacing uses each event's estimated game duration. Different venues can run at the same time. Existing bookings at the venue are skipped.
                         </div>
                     </div>
 
@@ -553,7 +673,7 @@ $renderSlotSelects = static function (string $namePrefix, array $slotMap, array 
                     <strong>2. Preview by event</strong>
                     <span class="text-muted small">
                         <span id="previewTotalLabel"><?= (int) $previewTotal ?></span> total
-                        <?php if ($scheduleSlots): ?>
+                        <?php if (scheduleWindowIsValid($scheduleWindow)): ?>
                             · <?= $smartVenue ? 'smart same-venue times' : 'auto times' ?> (editable later)
                         <?php else: ?>
                             · set schedule window for auto times
@@ -582,9 +702,13 @@ $renderSlotSelects = static function (string $namePrefix, array $slotMap, array 
                                 <div>
                                     <strong><?= sanitize(sportLabel($block['sport'])) ?></strong>
                                     <span class="badge bg-info text-dark ms-1"><?= sanitize(tournamentFormatLabel($block['sport']['tournament_format'] ?? 'round_robin')) ?></span>
+                                    <?php if (isChessSport((string) ($block['sport']['name'] ?? ''))): ?>
+                                    <span class="badge bg-dark ms-1"><?= (int) ($chessBoardsBySport[(int) $block['sport']['id']] ?? defaultChessBoardsPerTeam($block['sport'])) ?> boards / tie</span>
+                                    <?php endif; ?>
                                     <?php if (!empty($block['sport']['venue'])): ?>
                                     <span class="badge bg-secondary ms-1"><i class="bi bi-geo-alt"></i> <?= sanitize($block['sport']['venue']) ?></span>
                                     <?php endif; ?>
+                                    <span class="badge bg-light text-dark border ms-1"><i class="bi bi-stopwatch"></i> <?= sanitize(formatGameDurationMinutes(getSportGameDurationMinutes($block['sport']))) ?> / game</span>
                                     <?php if ($participantLabels): ?>
                                     <div class="small text-muted mt-1"><?= sanitize(implode(' · ', $participantLabels)) ?></div>
                                     <?php endif; ?>
@@ -594,7 +718,7 @@ $renderSlotSelects = static function (string $namePrefix, array $slotMap, array 
                             <div class="table-responsive" style="max-height:220px;overflow:auto">
                                 <table class="table table-sm mb-0">
                                     <thead class="table-light sticky-top">
-                                        <tr><th>#</th><th>Round</th><th>Schedule</th><th>Venue</th><th>Side 1</th><th>Side 2</th></tr>
+                                        <tr><th>#</th><th>Round / Board</th><th>Schedule</th><th>Venue</th><th>Side 1</th><th>Side 2</th></tr>
                                     </thead>
                                     <tbody>
                                         <?php foreach ($block['fixtures'] as $f): ?>
@@ -634,6 +758,7 @@ function applySchedulePreset(key) {
     const customRadio = document.getElementById('preset_custom');
     if (key === 'custom') {
         if (customRadio) customRadio.checked = true;
+        syncScheduleHourUi();
         return;
     }
     const preset = schedulePresets[key];
@@ -642,12 +767,41 @@ function applySchedulePreset(key) {
     if (radio) radio.checked = true;
     document.getElementById('scheduleStartDate').value = preset.start_date || '';
     document.getElementById('scheduleEndDate').value = preset.end_date || '';
-    document.getElementById('scheduleStartHour').value = String(preset.start_hour);
-    document.getElementById('scheduleEndHour').value = String(preset.end_hour);
+    const hourFields = [
+        ['scheduleStartDateStartHour', preset.start_date_start_hour ?? preset.start_hour ?? 7],
+        ['scheduleStartDateEndHour', preset.start_date_end_hour ?? preset.end_hour ?? 17],
+        ['scheduleEndDateStartHour', preset.end_date_start_hour ?? preset.start_hour ?? 7],
+        ['scheduleEndDateEndHour', preset.end_date_end_hour ?? preset.end_hour ?? 17],
+        ['scheduleDailyStartHour', preset.daily_start_hour ?? preset.start_hour ?? 7],
+        ['scheduleDailyEndHour', preset.daily_end_hour ?? preset.end_hour ?? 17],
+    ];
+    hourFields.forEach(function ([id, value]) {
+        const el = document.getElementById(id);
+        if (el) el.value = String(value);
+    });
+    syncScheduleHourUi();
 }
 function markCustomSchedule() {
     const custom = document.getElementById('preset_custom');
     if (custom) custom.checked = true;
+}
+function syncScheduleHourUi() {
+    const startDate = document.getElementById('scheduleStartDate')?.value || '';
+    const endDate = document.getElementById('scheduleEndDate')?.value || '';
+    const multiDay = startDate && endDate && startDate !== endDate;
+    [
+        'endDateHoursBlock',
+        'endDateHoursFromCol',
+        'endDateHoursUntilCol',
+        'regularDayHoursBlock',
+        'regularDayHoursFromCol',
+        'regularDayHoursUntilCol',
+    ].forEach(function (id) {
+        const el = document.getElementById(id);
+        if (el) el.style.display = multiDay ? '' : 'none';
+    });
+    const singleHint = document.getElementById('singleDayHoursHint');
+    if (singleHint) singleHint.style.display = multiDay ? 'none' : '';
 }
 
 function toggleTeamMode() {
@@ -667,6 +821,26 @@ function toggleSportTeams() {
     });
     const hint = document.getElementById('perSportEmptyHint');
     if (hint) hint.style.display = any ? 'none' : '';
+    toggleChessBoards();
+}
+function toggleChessBoards() {
+    const selected = new Set(Array.from(document.querySelectorAll('.sport-check:checked')).map(c => c.value));
+    let anyChess = false;
+    document.querySelectorAll('.chess-boards-row').forEach(function (row) {
+        const show = selected.has(row.getAttribute('data-sport-id'));
+        row.style.display = show ? '' : 'none';
+        if (show) anyChess = true;
+    });
+    const block = document.getElementById('chessBoardsBlock');
+    if (block) block.style.display = anyChess ? '' : 'none';
+}
+function syncChessBoards(sportId) {
+    const main = document.querySelector('#chessBoardsList .chess-boards-row[data-sport-id="' + sportId + '"] input');
+    if (!main) return;
+    const val = main.value;
+    document.querySelectorAll('input[name="chess_boards[' + sportId + ']"]').forEach(function (inp) {
+        if (inp !== main) inp.value = val;
+    });
 }
 function fillSportSlots(sportId) {
     const panel = document.querySelector('.sport-teams-panel[data-sport-id="' + sportId + '"]');
@@ -693,6 +867,8 @@ function updatePreview() {
     }
 }
 toggleTeamMode();
+toggleChessBoards();
+syncScheduleHourUi();
 document.querySelectorAll('button[type=submit]').forEach(function (btn) {
     btn.addEventListener('click', function () {
         if (btn.getAttribute('onclick') && btn.getAttribute('onclick').includes('preview')) {

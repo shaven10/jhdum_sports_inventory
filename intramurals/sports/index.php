@@ -5,6 +5,7 @@ ensurePlayersPerEventColumn();
 ensureSportCategoryEnum();
 ensureSportVenueColumn();
 ensureSportGuidelinesColumn();
+ensureSportGameDurationColumn();
 ensureEventManagersTable();
 
 $db = getDB();
@@ -32,6 +33,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && canManageIntramurals()) {
         $guidelines = trim(post('guidelines'));
         $scheduleNotes = post('schedule_notes');
         $venue = post('venue');
+        $gameDurationMinutes = post('game_duration_minutes') !== ''
+            ? normalizeGameDurationMinutes((int) post('game_duration_minutes'))
+            : DEFAULT_GAME_DURATION_MINUTES;
         $tournamentFormat = post('tournament_format', 'round_robin');
         $formatNotes = post('format_notes');
         $winPoints = max(0, (int) post('win_points', '3'));
@@ -53,12 +57,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && canManageIntramurals()) {
         if ($playersPerEvent !== null && $playersPerEvent < 1) {
             $errors[] = 'Players per event must be at least 1.';
         }
+        if ($gameDurationMinutes < MIN_GAME_DURATION_MINUTES || $gameDurationMinutes > MAX_GAME_DURATION_MINUTES) {
+            $errors[] = 'Estimated game duration must be between ' . MIN_GAME_DURATION_MINUTES . ' and ' . MAX_GAME_DURATION_MINUTES . ' minutes.';
+        }
 
         if (empty($errors)) {
             if ($action === 'add') {
                 try {
-                    $stmt = $db->prepare('INSERT INTO intramural_sports (name, description, category, players_per_event, scoring_method, rules, guidelines, schedule_notes, venue, tournament_format, format_notes, win_points, draw_points, loss_points, point_scheme_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-                    $stmt->execute([$name, $description, $category, $playersPerEvent, $scoring, $rules, $guidelines !== '' ? $guidelines : null, $scheduleNotes, $venue ?: null, $tournamentFormat, $formatNotes ?: null, $winPoints, $drawPoints, $lossPoints, $pointSchemeId]);
+                    $stmt = $db->prepare('INSERT INTO intramural_sports (name, description, category, players_per_event, scoring_method, rules, guidelines, schedule_notes, venue, game_duration_minutes, tournament_format, format_notes, win_points, draw_points, loss_points, point_scheme_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+                    $stmt->execute([$name, $description, $category, $playersPerEvent, $scoring, $rules, $guidelines !== '' ? $guidelines : null, $scheduleNotes, $venue ?: null, $gameDurationMinutes, $tournamentFormat, $formatNotes ?: null, $winPoints, $drawPoints, $lossPoints, $pointSchemeId]);
                     auditLog($_SESSION['user_id'], 'create', 'intramural_sport', (int) $db->lastInsertId(), null, ['name' => $name, 'category' => $category, 'tournament_format' => $tournamentFormat, 'venue' => $venue]);
                     flash('success', 'Sport added successfully.');
                     redirect(BASE_URL . '/intramurals/sports/index.php');
@@ -67,8 +74,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && canManageIntramurals()) {
                 }
             } else {
                 try {
-                    $stmt = $db->prepare('UPDATE intramural_sports SET name=?, description=?, category=?, players_per_event=?, scoring_method=?, rules=?, schedule_notes=?, venue=?, tournament_format=?, format_notes=?, win_points=?, draw_points=?, loss_points=?, point_scheme_id=? WHERE id=?');
-                    $stmt->execute([$name, $description, $category, $playersPerEvent, $scoring, $rules, $scheduleNotes, $venue ?: null, $tournamentFormat, $formatNotes ?: null, $winPoints, $drawPoints, $lossPoints, $pointSchemeId, $id]);
+                    $stmt = $db->prepare('UPDATE intramural_sports SET name=?, description=?, category=?, players_per_event=?, scoring_method=?, rules=?, schedule_notes=?, venue=?, game_duration_minutes=?, tournament_format=?, format_notes=?, win_points=?, draw_points=?, loss_points=?, point_scheme_id=? WHERE id=?');
+                    $stmt->execute([$name, $description, $category, $playersPerEvent, $scoring, $rules, $scheduleNotes, $venue ?: null, $gameDurationMinutes, $tournamentFormat, $formatNotes ?: null, $winPoints, $drawPoints, $lossPoints, $pointSchemeId, $id]);
                     auditLog($_SESSION['user_id'], 'update', 'intramural_sport', $id, null, ['name' => $name, 'tournament_format' => $tournamentFormat, 'venue' => $venue]);
                     flash('success', 'Sport updated successfully.');
                     redirect(BASE_URL . '/intramurals/sports/index.php');
@@ -92,6 +99,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && canManageIntramurals()) {
                     'guidelines' => $guidelines,
                     'schedule_notes' => $scheduleNotes,
                     'venue' => $venue,
+                    'game_duration_minutes' => $gameDurationMinutes,
                     'tournament_format' => $tournamentFormat,
                     'format_notes' => $formatNotes,
                     'win_points' => $winPoints,
@@ -146,6 +154,7 @@ $formDefaults = [
     'guidelines' => '',
     'schedule_notes' => '',
     'venue' => '',
+    'game_duration_minutes' => DEFAULT_GAME_DURATION_MINUTES,
     'tournament_format' => 'round_robin',
     'format_notes' => '',
     'win_points' => 3,
@@ -178,6 +187,7 @@ if ($formState) {
                 'guidelines' => $sport['guidelines'] ?? '',
                 'schedule_notes' => $sport['schedule_notes'] ?? '',
                 'venue' => $sport['venue'] ?? '',
+                'game_duration_minutes' => getSportGameDurationMinutes($sport),
                 'tournament_format' => $sport['tournament_format'] ?? 'round_robin',
                 'format_notes' => $sport['format_notes'] ?? '',
                 'win_points' => (int) $sport['win_points'],
@@ -224,6 +234,7 @@ require __DIR__ . '/../_season_bar.php';
                         <th>Category</th>
                         <th>Players/Event</th>
                         <th>Venue</th>
+                        <th>Duration</th>
                         <th>Tournament Style</th>
                         <th>Tournament Manager</th>
                         <th>Placement Scheme</th>
@@ -235,7 +246,7 @@ require __DIR__ . '/../_season_bar.php';
                 </thead>
                 <tbody>
                     <?php if (empty($sports)): ?>
-                    <tr><td colspan="<?= canManageIntramurals() ? 11 : 10 ?>" class="text-center text-muted py-4">No sports yet.</td></tr>
+                    <tr><td colspan="<?= canManageIntramurals() ? 12 : 11 ?>" class="text-center text-muted py-4">No sports yet.</td></tr>
                     <?php else: ?>
                     <?php foreach ($sports as $s): ?>
                     <?php
@@ -249,6 +260,7 @@ require __DIR__ . '/../_season_bar.php';
                         'guidelines' => $s['guidelines'] ?? '',
                         'schedule_notes' => $s['schedule_notes'] ?? '',
                         'venue' => $s['venue'] ?? '',
+                        'game_duration_minutes' => getSportGameDurationMinutes($s),
                         'tournament_format' => $s['tournament_format'] ?? 'round_robin',
                         'format_notes' => $s['format_notes'] ?? '',
                         'win_points' => (int) $s['win_points'],
@@ -272,6 +284,7 @@ require __DIR__ . '/../_season_bar.php';
                             <?php endif; ?>
                         </td>
                         <td><?= sanitize($s['venue'] ?: '—') ?></td>
+                        <td><?= sanitize(formatGameDurationMinutes(getSportGameDurationMinutes($s))) ?></td>
                         <td>
                             <span class="badge bg-info text-dark"><?= sanitize(tournamentFormatLabel($s['tournament_format'] ?? 'round_robin')) ?></span>
                             <?php if (!empty($s['format_notes'])): ?>
@@ -418,6 +431,11 @@ require __DIR__ . '/../_season_bar.php';
                             <div class="form-text">Default venue used when generating matches for this event.</div>
                         </div>
                         <div class="col-md-6">
+                            <label class="form-label" for="gameDurationMinutes">Estimated game duration (minutes) *</label>
+                            <input type="number" name="game_duration_minutes" id="gameDurationMinutes" class="form-control" min="<?= MIN_GAME_DURATION_MINUTES ?>" max="<?= MAX_GAME_DURATION_MINUTES ?>" value="<?= (int) DEFAULT_GAME_DURATION_MINUTES ?>" required>
+                            <div class="form-text">Used as the time block when auto-scheduling generated matches (e.g. 90 for basketball).</div>
+                        </div>
+                        <div class="col-12">
                             <label class="form-label" for="scheduleNotes">Event Schedule Notes</label>
                             <textarea name="schedule_notes" id="scheduleNotes" class="form-control" rows="2"></textarea>
                         </div>
@@ -513,6 +531,7 @@ require __DIR__ . '/../_season_bar.php';
         document.getElementById('sportRules').value = data.rules || '';
         document.getElementById('scheduleNotes').value = data.schedule_notes || '';
         document.getElementById('sportVenue').value = data.venue || '';
+        document.getElementById('gameDurationMinutes').value = data.game_duration_minutes ?? <?= (int) DEFAULT_GAME_DURATION_MINUTES ?>;
         formatSelect.value = data.tournament_format || 'round_robin';
         document.getElementById('formatNotes').value = data.format_notes || '';
         guidelinesInput.value = data.guidelines || '';

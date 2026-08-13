@@ -209,6 +209,7 @@ $flash = getFlash();
                     <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown"><i class="bi bi-gear"></i> Settings</a>
                     <ul class="dropdown-menu">
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/settings/index.php">System Settings</a></li>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/settings/database.php"><i class="bi bi-database-gear"></i> Database Tools</a></li>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/settings/theme.php"><i class="bi bi-palette"></i> Theme Manager</a></li>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/settings/categories.php">Equipment Categories</a></li>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/audit/index.php">Audit Logs</a></li>

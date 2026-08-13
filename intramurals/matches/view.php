@@ -91,6 +91,17 @@ require __DIR__ . '/../_season_bar.php';
         <a href="<?= BASE_URL ?>/intramurals/matches/edit.php?id=<?= $id ?>" class="btn btn-primary">Record Score</a>
         <?php endif; ?>
         <?php endif; ?>
+        <?php if (canDeleteAllMatches()): ?>
+        <form method="POST" action="<?= BASE_URL ?>/intramurals/matches/delete_generated.php" class="d-inline">
+            <?= csrfField() ?>
+            <input type="hidden" name="action" value="single">
+            <input type="hidden" name="match_id" value="<?= (int) $id ?>">
+            <input type="hidden" name="return" value="<?= BASE_URL ?>/intramurals/matches/index.php">
+            <button type="submit" class="btn btn-outline-danger" data-confirm="Delete this match permanently?">
+                <i class="bi bi-trash"></i> Delete Match
+            </button>
+        </form>
+        <?php endif; ?>
         <a href="<?= BASE_URL ?>/intramurals/matches/index.php" class="btn btn-outline-secondary">Back</a>
     </div>
 </div>

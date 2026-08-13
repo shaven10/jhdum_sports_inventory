@@ -420,6 +420,18 @@ function canManageSettings(): bool
     return isLoggedIn() && $_SESSION['user_role'] === 'admin';
 }
 
+/** Delete auto-generated fixtures (admin only). */
+function canDeleteGeneratedMatches(): bool
+{
+    return canManageSettings();
+}
+
+/** Delete any matches including manual entries (admin only). */
+function canDeleteAllMatches(): bool
+{
+    return canManageSettings();
+}
+
 /** Full intramurals administration (all teams/sports/matches). */
 function canManageIntramurals(): bool
 {

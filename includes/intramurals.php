@@ -82,6 +82,106 @@ function ensureSportGuidelinesColumn(): void
     if ((int) $stmt->fetchColumn() === 0) {
         $db->exec('ALTER TABLE intramural_sports ADD COLUMN guidelines TEXT NULL AFTER rules');
     }
+
+    ensureSportGameDurationColumn();
+}
+
+/** Ensure intramural_sports.game_duration_minutes exists for match scheduling. */
+function ensureSportGameDurationColumn(): void
+{
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    $db = getDB();
+    $stmt = $db->prepare('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
+    $stmt->execute(['intramural_sports', 'game_duration_minutes']);
+    if ((int) $stmt->fetchColumn() === 0) {
+        $db->exec('ALTER TABLE intramural_sports ADD COLUMN game_duration_minutes INT NOT NULL DEFAULT 60 AFTER venue');
+    }
+}
+
+const DEFAULT_GAME_DURATION_MINUTES = 60;
+const MIN_GAME_DURATION_MINUTES = 15;
+const MAX_GAME_DURATION_MINUTES = 480;
+
+/** Clamp or infer per-sport estimated game length in minutes. */
+function normalizeGameDurationMinutes($value, ?array $sport = null): int
+{
+    $minutes = (int) $value;
+    if ($minutes <= 0 && $sport !== null) {
+        $minutes = guessDefaultGameDuration($sport);
+    }
+    if ($minutes <= 0) {
+        $minutes = DEFAULT_GAME_DURATION_MINUTES;
+    }
+
+    return max(MIN_GAME_DURATION_MINUTES, min(MAX_GAME_DURATION_MINUTES, $minutes));
+}
+
+/** Best-effort default duration from sport name / scoring when not configured. */
+function guessDefaultGameDuration(array $sport): int
+{
+    $name = strtolower((string) ($sport['name'] ?? ''));
+    if (str_contains($name, 'basketball')) {
+        return str_contains($name, '3x3') ? 45 : 90;
+    }
+    if (str_contains($name, 'volleyball') || str_contains($name, 'sepak')) {
+        return 90;
+    }
+    if (str_contains($name, 'baseball') || str_contains($name, 'softball')) {
+        return 120;
+    }
+    if (str_contains($name, 'athletics') || str_contains($name, 'track')) {
+        return 180;
+    }
+    if (str_contains($name, 'chess')) {
+        return 30;
+    }
+    if (str_contains($name, 'badminton') || str_contains($name, 'table tennis')
+        || str_contains($name, 'pickleball') || str_contains($name, 'tennis')) {
+        return 45;
+    }
+    if (str_contains($name, 'dance') || str_contains($name, 'mlbb') || str_contains($name, 'codm')
+        || str_contains($name, 'esport') || str_contains($name, 'frisbee')) {
+        return 60;
+    }
+
+    $scoring = (string) ($sport['scoring_method'] ?? '');
+    if ($scoring === 'time') {
+        return 120;
+    }
+    if ($scoring === 'sets') {
+        return 90;
+    }
+
+    return DEFAULT_GAME_DURATION_MINUTES;
+}
+
+function getSportGameDurationMinutes(array $sport): int
+{
+    ensureSportGameDurationColumn();
+
+    return normalizeGameDurationMinutes($sport['game_duration_minutes'] ?? null, $sport);
+}
+
+function formatGameDurationMinutes(int $minutes): string
+{
+    if ($minutes % 60 === 0) {
+        $hours = (int) ($minutes / 60);
+
+        return $hours === 1 ? '1 hour' : $hours . ' hours';
+    }
+    if ($minutes > 60) {
+        $hours = intdiv($minutes, 60);
+        $mins = $minutes % 60;
+
+        return $hours . ' hr ' . $mins . ' min';
+    }
+
+    return $minutes . ' min';
 }
 
 /** Ensure intramural_seasons has roster lock columns. */
@@ -513,6 +613,63 @@ function buildTeamPlaySdsFixtures(array $teamIds): array
     return $fixtures;
 }
 
+function isChessSport(string $sportName): bool
+{
+    return strcasecmp(trim($sportName), 'Chess') === 0;
+}
+
+/** Default chess boards per team tie (from sport roster size or 4). */
+function defaultChessBoardsPerTeam(array $sport): int
+{
+    $fromSport = (int) ($sport['players_per_event'] ?? 0);
+    if ($fromSport >= 1 && $fromSport <= 20) {
+        return $fromSport;
+    }
+
+    return 4;
+}
+
+/**
+ * Expand each team-vs-team tie into individual chess board matches.
+ *
+ * @param list<array<string, mixed>> $fixtures
+ * @return list<array<string, mixed>>
+ */
+function expandChessBoardFixtures(array $fixtures, int $boardsPerTeam): array
+{
+    $boardsPerTeam = max(1, min(20, $boardsPerTeam));
+    if (empty($fixtures)) {
+        return [];
+    }
+
+    $expanded = [];
+    $order = 0;
+    $tieNum = 0;
+
+    foreach ($fixtures as $tie) {
+        $tieNum++;
+        $baseRound = (int) ($tie['round_number'] ?? 1);
+        $roundLabel = (string) ($tie['round_label'] ?? 'Round Robin');
+        $isTbd = empty($tie['team_a_id']) || empty($tie['team_b_id']);
+
+        for ($board = 1; $board <= $boardsPerTeam; $board++) {
+            $order++;
+            $expanded[] = [
+                'team_a_id' => $tie['team_a_id'],
+                'team_b_id' => $tie['team_b_id'],
+                'round_number' => $baseRound,
+                'round_label' => $roundLabel . ' — Board ' . $board,
+                'match_order' => $order,
+                'notes' => ($isTbd ? 'TBD — fill teams after previous round. ' : '')
+                    . 'Chess team tie #' . $tieNum . ' — Board ' . $board . ' of ' . $boardsPerTeam
+                    . '. Record each board result; team match score is based on boards won.',
+            ];
+        }
+    }
+
+    return $expanded;
+}
+
 /**
  * Single elimination: first round with byes, plus TBD shells for later rounds.
  *
@@ -769,6 +926,371 @@ function buildConsolationBracketShells(int $loserCount, int &$order): array
 }
 
 /**
+ * Schedule window for auto-timing generated matches.
+ *
+ * @param array{
+ *   start_date_start_hour?:int,
+ *   start_date_end_hour?:int,
+ *   end_date_start_hour?:int,
+ *   end_date_end_hour?:int,
+ *   daily_start_hour?:int,
+ *   daily_end_hour?:int,
+ *   start_hour?:int,
+ *   end_hour?:int
+ * } $hours
+ * @return array{
+ *   start_date:?string,
+ *   end_date:?string,
+ *   start_date_start_hour:int,
+ *   start_date_end_hour:int,
+ *   end_date_start_hour:int,
+ *   end_date_end_hour:int,
+ *   daily_start_hour:int,
+ *   daily_end_hour:int
+ * }
+ */
+function buildScheduleWindow(?string $startDate, ?string $endDate, array $hours = []): array
+{
+    $legacyStartHour = max(0, min(23, (int) ($hours['start_hour'] ?? 7)));
+    $legacyEndHour = max($legacyStartHour + 1, min(24, (int) ($hours['end_hour'] ?? 17)));
+
+    $startDateStartHour = max(0, min(23, (int) ($hours['start_date_start_hour'] ?? $legacyStartHour)));
+    $startDateEndHour = max($startDateStartHour + 1, min(24, (int) ($hours['start_date_end_hour'] ?? $legacyEndHour)));
+    $endDateStartHour = max(0, min(23, (int) ($hours['end_date_start_hour'] ?? $legacyStartHour)));
+    $endDateEndHour = max($endDateStartHour + 1, min(24, (int) ($hours['end_date_end_hour'] ?? $legacyEndHour)));
+    $dailyStartHour = max(0, min(23, (int) ($hours['daily_start_hour'] ?? $legacyStartHour)));
+    $dailyEndHour = max($dailyStartHour + 1, min(24, (int) ($hours['daily_end_hour'] ?? $legacyEndHour)));
+
+    return [
+        'start_date' => $startDate,
+        'end_date' => $endDate,
+        'start_date_start_hour' => $startDateStartHour,
+        'start_date_end_hour' => $startDateEndHour,
+        'end_date_start_hour' => $endDateStartHour,
+        'end_date_end_hour' => $endDateEndHour,
+        'daily_start_hour' => $dailyStartHour,
+        'daily_end_hour' => $dailyEndHour,
+    ];
+}
+
+/** Inclusive playable hours for a calendar day inside the schedule window. */
+function scheduleDayBounds(string $dateYmd, array $window): array
+{
+    $startDate = (string) ($window['start_date'] ?? '');
+    $endDate = (string) ($window['end_date'] ?? '');
+
+    if ($startDate !== '' && $dateYmd === $startDate) {
+        return [(int) $window['start_date_start_hour'], (int) $window['start_date_end_hour']];
+    }
+    if ($endDate !== '' && $dateYmd === $endDate) {
+        return [(int) $window['end_date_start_hour'], (int) $window['end_date_end_hour']];
+    }
+
+    return [(int) $window['daily_start_hour'], (int) $window['daily_end_hour']];
+}
+
+function formatScheduleHour(int $hour): string
+{
+    return sprintf('%02d:00', max(0, min(23, $hour)));
+}
+
+function formatScheduleWindowSummary(array $window): string
+{
+    if (!scheduleWindowIsValid($window)) {
+        return '';
+    }
+
+    $startDate = (string) $window['start_date'];
+    $endDate = (string) $window['end_date'];
+    $parts = [formatDate($startDate) . ' → ' . formatDate($endDate)];
+
+    if ($startDate === $endDate) {
+        $parts[] = formatScheduleHour((int) $window['start_date_start_hour'])
+            . '–' . formatScheduleHour((int) $window['start_date_end_hour']);
+    } else {
+        $parts[] = 'start date '
+            . formatScheduleHour((int) $window['start_date_start_hour'])
+            . '–' . formatScheduleHour((int) $window['start_date_end_hour']);
+        $parts[] = 'end date '
+            . formatScheduleHour((int) $window['end_date_start_hour'])
+            . '–' . formatScheduleHour((int) $window['end_date_end_hour']);
+        $parts[] = 'regular days '
+            . formatScheduleHour((int) $window['daily_start_hour'])
+            . '–' . formatScheduleHour((int) $window['daily_end_hour']);
+    }
+
+    return implode('; ', $parts);
+}
+
+function scheduleWindowIsValid(array $window): bool
+{
+    if (empty($window['start_date']) || empty($window['end_date'])) {
+        return false;
+    }
+
+    try {
+        $start = new DateTime((string) $window['start_date']);
+        $end = new DateTime((string) $window['end_date']);
+    } catch (Throwable $e) {
+        return false;
+    }
+
+    return $end >= $start;
+}
+
+/** Earliest allowed start datetime inside the schedule window. */
+function scheduleWindowStartDateTime(array $window): ?DateTime
+{
+    if (!scheduleWindowIsValid($window)) {
+        return null;
+    }
+
+    try {
+        $cursor = new DateTime((string) $window['start_date']);
+        [$startHour] = scheduleDayBounds($cursor->format('Y-m-d'), $window);
+        $cursor->setTime($startHour, 0, 0);
+
+        return $cursor;
+    } catch (Throwable $e) {
+        return null;
+    }
+}
+
+/** Latest allowed end datetime inside the schedule window. */
+function scheduleWindowEndDateTime(array $window): ?DateTime
+{
+    if (!scheduleWindowIsValid($window)) {
+        return null;
+    }
+
+    try {
+        $cursor = new DateTime((string) $window['end_date']);
+        [, $endHour] = scheduleDayBounds($cursor->format('Y-m-d'), $window);
+        $cursor->setTime($endHour, 0, 0);
+
+        return $cursor;
+    } catch (Throwable $e) {
+        return null;
+    }
+}
+
+function createScheduleCursor(array $window, ?DateTime $resume = null): ?DateTime
+{
+    if (!scheduleWindowIsValid($window)) {
+        return null;
+    }
+
+    if ($resume !== null) {
+        $cursor = clone $resume;
+        if (normalizeScheduleCursor($cursor, $window)) {
+            return $cursor;
+        }
+
+        return null;
+    }
+
+    return scheduleWindowStartDateTime($window);
+}
+
+/** Move cursor into the daily window; return false if past the schedule end date. */
+function normalizeScheduleCursor(DateTime &$cursor, array $window): bool
+{
+    try {
+        $startDate = new DateTime((string) $window['start_date']);
+        $startDate->setTime(0, 0, 0);
+        $endDate = new DateTime((string) $window['end_date']);
+        $endDate->setTime(23, 59, 59);
+    } catch (Throwable $e) {
+        return false;
+    }
+
+    if ($cursor < $startDate) {
+        $windowStart = scheduleWindowStartDateTime($window);
+        if (!$windowStart) {
+            return false;
+        }
+        $cursor = clone $windowStart;
+    }
+
+    while (true) {
+        if ($cursor > $endDate) {
+            return false;
+        }
+
+        [$dayStartHour, $dayEndHour] = scheduleDayBounds($cursor->format('Y-m-d'), $window);
+        $timeMinutes = ((int) $cursor->format('G')) * 60 + (int) $cursor->format('i');
+        $startMinutes = $dayStartHour * 60;
+        $endMinutes = $dayEndHour * 60;
+
+        if ($timeMinutes < $startMinutes) {
+            $cursor->setTime($dayStartHour, 0, 0);
+
+            return true;
+        }
+        if ($timeMinutes >= $endMinutes) {
+            $cursor->modify('+1 day');
+            if ($cursor > $endDate) {
+                return false;
+            }
+            [$nextDayStartHour] = scheduleDayBounds($cursor->format('Y-m-d'), $window);
+            $cursor->setTime($nextDayStartHour, 0, 0);
+            continue;
+        }
+
+        return true;
+    }
+}
+
+function matchFitsScheduleWindow(DateTime $start, int $durationMinutes, array $window): bool
+{
+    $windowStart = scheduleWindowStartDateTime($window);
+    $lastDay = scheduleWindowEndDateTime($window);
+    if (!$windowStart || !$lastDay) {
+        return false;
+    }
+
+    if ($start < $windowStart || $start > $lastDay) {
+        return false;
+    }
+
+    [, $dayEndHour] = scheduleDayBounds($start->format('Y-m-d'), $window);
+    $end = clone $start;
+    $end->modify('+' . $durationMinutes . ' minutes');
+    $dayEnd = clone $start;
+    $dayEnd->setTime($dayEndHour, 0, 0);
+
+    return $end <= $dayEnd && $end <= $lastDay;
+}
+
+function advanceScheduleCursor(DateTime &$cursor, int $durationMinutes, array $window): bool
+{
+    $cursor->modify('+' . $durationMinutes . ' minutes');
+
+    return normalizeScheduleCursor($cursor, $window);
+}
+
+/**
+ * @param list<array{0:int,1:int}> $ranges Unix timestamps [start, end)
+ */
+function matchOverlapsRanges(DateTime $start, int $durationMinutes, array $ranges): bool
+{
+    $startTs = (int) $start->format('U');
+    $endTs = $startTs + ($durationMinutes * 60);
+    foreach ($ranges as $range) {
+        if ($startTs < $range[1] && $range[0] < $endTs) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * @param list<array{0:int,1:int}> $ranges
+ */
+function bumpCursorPastRanges(DateTime &$cursor, int $durationMinutes, array $ranges, array $window): bool
+{
+    for ($attempt = 0; $attempt < 10000; $attempt++) {
+        if (!normalizeScheduleCursor($cursor, $window)) {
+            return false;
+        }
+        if (matchOverlapsRanges($cursor, $durationMinutes, $ranges)) {
+            $cursor->modify('+15 minutes');
+            continue;
+        }
+        if (matchFitsScheduleWindow($cursor, $durationMinutes, $window)) {
+            return true;
+        }
+        $cursor->modify('+1 day');
+        [$dayStartHour] = scheduleDayBounds($cursor->format('Y-m-d'), $window);
+        $cursor->setTime($dayStartHour, 0, 0);
+    }
+
+    return false;
+}
+
+/** Resume scheduling after the latest existing match end time in the season. */
+function getScheduleResumeCursor(int $seasonId, array $window): ?DateTime
+{
+    if (!scheduleWindowIsValid($window)) {
+        return null;
+    }
+
+    if ($seasonId <= 0) {
+        return createScheduleCursor($window);
+    }
+
+    ensureSportGameDurationColumn();
+    $db = getDB();
+    $stmt = $db->prepare('SELECT m.scheduled_at, s.game_duration_minutes
+        FROM intramural_matches m
+        JOIN intramural_sports s ON m.sport_id = s.id
+        WHERE m.season_id = ? AND m.scheduled_at IS NOT NULL AND m.status NOT IN (\'cancelled\')');
+    $stmt->execute([$seasonId]);
+    $maxEnd = null;
+    foreach ($stmt->fetchAll() as $row) {
+        $startTs = strtotime((string) $row['scheduled_at']);
+        if ($startTs === false) {
+            continue;
+        }
+        $duration = normalizeGameDurationMinutes($row['game_duration_minutes'] ?? null);
+        $endTs = $startTs + ($duration * 60);
+        if ($maxEnd === null || $endTs > $maxEnd) {
+            $maxEnd = $endTs;
+        }
+    }
+
+    if ($maxEnd === null) {
+        return createScheduleCursor($window);
+    }
+
+    $cursor = DateTime::createFromFormat('U', (string) $maxEnd);
+    if (!$cursor) {
+        return createScheduleCursor($window);
+    }
+
+    $windowStart = scheduleWindowStartDateTime($window);
+    $windowEnd = scheduleWindowEndDateTime($window);
+    if ($windowStart && $cursor < $windowStart) {
+        return clone $windowStart;
+    }
+    if ($windowEnd && $cursor > $windowEnd) {
+        return clone $windowStart;
+    }
+
+    if (!normalizeScheduleCursor($cursor, $window)) {
+        return $windowStart ? clone $windowStart : null;
+    }
+
+    return $cursor;
+}
+
+/**
+ * Assign scheduled_at using each sport's estimated game duration.
+ *
+ * @param list<array<string, mixed>> $fixtures
+ * @return int Number of fixtures scheduled
+ */
+function applyDurationScheduleToFixtures(array &$fixtures, array $sport, array $window, DateTime &$cursor): int
+{
+    $duration = getSportGameDurationMinutes($sport);
+    $scheduled = 0;
+    foreach ($fixtures as &$fixture) {
+        if (!bumpCursorPastRanges($cursor, $duration, [], $window)) {
+            break;
+        }
+        $fixture['scheduled_at'] = $cursor->format('Y-m-d H:i:s');
+        $scheduled++;
+        if (!advanceScheduleCursor($cursor, $duration, $window)) {
+            break;
+        }
+    }
+    unset($fixture);
+
+    return $scheduled;
+}
+
+/**
  * Build hourly schedule slots between two dates (inclusive), default 7:00–17:00.
  * Dates may be any range — not limited to the active season period.
  *
@@ -887,18 +1409,19 @@ function normalizeVenueKey(?string $venue): string
 }
 
 /**
- * Occupied datetimes for a venue in a season (existing scheduled matches).
+ * Occupied time ranges for a venue in a season (existing scheduled matches).
  *
- * @return array<string, true>
+ * @return list<array{0:int,1:int}> Unix timestamps [start, end)
  */
-function getOccupiedVenueSlots(int $seasonId, string $venueKey): array
+function getOccupiedVenueRanges(int $seasonId, string $venueKey): array
 {
     if ($venueKey === '' || $seasonId <= 0) {
         return [];
     }
 
+    ensureSportGameDurationColumn();
     $db = getDB();
-    $stmt = $db->prepare('SELECT m.scheduled_at, m.venue AS match_venue, s.venue AS sport_venue
+    $stmt = $db->prepare('SELECT m.scheduled_at, m.venue AS match_venue, s.venue AS sport_venue, s.game_duration_minutes
         FROM intramural_matches m
         JOIN intramural_sports s ON m.sport_id = s.id
         WHERE m.season_id = ?
@@ -913,23 +1436,48 @@ function getOccupiedVenueSlots(int $seasonId, string $venueKey): array
         if (normalizeVenueKey($rowVenue) !== $venueKey) {
             continue;
         }
-        $occupied[(string) $row['scheduled_at']] = true;
+        $startTs = strtotime((string) $row['scheduled_at']);
+        if ($startTs === false) {
+            continue;
+        }
+        $duration = normalizeGameDurationMinutes($row['game_duration_minutes'] ?? null);
+        $occupied[] = [$startTs, $startTs + ($duration * 60)];
     }
 
     return $occupied;
 }
 
 /**
+ * @deprecated Use getOccupiedVenueRanges() for duration-aware scheduling.
+ * @return array<string, true>
+ */
+function getOccupiedVenueSlots(int $seasonId, string $venueKey): array
+{
+    $slots = [];
+    foreach (getOccupiedVenueRanges($seasonId, $venueKey) as [$startTs]) {
+        $slots[date('Y-m-d H:i:s', $startTs)] = true;
+    }
+
+    return $slots;
+}
+
+/**
  * Smart schedule: group selected events by venue, alternate their games, and
- * avoid overlapping times on the same venue. Different venues may share times.
+ * avoid overlapping times on the same venue. Spacing uses each sport's estimated
+ * game duration. Different venues may share times.
  *
  * @param array<int, list<array<string,mixed>>> $fixturesBySport
  * @param array<int, array> $sportsById
  * @return int Number of fixtures scheduled
  */
-function applySmartVenueSchedule(array &$fixturesBySport, array $sportsById, array $slots, int $seasonId): int
+function applySmartVenueSchedule(array &$fixturesBySport, array $sportsById, array $window, int $seasonId, ?DateTime $sharedCursor = null): int
 {
-    if (empty($slots) || empty($fixturesBySport)) {
+    if (!scheduleWindowIsValid($window) || empty($fixturesBySport)) {
+        return 0;
+    }
+
+    $defaultCursor = $sharedCursor ?? getScheduleResumeCursor($seasonId, $window) ?? createScheduleCursor($window);
+    if (!$defaultCursor) {
         return 0;
     }
 
@@ -952,20 +1500,25 @@ function applySmartVenueSchedule(array &$fixturesBySport, array $sportsById, arr
     foreach ($venueGroups as $venueKey => $groupSportIds) {
         // No venue set: schedule each sport independently (no cross-sport blocking)
         if ($venueKey === '') {
-            $slotIndex = 0;
             foreach ($groupSportIds as $sportId) {
-                $scheduled += applyAutoScheduleToFixtures($fixturesBySport[$sportId], $slots, $slotIndex);
+                $cursor = clone $defaultCursor;
+                $scheduled += applyDurationScheduleToFixtures(
+                    $fixturesBySport[$sportId],
+                    $sportsById[$sportId] ?? [],
+                    $window,
+                    $cursor
+                );
             }
             continue;
         }
 
-        $occupied = getOccupiedVenueSlots($seasonId, $venueKey);
+        $occupied = getOccupiedVenueRanges($seasonId, $venueKey);
+        $cursor = clone $defaultCursor;
         $queues = [];
         foreach ($groupSportIds as $sportId) {
-            $queues[$sportId] = array_keys($fixturesBySport[$sportId]); // fixture indices
+            $queues[$sportId] = array_keys($fixturesBySport[$sportId]);
         }
 
-        $slotPos = 0;
         $active = true;
         while ($active) {
             $active = false;
@@ -974,22 +1527,22 @@ function applySmartVenueSchedule(array &$fixturesBySport, array $sportsById, arr
                     continue;
                 }
                 $active = true;
-
-                // Find next free slot for this venue
-                while (isset($slots[$slotPos]) && !empty($occupied[$slots[$slotPos]])) {
-                    $slotPos++;
-                }
-                if (!isset($slots[$slotPos])) {
+                $sport = $sportsById[$sportId] ?? [];
+                $duration = getSportGameDurationMinutes($sport);
+                if (!bumpCursorPastRanges($cursor, $duration, $occupied, $window)) {
                     break 2;
                 }
 
                 $idx = array_shift($queues[$sportId]);
-                $when = $slots[$slotPos];
+                $startTs = (int) $cursor->format('U');
+                $when = $cursor->format('Y-m-d H:i:s');
                 $fixturesBySport[$sportId][$idx]['scheduled_at'] = $when;
-                $fixturesBySport[$sportId][$idx]['venue'] = $sportsById[$sportId]['venue'] ?? null;
-                $occupied[$when] = true;
-                $slotPos++;
+                $fixturesBySport[$sportId][$idx]['venue'] = $sport['venue'] ?? null;
+                $occupied[] = [$startTs, $startTs + ($duration * 60)];
                 $scheduled++;
+                if (!advanceScheduleCursor($cursor, $duration, $window)) {
+                    break 2;
+                }
             }
         }
     }
@@ -1039,7 +1592,7 @@ function getHouseTeamLabels(array $teams): array
  * @param list<int> $teamIds
  * @return array{created: int, format: string, error?: string}
  */
-function generateMatchesForSport(int $sportId, int $seasonId, array $teamIds, ?int $createdBy = null, bool $replaceUnscheduled = false, ?array $scheduleSlots = null, ?int &$scheduleSlotIndex = null, ?array $prebuiltFixtures = null): array
+function generateMatchesForSport(int $sportId, int $seasonId, array $teamIds, ?int $createdBy = null, bool $replaceUnscheduled = false, ?array $scheduleWindow = null, ?DateTime &$scheduleCursor = null, ?array $prebuiltFixtures = null): array
 {
     $db = getDB();
     $stmt = $db->prepare('SELECT * FROM intramural_sports WHERE id = ?');
@@ -1061,8 +1614,8 @@ function generateMatchesForSport(int $sportId, int $seasonId, array $teamIds, ?i
         if (empty($fixtures)) {
             return ['created' => 0, 'format' => $format, 'error' => 'Select at least 2 teams to generate matches.'];
         }
-        if ($scheduleSlots !== null && $scheduleSlotIndex !== null) {
-            applyAutoScheduleToFixtures($fixtures, $scheduleSlots, $scheduleSlotIndex);
+        if ($scheduleWindow !== null && $scheduleCursor !== null && scheduleWindowIsValid($scheduleWindow)) {
+            applyDurationScheduleToFixtures($fixtures, $sport, $scheduleWindow, $scheduleCursor);
         }
     }
 
@@ -1107,12 +1660,137 @@ function generateMatchesForSport(int $sportId, int $seasonId, array $teamIds, ?i
 }
 
 /**
+ * Count generated matches for the active season (optionally one event).
+ */
+function countGeneratedMatches(int $seasonId, ?int $sportId = null, bool $includeCompleted = false): int
+{
+    $db = getDB();
+    $sql = 'SELECT COUNT(*) FROM intramural_matches WHERE season_id = ? AND is_generated = 1';
+    $params = [$seasonId];
+
+    if ($sportId) {
+        $sql .= ' AND sport_id = ?';
+        $params[] = $sportId;
+    }
+
+    if (!$includeCompleted) {
+        $sql .= " AND status IN ('scheduled', 'cancelled') AND score_a IS NULL AND score_b IS NULL";
+    }
+
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
+    return (int) $stmt->fetchColumn();
+}
+
+/**
+ * Delete generated fixtures (admin). Manual matches (is_generated = 0) are never removed.
+ *
+ * @return array{deleted: int, scope: string}
+ */
+function deleteGeneratedMatches(int $seasonId, ?int $sportId = null, bool $includeCompleted = false): array
+{
+    $db = getDB();
+    $sql = 'DELETE FROM intramural_matches WHERE season_id = ? AND is_generated = 1';
+    $params = [$seasonId];
+
+    if ($sportId) {
+        $sql .= ' AND sport_id = ?';
+        $params[] = $sportId;
+    }
+
+    if (!$includeCompleted) {
+        $sql .= " AND status IN ('scheduled', 'cancelled') AND score_a IS NULL AND score_b IS NULL";
+    }
+
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
+
+    return [
+        'deleted' => $stmt->rowCount(),
+        'scope' => $includeCompleted ? 'all_generated' : 'unplayed_generated',
+    ];
+}
+
+/** Delete one generated match by id (admin). */
+function deleteGeneratedMatchById(int $matchId): bool
+{
+    $db = getDB();
+    $stmt = $db->prepare('DELETE FROM intramural_matches WHERE id = ? AND is_generated = 1');
+    $stmt->execute([$matchId]);
+    return $stmt->rowCount() > 0;
+}
+
+/** Count all matches for a season (optionally one event). */
+function countSeasonMatches(int $seasonId, ?int $sportId = null): int
+{
+    $db = getDB();
+    $sql = 'SELECT COUNT(*) FROM intramural_matches WHERE season_id = ?';
+    $params = [$seasonId];
+
+    if ($sportId) {
+        $sql .= ' AND sport_id = ?';
+        $params[] = $sportId;
+    }
+
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
+    return (int) $stmt->fetchColumn();
+}
+
+/**
+ * Delete all matches for a season (generated and manual).
+ *
+ * @return array{deleted: int, scope: string}
+ */
+function deleteAllMatches(int $seasonId, ?int $sportId = null): array
+{
+    $db = getDB();
+    $sql = 'DELETE FROM intramural_matches WHERE season_id = ?';
+    $params = [$seasonId];
+
+    if ($sportId) {
+        $sql .= ' AND sport_id = ?';
+        $params[] = $sportId;
+    }
+
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
+
+    return [
+        'deleted' => $stmt->rowCount(),
+        'scope' => 'all_matches',
+    ];
+}
+
+/** Delete any match by id (admin). */
+function deleteMatchById(int $matchId): bool
+{
+    $db = getDB();
+    $stmt = $db->prepare('DELETE FROM intramural_matches WHERE id = ?');
+    $stmt->execute([$matchId]);
+    return $stmt->rowCount() > 0;
+}
+
+/**
  * Generate fixtures for multiple sports in one pass.
  *
  * @param list<int> $sportIds
  * @param list<int>|null $sharedTeamIds  When set, used for every sport. When null, teams come from season registrations per sport.
  * @param array<int, list<int>>|null $teamsBySport  Per-sport team IDs (sport_id => team ids)
- * @param array{start_date?:?string,end_date?:?string,start_hour?:int,end_hour?:int}|null $scheduleOptions Custom auto-schedule window (optional)
+ * @param array{
+ *   start_date?:?string,
+ *   end_date?:?string,
+ *   start_date_start_hour?:int,
+ *   start_date_end_hour?:int,
+ *   end_date_start_hour?:int,
+ *   end_date_end_hour?:int,
+ *   daily_start_hour?:int,
+ *   daily_end_hour?:int,
+ *   start_hour?:int,
+ *   end_hour?:int,
+ *   smart_venue?:bool,
+ *   boards_by_sport?:array<int,int>
+ * }|null $scheduleOptions Custom auto-schedule window (optional)
  * @return array{created: int, sports: int, details: list<array>, errors: list<string>, scheduled: int}
  */
 function generateMatchesForSports(array $sportIds, int $seasonId, ?array $sharedTeamIds, ?int $createdBy = null, bool $replaceUnscheduled = false, ?array $teamsBySport = null, ?array $scheduleOptions = null): array
@@ -1126,13 +1804,11 @@ function generateMatchesForSports(array $sportIds, int $seasonId, ?array $shared
     $totalScheduled = 0;
 
     $season = getSeasonById($seasonId);
-    $startHour = (int) ($scheduleOptions['start_hour'] ?? 7);
-    $endHour = (int) ($scheduleOptions['end_hour'] ?? 17);
     $startDate = $scheduleOptions['start_date'] ?? ($season['start_date'] ?? null);
     $endDate = $scheduleOptions['end_date'] ?? ($season['end_date'] ?? null);
     $smartVenue = !empty($scheduleOptions['smart_venue']);
-    $scheduleSlots = buildScheduleSlots($startDate, $endDate, $startHour, $endHour);
-    $scheduleSlotIndex = getNextScheduleSlotIndex($seasonId, $scheduleSlots);
+    $scheduleWindow = buildScheduleWindow($startDate, $endDate, $scheduleOptions ?? []);
+    $scheduleCursor = getScheduleResumeCursor($seasonId, $scheduleWindow);
 
     $regTeamsStmt = $db->prepare('SELECT DISTINCT team_id FROM intramural_registrations WHERE sport_id = ? AND season_id = ?');
     $sportsById = [];
@@ -1175,18 +1851,47 @@ function generateMatchesForSports(array $sportIds, int $seasonId, ?array $shared
             $errors[] = sportLabel($sport) . ': no fixtures to generate.';
             continue;
         }
+
+        $boardsBySport = $scheduleOptions['boards_by_sport'] ?? [];
+        if (isChessSport((string) ($sport['name'] ?? ''))) {
+            $boards = (int) ($boardsBySport[$sportId] ?? defaultChessBoardsPerTeam($sport));
+            $fixtures = expandChessBoardFixtures($fixtures, $boards);
+        }
+
         $fixturesBySport[$sportId] = $fixtures;
     }
 
-    if ($smartVenue && $scheduleSlots && $fixturesBySport) {
-        $totalScheduled = applySmartVenueSchedule($fixturesBySport, $sportsById, $scheduleSlots, $seasonId);
-    } elseif ($scheduleSlots && $fixturesBySport) {
-        foreach ($fixturesBySport as $sportId => &$fixtures) {
-            $before = $scheduleSlotIndex;
-            applyAutoScheduleToFixtures($fixtures, $scheduleSlots, $scheduleSlotIndex);
-            $totalScheduled += ($scheduleSlotIndex - $before);
+    if ($smartVenue && scheduleWindowIsValid($scheduleWindow) && $fixturesBySport) {
+        $totalScheduled = applySmartVenueSchedule($fixturesBySport, $sportsById, $scheduleWindow, $seasonId, $scheduleCursor);
+    } elseif (scheduleWindowIsValid($scheduleWindow) && $fixturesBySport) {
+        if (!$scheduleCursor) {
+            $scheduleCursor = createScheduleCursor($scheduleWindow);
         }
-        unset($fixtures);
+        if ($scheduleCursor) {
+            foreach ($fixturesBySport as $sportId => &$fixtures) {
+                $totalScheduled += applyDurationScheduleToFixtures(
+                    $fixtures,
+                    $sportsById[$sportId] ?? [],
+                    $scheduleWindow,
+                    $scheduleCursor
+                );
+            }
+            unset($fixtures);
+        }
+    }
+
+    $unscheduledCount = 0;
+    foreach ($fixturesBySport as $fixtures) {
+        foreach ($fixtures as $fixture) {
+            if (empty($fixture['scheduled_at'])) {
+                $unscheduledCount++;
+            }
+        }
+    }
+    if ($unscheduledCount > 0 && scheduleWindowIsValid($scheduleWindow)) {
+        $errors[] = $unscheduledCount . ' match(es) could not be auto-scheduled within '
+            . formatScheduleWindowSummary($scheduleWindow)
+            . '. Widen the date range or hours, shorten game durations, or set times manually after generating.';
     }
 
     foreach ($fixturesBySport as $sportId => $fixtures) {
@@ -1198,7 +1903,7 @@ function generateMatchesForSports(array $sportIds, int $seasonId, ?array $shared
             $createdBy,
             $replaceUnscheduled,
             null,
-            $scheduleSlotIndex,
+            null,
             $fixtures
         );
 
