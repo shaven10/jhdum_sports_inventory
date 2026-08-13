@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
+requireIntramuralsAccess();
 if (!canManageMatches()) {
     flash('error', 'You do not have permission to schedule matches.');
     redirect(BASE_URL . '/intramurals/matches/index.php');
@@ -24,9 +25,11 @@ if (!$match) {
     redirect(BASE_URL . '/intramurals/matches/index.php');
 }
 
+requireEventMatchAccess((int) $match['sport_id']);
+
 $teams = $db->query('SELECT * FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll();
 $errors = [];
-$isTabulator = hasRole('tabulator') && !canManageIntramurals();
+$isTabulator = isTournamentManager() && !canManageIntramurals() && !isSecretariat();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!verifyCsrf(post('csrf_token'))) {

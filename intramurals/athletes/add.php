@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
-requireLogin();
+requireIntramuralsAccess();
 
 if (!canManageTeamAthletes()) {
     flash('error', 'You do not have permission to register athletes.');
@@ -8,6 +8,7 @@ if (!canManageTeamAthletes()) {
 }
 
 requireWritableSeason();
+requireUnlockedRoster();
 
 $db = getDB();
 $seasonId = getCurrentSeasonId();

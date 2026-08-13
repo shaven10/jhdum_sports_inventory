@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS users (
     student_id VARCHAR(20) DEFAULT NULL,
     department VARCHAR(100) DEFAULT NULL,
     phone VARCHAR(20) DEFAULT NULL,
-    role ENUM('admin', 'coordinator', 'staff', 'unit_manager', 'coach', 'tabulator', 'student') NOT NULL DEFAULT 'student',
+    role ENUM('admin', 'coordinator', 'staff', 'unit_manager', 'coach', 'tabulator', 'secretariat', 'student') NOT NULL DEFAULT 'student',
     team_id INT DEFAULT NULL,
     avatar VARCHAR(255) DEFAULT NULL,
     is_active TINYINT(1) NOT NULL DEFAULT 1,
@@ -246,6 +246,10 @@ CREATE TABLE IF NOT EXISTS intramural_seasons (
     description TEXT,
     is_active TINYINT(1) NOT NULL DEFAULT 0,
     is_archived TINYINT(1) NOT NULL DEFAULT 0,
+    roster_locked TINYINT(1) NOT NULL DEFAULT 0,
+    roster_lock_date DATE DEFAULT NULL,
+    roster_locked_at DATETIME DEFAULT NULL,
+    roster_locked_by INT DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uq_season_year_label (year_label)
@@ -291,6 +295,7 @@ CREATE TABLE IF NOT EXISTS intramural_sports (
     players_per_event INT DEFAULT NULL,
     scoring_method ENUM('points', 'sets', 'games', 'time') NOT NULL DEFAULT 'points',
     rules TEXT,
+    guidelines TEXT,
     schedule_notes TEXT,
     venue VARCHAR(150) DEFAULT NULL,
     tournament_format ENUM('round_robin', 'single_elimination', 'single_elimination_consolation', 'double_elimination', 'group_knockout', 'rank_first_to_last', 'team_play_sds', 'custom') NOT NULL DEFAULT 'round_robin',
@@ -342,6 +347,20 @@ CREATE TABLE IF NOT EXISTS intramural_registrations (
     FOREIGN KEY (athlete_id) REFERENCES intramural_athletes(id) ON DELETE CASCADE,
     FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE,
     FOREIGN KEY (team_id) REFERENCES intramural_teams(id) ON DELETE RESTRICT
+) ENGINE=InnoDB;
+
+-- One tournament manager per event + season
+CREATE TABLE IF NOT EXISTS intramural_event_managers (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    season_id INT NOT NULL,
+    sport_id INT NOT NULL,
+    manager_user_id INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_sport_season_manager (sport_id, season_id),
+    FOREIGN KEY (season_id) REFERENCES intramural_seasons(id) ON DELETE RESTRICT,
+    FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE,
+    FOREIGN KEY (manager_user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 -- One coach account per team + event + season

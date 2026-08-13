@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
-requireLogin();
+requireIntramuralsAccess();
+requireMatchResultsAccess();
 
 $db = getDB();
 $seasonId = getCurrentSeasonId();
@@ -25,6 +26,16 @@ $params = [$start, $end];
 if ($seasonId) {
     $sql .= ' AND m.season_id = ?';
     $params[] = $seasonId;
+}
+if (isTournamentManager() && !canManageIntramurals()) {
+    $tmSportIds = getTmSportIds();
+    if (empty($tmSportIds)) {
+        $sql .= ' AND 0=1';
+    } else {
+        $placeholders = implode(',', array_fill(0, count($tmSportIds), '?'));
+        $sql .= " AND m.sport_id IN ($placeholders)";
+        $params = array_merge($params, $tmSportIds);
+    }
 }
 $sql .= ' ORDER BY m.scheduled_at';
 $stmt = $db->prepare($sql);

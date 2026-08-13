@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
-requireLogin();
+requireIntramuralsAccess();
 
 $db = getDB();
 $id = (int) get('id');
@@ -19,9 +19,30 @@ if (!canEditOwnTeam($id) && !canManageIntramurals()) {
     redirect(BASE_URL . '/intramurals/teams/view.php?id=' . $id);
 }
 
+$canAddCoach = canCreateCoachAccounts($id);
 $seasonId = getCurrentSeasonId();
 $sports = $db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll();
 $coaches = $db->query("SELECT id, first_name, last_name, username, team_id FROM users WHERE role = 'coach' AND is_active = 1 ORDER BY first_name, last_name")->fetchAll();
+
+$coachFormDefaults = [
+    'username' => '',
+    'email' => '',
+    'first_name' => '',
+    'last_name' => '',
+    'department' => $team['department'] ?? '',
+    'phone' => '',
+];
+$coachFormData = $coachFormDefaults;
+$coachFormErrors = [];
+$openCoachModal = get('add_coach') === '1';
+
+if (!empty($_SESSION['coach_form'])) {
+    $coachFormState = $_SESSION['coach_form'];
+    unset($_SESSION['coach_form']);
+    $coachFormData = array_merge($coachFormDefaults, $coachFormState['data'] ?? []);
+    $coachFormErrors = $coachFormState['errors'] ?? [];
+    $openCoachModal = true;
+}
 
 $current = [];
 try {
@@ -40,21 +61,55 @@ try {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
-    requireWritableSeason();
-    $assignments = $_POST['coach'] ?? [];
-    if (!is_array($assignments)) {
-        $assignments = [];
+    $action = post('action');
+
+    if ($action === 'create_coach' && $canAddCoach) {
+        $result = createCoachAccount([
+            'username' => post('username'),
+            'email' => post('email'),
+            'password' => post('password'),
+            'first_name' => post('first_name'),
+            'last_name' => post('last_name'),
+            'department' => post('department'),
+            'phone' => post('phone'),
+        ], $id);
+
+        if ($result['success']) {
+            flash('success', $result['message']);
+            redirect(BASE_URL . '/intramurals/teams/coaches.php?id=' . $id);
+        }
+
+        $_SESSION['coach_form'] = [
+            'errors' => [$result['message'] ?? 'Could not create coach account.'],
+            'data' => [
+                'username' => post('username'),
+                'email' => post('email'),
+                'first_name' => post('first_name'),
+                'last_name' => post('last_name'),
+                'department' => post('department'),
+                'phone' => post('phone'),
+            ],
+        ];
+        redirect(BASE_URL . '/intramurals/teams/coaches.php?id=' . $id . '&add_coach=1');
     }
 
-    foreach ($sports as $sport) {
-        $sportId = (int) $sport['id'];
-        $coachId = isset($assignments[$sportId]) ? ((int) $assignments[$sportId] ?: null) : null;
-        assignEventCoach($id, $sportId, $coachId, $seasonId);
-    }
+    if ($action === 'assign_coaches') {
+        requireWritableSeason();
+        $assignments = $_POST['coach'] ?? [];
+        if (!is_array($assignments)) {
+            $assignments = [];
+        }
 
-    auditLog($_SESSION['user_id'], 'assign_event_coaches', 'intramural_team', $id, null, ['season_id' => $seasonId]);
-    flash('success', 'Event coaches updated for ' . $team['name'] . '.');
-    redirect(BASE_URL . '/intramurals/teams/coaches.php?id=' . $id);
+        foreach ($sports as $sport) {
+            $sportId = (int) $sport['id'];
+            $coachId = isset($assignments[$sportId]) ? ((int) $assignments[$sportId] ?: null) : null;
+            assignEventCoach($id, $sportId, $coachId, $seasonId);
+        }
+
+        auditLog($_SESSION['user_id'], 'assign_event_coaches', 'intramural_team', $id, null, ['season_id' => $seasonId]);
+        flash('success', 'Event coaches updated for ' . $team['name'] . '.');
+        redirect(BASE_URL . '/intramurals/teams/coaches.php?id=' . $id);
+    }
 }
 
 $pageTitle = 'Event Coaches — ' . $team['name'];
@@ -70,20 +125,28 @@ require __DIR__ . '/../_season_bar.php';
             <strong style="color:<?= sanitize($team['color']) ?>"><?= sanitize($team['name']) ?></strong>
         </p>
     </div>
-    <div class="d-flex gap-2">
-        <a href="<?= BASE_URL ?>/users/add.php" class="btn btn-outline-primary">Add Coach Account</a>
+    <div class="d-flex gap-2 flex-wrap">
+        <?php if ($canAddCoach): ?>
+        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addCoachModal">
+            <i class="bi bi-person-plus"></i> Add Coach
+        </button>
+        <?php endif; ?>
         <a href="<?= BASE_URL ?>/intramurals/teams/view.php?id=<?= $id ?>" class="btn btn-outline-secondary">Back to Team</a>
     </div>
 </div>
 
 <div class="alert alert-info">
-    Each event on this team can have its own coach. Coaches can manage roster details (jersey, position, sport assignment) only for events they are assigned to.
+    Each event on this team must have a coach assigned for that team + event. Coaches can manage roster details (jersey, position, sport assignment) only for events they are assigned to.
+    <?php if ($canAddCoach): ?>
+    Use <strong>Add Coach</strong> to create a new coach login for this team, then assign them to events below.
+    <?php endif; ?>
 </div>
 
 <div class="card">
     <div class="card-body">
         <form method="POST">
             <?= csrfField() ?>
+            <input type="hidden" name="action" value="assign_coaches">
             <div class="table-responsive">
                 <table class="table table-hover align-middle">
                     <thead class="table-light">
@@ -117,11 +180,89 @@ require __DIR__ . '/../_season_bar.php';
                 </table>
             </div>
             <?php if (empty($coaches)): ?>
-            <div class="alert alert-warning">No coach accounts found. Create users with the Coach role first.</div>
+            <div class="alert alert-warning mb-3">
+                No coach accounts found.
+                <?php if ($canAddCoach): ?>
+                Click <strong>Add Coach</strong> above to create one for this team.
+                <?php else: ?>
+                Ask an administrator to create coach user accounts first.
+                <?php endif; ?>
+            </div>
             <?php endif; ?>
             <button type="submit" class="btn btn-primary" <?= empty($sports) ? 'disabled' : '' ?>>Save Event Coaches</button>
         </form>
     </div>
 </div>
+
+<?php if ($canAddCoach): ?>
+<div class="modal fade" id="addCoachModal" tabindex="-1" aria-labelledby="addCoachModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form method="POST" id="addCoachForm">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="create_coach">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="addCoachModalLabel"><i class="bi bi-person-plus"></i> Add Coach Account</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <?php if (!empty($coachFormErrors)): ?>
+                    <div class="alert alert-danger">
+                        <ul class="mb-0">
+                            <?php foreach ($coachFormErrors as $err): ?>
+                            <li><?= sanitize($err) ?></li>
+                            <?php endforeach; ?>
+                        </ul>
+                    </div>
+                    <?php endif; ?>
+                    <p class="text-muted">Creates a login for a coach linked to <strong><?= sanitize($team['name']) ?></strong>. After saving, assign them to events in the table above.</p>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label" for="coachUsername">Username *</label>
+                            <input type="text" name="username" id="coachUsername" class="form-control" required value="<?= sanitize($coachFormData['username']) ?>">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="coachEmail">Email *</label>
+                            <input type="email" name="email" id="coachEmail" class="form-control" required value="<?= sanitize($coachFormData['email']) ?>">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="coachFirstName">First Name *</label>
+                            <input type="text" name="first_name" id="coachFirstName" class="form-control" required value="<?= sanitize($coachFormData['first_name']) ?>">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="coachLastName">Last Name *</label>
+                            <input type="text" name="last_name" id="coachLastName" class="form-control" required value="<?= sanitize($coachFormData['last_name']) ?>">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="coachPassword">Password *</label>
+                            <input type="text" name="password" id="coachPassword" class="form-control" required minlength="6" autocomplete="new-password" placeholder="Min. 6 characters">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="coachDepartment">Department</label>
+                            <input type="text" name="department" id="coachDepartment" class="form-control" value="<?= sanitize($coachFormData['department']) ?>">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="coachPhone">Phone</label>
+                            <input type="text" name="phone" id="coachPhone" class="form-control" value="<?= sanitize($coachFormData['phone']) ?>">
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create Coach</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<?php if ($openCoachModal): ?>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('addCoachModal')).show();
+});
+</script>
+<?php endif; ?>
+<?php endif; ?>
 
 <?php require_once __DIR__ . '/../../includes/footer.php'; ?>

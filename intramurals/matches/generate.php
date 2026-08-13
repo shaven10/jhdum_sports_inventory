@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
-if (!canManageMatches()) {
+requireIntramuralsAccess();
+if (!canGenerateMatches()) {
     flash('error', 'You do not have permission to generate match fixtures.');
     redirect(BASE_URL . '/intramurals/matches/index.php');
 }
@@ -10,7 +11,7 @@ $db = getDB();
 $seasonId = getCurrentSeasonId();
 $season = getCurrentSeason();
 
-$sports = $db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll();
+$sports = filterSportsForUser($db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll());
 $teams = $db->query('SELECT * FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll();
 $slotLetters = ['A', 'B', 'C', 'D'];
 $sportMap = [];
@@ -241,6 +242,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && post('action') === 'generate') {
     }
     if (empty($selectedSportIds)) {
         $errors[] = 'Select at least one sport.';
+    }
+    foreach ($selectedSportIds as $sid) {
+        if (!canManageEventMatches((int) $sid)) {
+            $errors[] = 'You are not assigned as tournament manager for one or more selected events.';
+            break;
+        }
+        if (!eventHasManager((int) $sid, $seasonId) && !isSecretariat()) {
+            $label = isset($sportMap[$sid]) ? sportLabel($sportMap[$sid]) : 'Sport #' . $sid;
+            $errors[] = $label . ' has no tournament manager assigned. Assign one under Sports → Tournament Managers.';
+        }
     }
     if ($teamMode === 'shared' && count($selectedTeams) < 2) {
         $errors[] = 'Assign at least 2 teams in Team A–D (or switch team source).';

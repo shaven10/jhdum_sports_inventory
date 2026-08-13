@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
-requireLogin();
+requireIntramuralsAccess();
 
 $db = getDB();
 $seasonId = getCurrentSeasonId();
@@ -45,7 +45,7 @@ if ($sportId !== '') {
         $params[] = (int) $sportId;
     }
 } elseif ($isCoach) {
-    // Coaches only list athletes registered in (or belonging to teams of) their events
+    // Coaches only list athletes registered in their assigned team + event pairs
     $assignments = getCoachAssignments();
     if ($assignments) {
         $parts = [];
@@ -56,6 +56,8 @@ if ($sportId !== '') {
         }
         $seasonClause = $seasonId ? ' AND r.season_id = ' . (int) $seasonId : '';
         $where[] = 'EXISTS (SELECT 1 FROM intramural_registrations r WHERE r.athlete_id = a.id AND (' . implode(' OR ', $parts) . ')' . $seasonClause . ')';
+    } else {
+        $where[] = '0=1';
     }
 }
 
@@ -79,8 +81,8 @@ $stmt = $db->prepare($sql);
 $stmt->execute($params);
 $athletes = $stmt->fetchAll();
 
-$teams = $db->query('SELECT id, name FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll();
-$sports = $db->query('SELECT id, name, category FROM intramural_sports ORDER BY name, category')->fetchAll();
+$teams = filterTeamsForCoach($db->query('SELECT id, name FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll());
+$sports = filterSportsForCoach($db->query('SELECT id, name, category FROM intramural_sports ORDER BY name, category')->fetchAll());
 
 $pageTitle = 'Athlete Management';
 require_once __DIR__ . '/../../includes/header.php';
@@ -93,15 +95,19 @@ require __DIR__ . '/../_season_bar.php';
         <p class="text-muted mb-0">Athletes are added via roster import or manual registration</p>
     </div>
     <div class="d-flex gap-2">
-        <?php if (canManageTeamAthletes() || canManageTeamRoster()): ?>
+        <?php if (canModifyRosterAny()): ?>
         <a href="<?= BASE_URL ?>/intramurals/roster/import.php" class="btn btn-success"><i class="bi bi-file-earmark-arrow-up"></i> Import Roster</a>
         <?php endif; ?>
-        <?php if (canManageTeamAthletes()): ?>
+        <?php if (canModifyRosterAny() && canManageTeamAthletes()): ?>
         <a href="<?= BASE_URL ?>/intramurals/athletes/add.php" class="btn btn-primary"><i class="bi bi-person-plus"></i> Register Athlete</a>
         <?php endif; ?>
         <a href="<?= BASE_URL ?>/intramurals/index.php" class="btn btn-outline-secondary">Back</a>
     </div>
 </div>
+
+<?php if ($isCoach && !hasCoachAssignments()): ?>
+<div class="alert alert-warning">You have no event coach assignments for this season. Ask your unit manager to assign you under <strong>Teams → Event Coaches</strong>.</div>
+<?php endif; ?>
 
 <div class="filter-bar">
     <form method="GET" class="row g-2 align-items-end">
@@ -180,7 +186,10 @@ require __DIR__ . '/../_season_bar.php';
                             <a href="<?= BASE_URL ?>/intramurals/athletes/view.php?id=<?= $a['id'] ?>" class="btn btn-sm btn-outline-primary">View</a>
                             <?php
                             $athTeam = !empty($a['team_id']) ? (int) $a['team_id'] : null;
-                            if (canManageIntramurals() || ($athTeam && (canManageTeamRoster($athTeam) || canManageTeamAthletes($athTeam)))):
+                            $canEditAthlete = canManageIntramurals()
+                                || ($athTeam && canManageTeamAthletes($athTeam))
+                                || ($isCoach && $athTeam && canManageTeamRoster($athTeam));
+                            if ($canEditAthlete):
                             ?>
                             <a href="<?= BASE_URL ?>/intramurals/athletes/edit.php?id=<?= $a['id'] ?>" class="btn btn-sm btn-outline-secondary"><?= $isCoach ? 'Roster' : 'Edit' ?></a>
                             <?php endif; ?>

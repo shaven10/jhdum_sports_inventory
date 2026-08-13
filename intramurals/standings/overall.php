@@ -1,14 +1,43 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
-requireLogin();
+requireIntramuralsAccess();
+requireStandingsAccess();
 
 $export = get('export');
 $data = computeOverallStandings();
 $labels = $data['sport_labels'];
 $standings = $data['standings'];
 
+$medalTally = $standings;
+usort($medalTally, function ($a, $b) {
+    if ($a['gold'] !== $b['gold']) {
+        return $b['gold'] <=> $a['gold'];
+    }
+    if ($a['silver'] !== $b['silver']) {
+        return $b['silver'] <=> $a['silver'];
+    }
+    if ($a['bronze'] !== $b['bronze']) {
+        return $b['bronze'] <=> $a['bronze'];
+    }
+    return $b['total'] <=> $a['total'];
+});
+$medalRank = 1;
+foreach ($medalTally as &$medalRow) {
+    $medalRow['medal_rank'] = $medalRank++;
+    $medalRow['medal_total'] = $medalRow['gold'] + $medalRow['silver'] + $medalRow['bronze'];
+}
+unset($medalRow);
+
+$medalTotals = ['gold' => 0, 'silver' => 0, 'bronze' => 0];
+foreach ($standings as $r) {
+    $medalTotals['gold'] += $r['gold'];
+    $medalTotals['silver'] += $r['silver'];
+    $medalTotals['bronze'] += $r['bronze'];
+}
+$medalTotals['all'] = $medalTotals['gold'] + $medalTotals['silver'] + $medalTotals['bronze'];
+
 if ($export === 'excel') {
-    $headers = array_merge(['Rank', 'Team'], $labels, ['Total', 'Gold', 'Silver', 'Bronze']);
+    $headers = array_merge(['Rank', 'Team'], $labels, ['Total Points', 'Gold', 'Silver', 'Bronze', 'Total Medals']);
     $rows = [];
     foreach ($standings as $r) {
         $row = [$r['rank'], $r['team_name']];
@@ -19,15 +48,36 @@ if ($export === 'excel') {
         $row[] = $r['gold'];
         $row[] = $r['silver'];
         $row[] = $r['bronze'];
+        $row[] = $r['gold'] + $r['silver'] + $r['bronze'];
         $rows[] = $row;
     }
     exportCsv('overall-standings-' . date('Ymd') . '.csv', $headers, $rows);
+}
+
+if ($export === 'medals') {
+    $headers = ['Rank', 'Team', 'Gold', 'Silver', 'Bronze', 'Total Medals', 'Total Points'];
+    $rows = [];
+    foreach ($medalTally as $r) {
+        if ($r['medal_total'] === 0 && $r['total'] === 0) {
+            continue;
+        }
+        $rows[] = [$r['medal_rank'], $r['team_name'], $r['gold'], $r['silver'], $r['bronze'], $r['medal_total'], $r['total']];
+    }
+    exportCsv('medal-tally-' . date('Ymd') . '.csv', $headers, $rows);
 }
 
 $champion = null;
 foreach ($standings as $r) {
     if ($r['total'] > 0) {
         $champion = $r;
+        break;
+    }
+}
+
+$medalLeader = null;
+foreach ($medalTally as $r) {
+    if ($r['medal_total'] > 0) {
+        $medalLeader = $r;
         break;
     }
 }
@@ -40,12 +90,15 @@ require __DIR__ . '/../_season_bar.php';
 <div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2 no-print">
     <div>
         <h1><i class="bi bi-award"></i> Overall Intramurals Standing</h1>
-        <p class="text-muted mb-0">Sum of event placement points (Champion → 5th Runner Up)</p>
+        <p class="text-muted mb-0">Placement points by event and medal tally (Champion → 5th Runner Up)</p>
     </div>
-    <div class="d-flex gap-2">
+    <div class="d-flex gap-2 flex-wrap">
+        <?php if (canManageIntramurals()): ?>
         <a href="<?= BASE_URL ?>/intramurals/points/index.php" class="btn btn-outline-secondary"><i class="bi bi-calculator"></i> Point System</a>
+        <?php endif; ?>
         <a href="<?= BASE_URL ?>/intramurals/standings/index.php" class="btn btn-outline-primary">Per-Sport Standings</a>
-        <a href="?export=excel" class="btn btn-outline-success"><i class="bi bi-file-earmark-excel"></i> Excel</a>
+        <a href="?export=medals" class="btn btn-outline-warning"><i class="bi bi-trophy"></i> Medal Excel</a>
+        <a href="?export=excel" class="btn btn-outline-success"><i class="bi bi-file-earmark-excel"></i> Full Excel</a>
         <button class="btn btn-outline-secondary" onclick="printReport()"><i class="bi bi-printer"></i> Print / PDF</button>
     </div>
 </div>
@@ -65,26 +118,92 @@ require __DIR__ . '/../_season_bar.php';
 </div>
 <?php endif; ?>
 
-<div class="card">
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span><i class="bi bi-trophy"></i> Medal Tally</span>
+        <small class="text-muted">
+            <?php if ($medalLeader): ?>
+            Leader: <strong style="color:<?= sanitize($medalLeader['color']) ?>"><?= sanitize($medalLeader['team_name']) ?></strong>
+            · <?= (int) $medalTotals['gold'] ?>G / <?= (int) $medalTotals['silver'] ?>S / <?= (int) $medalTotals['bronze'] ?>B awarded
+            <?php else: ?>
+            No medals recorded yet
+            <?php endif; ?>
+        </small>
+    </div>
     <div class="card-body p-0">
-        <div class="table-responsive">
+        <div class="standings-scroll-wrap">
             <table class="table table-bordered table-hover mb-0">
                 <thead class="table-light">
                     <tr>
-                        <th>#</th>
-                        <th>Team</th>
+                        <th class="sticky-col">#</th>
+                        <th class="sticky-col sticky-col-2">Team</th>
+                        <th class="medal-tally-col gold"><i class="bi bi-trophy-fill"></i> Gold</th>
+                        <th class="medal-tally-col silver"><i class="bi bi-trophy"></i> Silver</th>
+                        <th class="medal-tally-col bronze"><i class="bi bi-trophy"></i> Bronze</th>
+                        <th>Total Medals</th>
+                        <th>Total Points</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($medalTally as $r): ?>
+                    <tr class="<?= $medalLeader && $r['team_id'] === $medalLeader['team_id'] ? 'table-warning' : '' ?>">
+                        <td class="sticky-col"><?= $r['medal_rank'] ?></td>
+                        <td class="sticky-col sticky-col-2">
+                            <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:<?= sanitize($r['color']) ?>"></span>
+                            <?= sanitize($r['team_name']) ?>
+                        </td>
+                        <td class="medal-tally-col gold"><?= (int) $r['gold'] ?></td>
+                        <td class="medal-tally-col silver"><?= (int) $r['silver'] ?></td>
+                        <td class="medal-tally-col bronze"><?= (int) $r['bronze'] ?></td>
+                        <td><strong><?= (int) $r['medal_total'] ?></strong></td>
+                        <td><?= (int) $r['total'] ?></td>
+                    </tr>
+                    <?php endforeach; ?>
+                    <?php if (empty($standings)): ?>
+                    <tr><td colspan="7" class="text-muted p-3">No teams yet.</td></tr>
+                    <?php else: ?>
+                    <tr class="table-light fw-semibold">
+                        <td class="sticky-col"></td>
+                        <td class="sticky-col sticky-col-2">Total</td>
+                        <td class="medal-tally-col gold"><?= (int) $medalTotals['gold'] ?></td>
+                        <td class="medal-tally-col silver"><?= (int) $medalTotals['silver'] ?></td>
+                        <td class="medal-tally-col bronze"><?= (int) $medalTotals['bronze'] ?></td>
+                        <td><?= (int) $medalTotals['all'] ?></td>
+                        <td></td>
+                    </tr>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span><i class="bi bi-table"></i> Points Breakdown by Event</span>
+        <small class="text-muted no-print">Scroll horizontally for more events · vertically for all teams</small>
+    </div>
+    <div class="card-body p-0">
+        <div class="standings-scroll-wrap">
+            <table class="table table-bordered table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th class="sticky-col">#</th>
+                        <th class="sticky-col sticky-col-2">Team</th>
                         <?php foreach ($labels as $label): ?>
                         <th><?= sanitize($label) ?></th>
                         <?php endforeach; ?>
                         <th>Total</th>
-                        <th>Medals</th>
+                        <th class="medal-tally-col gold">G</th>
+                        <th class="medal-tally-col silver">S</th>
+                        <th class="medal-tally-col bronze">B</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php foreach ($standings as $r): ?>
                     <tr class="<?= $champion && $r['team_id'] === $champion['team_id'] ? 'table-success' : '' ?>">
-                        <td><?= $r['rank'] ?></td>
-                        <td>
+                        <td class="sticky-col"><?= $r['rank'] ?></td>
+                        <td class="sticky-col sticky-col-2">
                             <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:<?= sanitize($r['color']) ?>"></span>
                             <?= sanitize($r['team_name']) ?>
                         </td>
@@ -92,7 +211,9 @@ require __DIR__ . '/../_season_bar.php';
                         <td><?= $r['sports'][$label] ?? 0 ?></td>
                         <?php endforeach; ?>
                         <td><strong><?= $r['total'] ?></strong></td>
-                        <td><span class="badge bg-warning text-dark"><?= $r['gold'] ?>G</span> <span class="badge bg-secondary"><?= $r['silver'] ?>S</span> <span class="badge bg-danger"><?= $r['bronze'] ?>B</span></td>
+                        <td class="medal-tally-col gold"><?= (int) $r['gold'] ?></td>
+                        <td class="medal-tally-col silver"><?= (int) $r['silver'] ?></td>
+                        <td class="medal-tally-col bronze"><?= (int) $r['bronze'] ?></td>
                     </tr>
                     <?php endforeach; ?>
                     <?php if (empty($standings)): ?>

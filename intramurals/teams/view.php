@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
-requireLogin();
+requireIntramuralsAccess();
 
 $db = getDB();
 $id = (int) get('id');
@@ -18,6 +18,10 @@ $team = $stmt->fetch();
 if (!$team) {
     flash('error', 'Team not found.');
     redirect(BASE_URL . '/intramurals/teams/index.php');
+}
+
+if (isCoach() && !canManageIntramurals()) {
+    requireTeamAccess($id);
 }
 
 $sports = $db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll();
@@ -113,6 +117,9 @@ require __DIR__ . '/../_season_bar.php';
     </div>
     <div class="d-flex gap-2 flex-wrap">
         <?php if (canEditOwnTeam($id) || canManageIntramurals()): ?>
+        <?php if (canCreateCoachAccounts($id)): ?>
+        <a href="<?= BASE_URL ?>/intramurals/teams/coaches.php?id=<?= $id ?>&add_coach=1" class="btn btn-outline-primary"><i class="bi bi-person-plus"></i> Add Coach</a>
+        <?php endif; ?>
         <a href="<?= BASE_URL ?>/intramurals/teams/coaches.php?id=<?= $id ?>" class="btn btn-primary"><i class="bi bi-person-badge"></i> Event Coaches</a>
         <a href="<?= BASE_URL ?>/intramurals/teams/edit.php?id=<?= $id ?>" class="btn btn-outline-primary">Edit Team</a>
         <?php endif; ?>

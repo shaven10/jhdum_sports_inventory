@@ -63,6 +63,106 @@ function ensureSportVenueColumn(): void
     if ((int) $stmt->fetchColumn() === 0) {
         $db->exec('ALTER TABLE intramural_sports ADD COLUMN venue VARCHAR(150) DEFAULT NULL AFTER schedule_notes');
     }
+
+    ensureSportGuidelinesColumn();
+}
+
+/** Ensure intramural_sports.guidelines exists for per-sport event guidelines. */
+function ensureSportGuidelinesColumn(): void
+{
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    $db = getDB();
+    $stmt = $db->prepare('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
+    $stmt->execute(['intramural_sports', 'guidelines']);
+    if ((int) $stmt->fetchColumn() === 0) {
+        $db->exec('ALTER TABLE intramural_sports ADD COLUMN guidelines TEXT NULL AFTER rules');
+    }
+}
+
+/** Ensure intramural_seasons has roster lock columns. */
+function ensureRosterLockColumns(): void
+{
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    $db = getDB();
+    $stmt = $db->prepare('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
+
+    $stmt->execute(['intramural_seasons', 'roster_locked']);
+    if ((int) $stmt->fetchColumn() === 0) {
+        $db->exec('ALTER TABLE intramural_seasons ADD COLUMN roster_locked TINYINT(1) NOT NULL DEFAULT 0 AFTER is_archived');
+    }
+
+    $stmt->execute(['intramural_seasons', 'roster_locked_at']);
+    if ((int) $stmt->fetchColumn() === 0) {
+        $db->exec('ALTER TABLE intramural_seasons ADD COLUMN roster_locked_at DATETIME DEFAULT NULL AFTER roster_locked');
+    }
+
+    $stmt->execute(['intramural_seasons', 'roster_locked_by']);
+    if ((int) $stmt->fetchColumn() === 0) {
+        $db->exec('ALTER TABLE intramural_seasons ADD COLUMN roster_locked_by INT DEFAULT NULL AFTER roster_locked_at');
+    }
+
+    $stmt->execute(['intramural_seasons', 'roster_lock_date']);
+    if ((int) $stmt->fetchColumn() === 0) {
+        $db->exec('ALTER TABLE intramural_seasons ADD COLUMN roster_lock_date DATE DEFAULT NULL AFTER roster_locked');
+    }
+}
+
+/** Ensure intramural_event_managers exists for per-event tournament manager assignments. */
+function ensureEventManagersTable(): void
+{
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    $db = getDB();
+    $stmt = $db->prepare('SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?');
+    $stmt->execute(['intramural_event_managers']);
+    if ((int) $stmt->fetchColumn() === 0) {
+        $db->exec("CREATE TABLE intramural_event_managers (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            season_id INT NOT NULL,
+            sport_id INT NOT NULL,
+            manager_user_id INT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_sport_season_manager (sport_id, season_id),
+            FOREIGN KEY (season_id) REFERENCES intramural_seasons(id) ON DELETE RESTRICT,
+            FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE,
+            FOREIGN KEY (manager_user_id) REFERENCES users(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB");
+        return;
+    }
+
+    $colStmt = $db->prepare('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
+    $colStmt->execute(['intramural_event_managers', 'user_id']);
+    if ((int) $colStmt->fetchColumn() > 0) {
+        $colStmt->execute(['intramural_event_managers', 'manager_user_id']);
+        if ((int) $colStmt->fetchColumn() === 0) {
+            $db->exec('ALTER TABLE intramural_event_managers CHANGE user_id manager_user_id INT NOT NULL');
+        }
+    }
+
+    $idxStmt = $db->prepare('SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?');
+    $idxStmt->execute(['intramural_event_managers', 'uq_sport_season_manager']);
+    if ((int) $idxStmt->fetchColumn() === 0) {
+        try {
+            $db->exec('ALTER TABLE intramural_event_managers ADD UNIQUE KEY uq_sport_season_manager (sport_id, season_id)');
+        } catch (Throwable $e) {
+            // ignore duplicate rows blocking unique index
+        }
+    }
 }
 
 /** Default max players per team for known intramural sports. */
@@ -1294,6 +1394,159 @@ function requireWritableSeason(): void
     }
 }
 
+function isRosterLocked(?int $seasonId = null): bool
+{
+    $status = getRosterLockStatus($seasonId);
+    return $status['is_locked'];
+}
+
+/**
+ * @return array{
+ *   is_locked: bool,
+ *   is_scheduled: bool,
+ *   lock_date: ?string,
+ *   locked_at: ?string,
+ *   locked_by: ?int,
+ *   locked_by_name: ?string,
+ *   season_id: ?int,
+ *   year_label: ?string,
+ *   season_name: ?string
+ * }
+ */
+function getRosterLockStatus(?int $seasonId = null): array
+{
+    ensureRosterLockColumns();
+    applyScheduledRosterLocks();
+
+    $empty = [
+        'is_locked' => false,
+        'is_scheduled' => false,
+        'lock_date' => null,
+        'locked_at' => null,
+        'locked_by' => null,
+        'locked_by_name' => null,
+        'season_id' => null,
+        'year_label' => null,
+        'season_name' => null,
+    ];
+
+    $season = $seasonId ? getSeasonById($seasonId) : getCurrentSeason();
+    if (!$season) {
+        return $empty;
+    }
+
+    $lockDate = !empty($season['roster_lock_date']) ? (string) $season['roster_lock_date'] : null;
+    $isLocked = !empty($season['roster_locked']);
+    $today = date('Y-m-d');
+    $isScheduled = !$isLocked && $lockDate !== null && $lockDate > $today;
+
+    $status = [
+        'is_locked' => $isLocked,
+        'is_scheduled' => $isScheduled,
+        'lock_date' => $lockDate,
+        'locked_at' => $season['roster_locked_at'] ?? null,
+        'locked_by' => !empty($season['roster_locked_by']) ? (int) $season['roster_locked_by'] : null,
+        'locked_by_name' => null,
+        'season_id' => (int) $season['id'],
+        'year_label' => $season['year_label'],
+        'season_name' => $season['name'],
+    ];
+
+    if ($status['locked_by']) {
+        $db = getDB();
+        $stmt = $db->prepare('SELECT first_name, last_name, username FROM users WHERE id = ?');
+        $stmt->execute([$status['locked_by']]);
+        $user = $stmt->fetch();
+        if ($user) {
+            $status['locked_by_name'] = trim($user['first_name'] . ' ' . $user['last_name']) ?: $user['username'];
+        }
+    }
+
+    return $status;
+}
+
+function getRosterLockInfo(?int $seasonId = null): ?array
+{
+    $status = getRosterLockStatus($seasonId);
+    if (!$status['is_locked']) {
+        return null;
+    }
+
+    return [
+        'season_id' => $status['season_id'],
+        'year_label' => $status['year_label'],
+        'season_name' => $status['season_name'],
+        'lock_date' => $status['lock_date'],
+        'locked_at' => $status['locked_at'],
+        'locked_by' => $status['locked_by'],
+        'locked_by_name' => $status['locked_by_name'],
+    ];
+}
+
+function applyScheduledRosterLocks(): void
+{
+    ensureRosterLockColumns();
+    $db = getDB();
+    $db->exec("UPDATE intramural_seasons
+        SET roster_locked = 1,
+            roster_locked_at = COALESCE(roster_locked_at, CONCAT(roster_lock_date, ' 00:00:00'))
+        WHERE roster_lock_date IS NOT NULL
+          AND roster_lock_date <= CURDATE()
+          AND roster_locked = 0");
+}
+
+function requireUnlockedRoster(?int $seasonId = null): void
+{
+    if (isRosterLocked($seasonId)) {
+        flash('error', 'The athlete roster is locked for this season. Contact the administrator to unlock it before making changes.');
+        redirect(BASE_URL . '/intramurals/roster/index.php');
+    }
+}
+
+function lockSeasonRoster(int $seasonId, int $userId, ?string $lockDate = null): bool
+{
+    $lockDate = $lockDate ?: date('Y-m-d');
+    return setSeasonRosterLockDate($seasonId, $userId, $lockDate);
+}
+
+function setSeasonRosterLockDate(int $seasonId, int $userId, string $lockDate): bool
+{
+    ensureRosterLockColumns();
+    if (!getSeasonById($seasonId)) {
+        return false;
+    }
+
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $lockDate)) {
+        return false;
+    }
+
+    $today = date('Y-m-d');
+    $db = getDB();
+
+    if ($lockDate <= $today) {
+        $stmt = $db->prepare('UPDATE intramural_seasons SET roster_locked = 1, roster_lock_date = ?, roster_locked_at = NOW(), roster_locked_by = ? WHERE id = ?');
+        $stmt->execute([$lockDate, $userId, $seasonId]);
+    } else {
+        $stmt = $db->prepare('UPDATE intramural_seasons SET roster_locked = 0, roster_lock_date = ?, roster_locked_at = NULL, roster_locked_by = ? WHERE id = ?');
+        $stmt->execute([$lockDate, $userId, $seasonId]);
+    }
+
+    return $stmt->rowCount() > 0;
+}
+
+function unlockSeasonRoster(int $seasonId): bool
+{
+    ensureRosterLockColumns();
+    if (!getSeasonById($seasonId)) {
+        return false;
+    }
+
+    $db = getDB();
+    $stmt = $db->prepare('UPDATE intramural_seasons SET roster_locked = 0, roster_lock_date = NULL, roster_locked_at = NULL, roster_locked_by = NULL WHERE id = ?');
+    $stmt->execute([$seasonId]);
+    return $stmt->rowCount() > 0;
+}
+
 function determineMatchWinner(?int $scoreA, ?int $scoreB, int $teamAId, int $teamBId, string $status, ?int $forfeitTeamId = null): ?int
 {
     if ($status === 'forfeit' && $forfeitTeamId) {
@@ -1818,6 +2071,46 @@ function getIntramuralsStats(?int $seasonId = null): array
     }
 
     return $stats;
+}
+
+/** Recent completed matches for the main dashboard (scoped for tournament managers). */
+function getDashboardRecentMatchResults(int $limit = 8, ?int $seasonId = null): array
+{
+    $db = getDB();
+    $seasonId = $seasonId ?? getCurrentSeasonId();
+    if (!$seasonId) {
+        return [];
+    }
+
+    $where = ['m.season_id = ?', "m.status IN ('completed', 'forfeit')"];
+    $params = [$seasonId];
+
+    if (isTournamentManager() && !canManageIntramurals()) {
+        $tmSportIds = getTmSportIds();
+        if (empty($tmSportIds)) {
+            return [];
+        }
+        $placeholders = implode(',', array_fill(0, count($tmSportIds), '?'));
+        $where[] = "m.sport_id IN ($placeholders)";
+        $params = array_merge($params, $tmSportIds);
+    }
+
+    $whereClause = implode(' AND ', $where);
+    $stmt = $db->prepare("
+        SELECT m.*, s.name AS sport_name, s.category AS sport_category,
+               ta.name AS team_a_name, ta.color AS team_a_color,
+               tb.name AS team_b_name, tb.color AS team_b_color
+        FROM intramural_matches m
+        JOIN intramural_sports s ON m.sport_id = s.id
+        LEFT JOIN intramural_teams ta ON m.team_a_id = ta.id
+        LEFT JOIN intramural_teams tb ON m.team_b_id = tb.id
+        WHERE $whereClause
+        ORDER BY m.updated_at DESC, m.scheduled_at DESC
+        LIMIT " . (int) $limit . "
+    ");
+    $stmt->execute($params);
+
+    return $stmt->fetchAll();
 }
 
 function placementLabels(): array

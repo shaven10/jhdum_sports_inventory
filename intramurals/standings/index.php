@@ -1,14 +1,18 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
-requireLogin();
+requireIntramuralsAccess();
+requireStandingsAccess();
 
 $db = getDB();
 $sportId = (int) get('sport');
 $export = get('export');
-$sports = $db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll();
+$sports = filterSportsForUser($db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll());
 
 if (!$sportId && $sports) {
     $sportId = (int) $sports[0]['id'];
+} elseif ($sportId && !canViewEvent($sportId)) {
+    flash('error', 'You do not have permission to view standings for this event.');
+    redirect(BASE_URL . '/intramurals/standings/index.php');
 }
 
 $blocks = $sportId ? computeSportStandings($sportId) : [];
@@ -120,7 +124,7 @@ require __DIR__ . '/../_season_bar.php';
         </div>
     </div>
 </div>
-<p class="text-muted small no-print">Event Pts (Champion → 5th Runner Up) feed the <a href="<?= BASE_URL ?>/intramurals/standings/overall.php">Overall Standing</a>. Manage values in <a href="<?= BASE_URL ?>/intramurals/points/index.php">Point System</a>.</p>
+<p class="text-muted small no-print">Event Pts (Champion → 5th Runner Up) feed the <a href="<?= BASE_URL ?>/intramurals/standings/overall.php">Overall Standing</a>.<?php if (canManageIntramurals()): ?> Manage values in <a href="<?= BASE_URL ?>/intramurals/points/index.php">Point System</a>.<?php endif; ?></p>
 <?= renderReportFooter($block ? sportLabel($block['sport']) : 'Result Tabulation') ?>
 <?php endif; ?>
 

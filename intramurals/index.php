@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../includes/auth.php';
-requireLogin();
+requireIntramuralsModule();
 
 $db = getDB();
 $seasonId = getCurrentSeasonId();
@@ -36,31 +36,92 @@ try {
 $pageTitle = 'Intramurals Dashboard';
 require_once __DIR__ . '/../includes/header.php';
 require __DIR__ . '/_season_bar.php';
+
+$intramuralsSubtitle = isSecretariat()
+    ? 'View all matches and standings, generate fixtures, reschedule games, and print reports'
+    : (isCoach() && !canManageIntramurals()
+    ? (hasCoachAssignments()
+        ? 'Manage rosters for your assigned team and event combinations'
+        : 'No event assignments yet — ask your unit manager to assign you under Teams → Event Coaches')
+    : (isTournamentManager() && !canManageIntramurals()
+    ? 'Generate fixtures, record scores, and view standings for your assigned events'
+    : 'Athlete, team, match, and standings management'));
+
+$intramuralsActions = '';
+if (isSecretariat()) {
+    $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/matches/generate.php" class="btn btn-light"><i class="bi bi-magic"></i> Generate Matches</a>';
+    $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/matches/index.php" class="btn btn-outline-light"><i class="bi bi-calendar3"></i> All Matches</a>';
+    $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/standings/overall.php" class="btn btn-outline-light"><i class="bi bi-award"></i> Overall Standing</a>';
+    $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/reports/index.php" class="btn btn-outline-light"><i class="bi bi-printer"></i> Reports</a>';
+}
+if (canModifyRosterAny()) {
+    $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/athletes/add.php" class="btn btn-light"><i class="bi bi-person-plus"></i> Register Athlete</a>';
+}
+if (canModifyRosterAny()) {
+    $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/roster/import.php" class="btn btn-light"><i class="bi bi-file-earmark-arrow-up"></i> Import Roster</a>';
+}
+if (canGenerateMatches() && !isSecretariat()) {
+    $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/matches/generate.php" class="btn btn-light"><i class="bi bi-magic"></i> Generate Matches</a>';
+}
+if (isTournamentManager() && !canManageIntramurals() && canViewStandings()) {
+    $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/standings/overall.php" class="btn btn-outline-light"><i class="bi bi-award"></i> Overall Standing</a>';
+    $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/reports/index.php?type=results" class="btn btn-outline-light"><i class="bi bi-list-check"></i> Match Results</a>';
+}
+if (hasRole('unit_manager') && getUserTeamId()) {
+    $teamId = (int) getUserTeamId();
+    $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/teams/view.php?id=' . $teamId . '" class="btn btn-outline-light"><i class="bi bi-shield"></i> My Team</a>';
+    $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/teams/coaches.php?id=' . $teamId . '" class="btn btn-outline-light"><i class="bi bi-person-badge"></i> Event Coaches</a>';
+} elseif (isTournamentManager() && getTmSportIds()) {
+    $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/matches/index.php?sport=' . (int) getTmSportIds()[0] . '" class="btn btn-outline-light"><i class="bi bi-calendar3"></i> My Events</a>';
+} elseif (hasRole('coach') && getCoachTeamIds()) {
+    $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/teams/view.php?id=' . (int) getCoachTeamIds()[0] . '" class="btn btn-outline-light"><i class="bi bi-shield"></i> My Events</a>';
+}
+
+echo renderDashboardHero('Intramurals', $intramuralsSubtitle, [
+    'icon' => 'bi-trophy-fill',
+    'actions' => $intramuralsActions,
+]);
+
+$coachAssignments = isCoach() && !canManageIntramurals() ? getCoachAssignments() : [];
+if ($coachAssignments) {
+    $teamNames = [];
+    $sportNames = [];
+    foreach ($db->query('SELECT id, name FROM intramural_teams')->fetchAll() as $t) {
+        $teamNames[(int) $t['id']] = $t['name'];
+    }
+    foreach ($db->query('SELECT id, name, category FROM intramural_sports')->fetchAll() as $s) {
+        $sportNames[(int) $s['id']] = sportLabel($s);
+    }
+}
 ?>
 
-<div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-    <div>
-        <h1><i class="bi bi-trophy-fill"></i> Intramurals</h1>
-        <p class="text-muted mb-0">Athlete, team, match, and standings management</p>
-    </div>
-    <div class="d-flex gap-2 flex-wrap">
-        <?php if (canManageTeamAthletes()): ?>
-        <a href="<?= BASE_URL ?>/intramurals/athletes/add.php" class="btn btn-primary"><i class="bi bi-person-plus"></i> Register Athlete</a>
-        <?php endif; ?>
-        <?php if (canManageTeamAthletes() || canManageTeamRoster()): ?>
-        <a href="<?= BASE_URL ?>/intramurals/roster/import.php" class="btn btn-success"><i class="bi bi-file-earmark-arrow-up"></i> Import Roster</a>
-        <?php endif; ?>
-        <?php if (canManageMatches()): ?>
-        <a href="<?= BASE_URL ?>/intramurals/matches/generate.php" class="btn btn-primary"><i class="bi bi-magic"></i> Generate Matches</a>
-        <?php endif; ?>
-        <?php if (hasRole('unit_manager') && getUserTeamId()): ?>
-        <a href="<?= BASE_URL ?>/intramurals/teams/view.php?id=<?= (int) getUserTeamId() ?>" class="btn btn-outline-secondary"><i class="bi bi-shield"></i> My Team</a>
-        <a href="<?= BASE_URL ?>/intramurals/teams/coaches.php?id=<?= (int) getUserTeamId() ?>" class="btn btn-outline-primary"><i class="bi bi-person-badge"></i> Event Coaches</a>
-        <?php elseif (hasRole('coach') && getCoachTeamIds()): ?>
-        <a href="<?= BASE_URL ?>/intramurals/teams/view.php?id=<?= (int) getCoachTeamIds()[0] ?>" class="btn btn-outline-secondary"><i class="bi bi-shield"></i> My Events</a>
-        <?php endif; ?>
+<?php if (!empty($coachAssignments)): ?>
+<div class="card mb-4">
+    <div class="card-header"><i class="bi bi-person-badge"></i> My Coach Assignments</div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr><th>Team</th><th>Event</th><th></th></tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($coachAssignments as $a): ?>
+                    <tr>
+                        <td><?= sanitize($teamNames[(int) $a['team_id']] ?? 'Team #' . $a['team_id']) ?></td>
+                        <td><?= sanitize($sportNames[(int) $a['sport_id']] ?? 'Event #' . $a['sport_id']) ?></td>
+                        <td class="text-end">
+                            <a href="<?= BASE_URL ?>/intramurals/teams/view.php?id=<?= (int) $a['team_id'] ?>&sport=<?= (int) $a['sport_id'] ?>" class="btn btn-sm btn-outline-primary">View Roster</a>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
     </div>
 </div>
+<?php elseif (isCoach() && !canManageIntramurals()): ?>
+<div class="alert alert-warning mb-4">You have no event coach assignments for this season. Ask your unit manager to assign you under <strong>Teams → Event Coaches</strong>.</div>
+<?php endif; ?>
 
 <div class="row g-3 mb-4">
     <div class="col-6 col-md-4 col-xl-2">
@@ -132,14 +193,22 @@ require __DIR__ . '/_season_bar.php';
 </div>
 
 <div class="row g-3 mb-4">
+    <?php if (canManageIntramurals() || (!isTournamentManager() && !isSecretariat())): ?>
     <div class="col-lg-3 col-6"><a class="btn btn-outline-primary w-100" href="<?= BASE_URL ?>/intramurals/athletes/index.php"><i class="bi bi-person-badge"></i> Athletes</a></div>
     <div class="col-lg-3 col-6"><a class="btn btn-outline-primary w-100" href="<?= BASE_URL ?>/intramurals/teams/index.php"><i class="bi bi-shield-shaded"></i> Teams</a></div>
     <div class="col-lg-3 col-6"><a class="btn btn-outline-primary w-100" href="<?= BASE_URL ?>/intramurals/sports/index.php"><i class="bi bi-trophy"></i> Sports</a></div>
     <div class="col-lg-3 col-6"><a class="btn btn-outline-primary w-100" href="<?= BASE_URL ?>/intramurals/roster/index.php"><i class="bi bi-list-ul"></i> Rosters</a></div>
+    <?php endif; ?>
+    <?php if (canViewMatchResults()): ?>
     <div class="col-lg-3 col-6"><a class="btn btn-outline-primary w-100" href="<?= BASE_URL ?>/intramurals/matches/index.php"><i class="bi bi-calendar3"></i> Matches</a></div>
+    <?php endif; ?>
+    <?php if (canViewStandings()): ?>
     <div class="col-lg-3 col-6"><a class="btn btn-outline-primary w-100" href="<?= BASE_URL ?>/intramurals/standings/index.php"><i class="bi bi-bar-chart-steps"></i> Standings</a></div>
     <div class="col-lg-3 col-6"><a class="btn btn-outline-primary w-100" href="<?= BASE_URL ?>/intramurals/standings/overall.php"><i class="bi bi-award"></i> Overall</a></div>
+    <?php endif; ?>
+    <?php if (canManageIntramurals()): ?>
     <div class="col-lg-3 col-6"><a class="btn btn-outline-primary w-100" href="<?= BASE_URL ?>/intramurals/points/index.php"><i class="bi bi-calculator"></i> Point System</a></div>
+    <?php endif; ?>
     <div class="col-lg-3 col-6"><a class="btn btn-outline-primary w-100" href="<?= BASE_URL ?>/intramurals/reports/index.php"><i class="bi bi-printer"></i> Reports</a></div>
 </div>
 

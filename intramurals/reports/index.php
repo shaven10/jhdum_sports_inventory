@@ -1,16 +1,24 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
-requireLogin();
-// Intramurals reports are available to all intramurals viewers (including tabulator / team roles)
+requireIntramuralsAccess();
+
+if (isTournamentManager() && !canManageIntramurals()) {
+    requireMatchResultsAccess();
+}
+
+if (isSecretariat() && !canViewIntramuralsReports()) {
+    flash('error', 'You do not have permission to view intramurals reports.');
+    redirect(getHomeUrl());
+}
 
 $db = getDB();
 $seasonId = getCurrentSeasonId();
-$type = get('type', 'athletes');
+$type = get('type', isTournamentManager() && !canManageIntramurals() ? 'results' : 'athletes');
 $sportId = get('sport');
 $teamId = get('team');
 $export = get('export');
 
-$sports = $db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll();
+$sports = filterSportsForUser($db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll());
 $teams = $db->query('SELECT * FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll();
 
 $titleMap = [
@@ -19,8 +27,17 @@ $titleMap = [
     'schedules' => 'Game Schedules',
     'results' => 'Match Results',
     'medals' => 'Medal Tally',
+    'overall' => 'Overall Standing',
     'standings' => 'Team Standings',
 ];
+if (isTournamentManager() && !canManageIntramurals()) {
+    $titleMap = array_intersect_key($titleMap, array_flip(getTabulatorReportTypes()));
+    if (!array_key_exists($type, $titleMap)) {
+        $type = 'results';
+    }
+} elseif (isSecretariat()) {
+    // Secretariat may access all report types
+}
 $reportTitle = $titleMap[$type] ?? 'Intramurals Report';
 
 $headers = [];
@@ -69,6 +86,7 @@ if ($type === 'athletes') {
     $params = [];
     if ($seasonId) { $sql .= ' AND m.season_id = ?'; $params[] = $seasonId; }
     if ($sportId !== '') { $sql .= ' AND m.sport_id = ?'; $params[] = (int) $sportId; }
+    appendTmSportFilter($sql, $params);
     $sql .= ' ORDER BY m.scheduled_at';
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
@@ -89,6 +107,7 @@ if ($type === 'athletes') {
     $params = [];
     if ($seasonId) { $sql .= ' AND m.season_id = ?'; $params[] = $seasonId; }
     if ($sportId !== '') { $sql .= ' AND m.sport_id = ?'; $params[] = (int) $sportId; }
+    appendTmSportFilter($sql, $params);
     $sql .= ' ORDER BY m.scheduled_at DESC';
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
@@ -100,13 +119,46 @@ if ($type === 'athletes') {
     }
 } elseif ($type === 'medals') {
     $overall = computeOverallStandings();
-    $headers = ['Rank', 'Team', 'Gold', 'Silver', 'Bronze', 'Total Points'];
-    foreach ($overall['standings'] as $r) {
-        $rows[] = [$r['rank'], $r['team_name'], $r['gold'], $r['silver'], $r['bronze'], $r['total']];
+    $medalRows = $overall['standings'];
+    usort($medalRows, function ($a, $b) {
+        if ($a['gold'] !== $b['gold']) {
+            return $b['gold'] <=> $a['gold'];
+        }
+        if ($a['silver'] !== $b['silver']) {
+            return $b['silver'] <=> $a['silver'];
+        }
+        if ($a['bronze'] !== $b['bronze']) {
+            return $b['bronze'] <=> $a['bronze'];
+        }
+        return $b['total'] <=> $a['total'];
+    });
+    $headers = ['Rank', 'Team', 'Gold', 'Silver', 'Bronze', 'Total Medals', 'Total Points'];
+    $rank = 1;
+    foreach ($medalRows as $r) {
+        $medalTotal = $r['gold'] + $r['silver'] + $r['bronze'];
+        $rows[] = [$rank++, $r['team_name'], $r['gold'], $r['silver'], $r['bronze'], $medalTotal, $r['total']];
         $htmlRows[] = $rows[count($rows) - 1];
+    }
+} elseif ($type === 'overall') {
+    $overall = computeOverallStandings();
+    $headers = array_merge(['Rank', 'Team'], $overall['sport_labels'], ['Total Points', 'Gold', 'Silver', 'Bronze']);
+    foreach ($overall['standings'] as $r) {
+        $row = [$r['rank'], $r['team_name']];
+        foreach ($overall['sport_labels'] as $label) {
+            $row[] = $r['sports'][$label] ?? 0;
+        }
+        $row[] = $r['total'];
+        $row[] = $r['gold'];
+        $row[] = $r['silver'];
+        $row[] = $r['bronze'];
+        $rows[] = $row;
+        $htmlRows[] = $row;
     }
 } elseif ($type === 'standings') {
     $sid = $sportId !== '' ? (int) $sportId : ((int) ($sports[0]['id'] ?? 0));
+    if ($sid && !canViewEvent($sid)) {
+        $sid = (int) ($sports[0]['id'] ?? 0);
+    }
     $blocks = $sid ? computeSportStandings($sid) : [];
     $block = $blocks[$sid] ?? null;
     $headers = ['Rank', 'Placement', 'Team', 'Wins', 'Losses', 'Draws', 'Match Pts', 'Event Pts', 'Diff'];
@@ -184,7 +236,7 @@ require __DIR__ . '/../_season_bar.php';
         <small class="text-muted"><?= sanitize(APP_CAMPUS) ?> · <?= date('M d, Y h:i A') ?></small>
     </div>
     <div class="card-body p-0">
-        <div class="table-responsive">
+        <div class="standings-scroll-wrap">
             <table class="table table-sm table-striped mb-0">
                 <thead class="table-light">
                     <tr><?php foreach ($headers as $h): ?><th><?= sanitize($h) ?></th><?php endforeach; ?></tr>

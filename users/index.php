@@ -143,6 +143,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
         ];
         redirect(BASE_URL . '/users/index.php?edit=' . $id);
     }
+
+    if ($formMode === 'delete') {
+        $id = (int) post('user_id');
+        $result = deleteUserAccount($id);
+        if ($result['success']) {
+            flash('success', 'User deleted successfully.');
+        } else {
+            flash('error', $result['message'] ?? 'Could not delete user.');
+        }
+        redirect(BASE_URL . '/users/index.php');
+    }
 }
 
 $search = get('search');
@@ -259,7 +270,7 @@ if ($formState) {
                         <th>Role</th>
                         <th>Team</th>
                         <th>Status</th>
-                        <th class="text-end" style="width: 5rem;">Actions</th>
+                        <th class="text-end" style="width: 7rem;">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -299,7 +310,7 @@ if ($formState) {
                         <td><?= roleBadge($user['role']) ?></td>
                         <td><?= sanitize($user['team_name'] ?? '-') ?></td>
                         <td><?= $user['is_active'] ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-secondary">Inactive</span>' ?></td>
-                        <td class="text-end">
+                        <td class="text-end text-nowrap">
                             <button type="button"
                                     class="btn btn-sm btn-outline-primary btn-edit-user"
                                     data-bs-toggle="modal"
@@ -309,6 +320,19 @@ if ($formState) {
                                     title="Edit user">
                                 <i class="bi bi-pencil"></i>
                             </button>
+                            <?php if ((int) $user['id'] !== (int) ($_SESSION['user_id'] ?? 0)): ?>
+                            <form method="POST" class="d-inline">
+                                <?= csrfField() ?>
+                                <input type="hidden" name="form_mode" value="delete">
+                                <input type="hidden" name="user_id" value="<?= (int) $user['id'] ?>">
+                                <button type="submit"
+                                        class="btn btn-sm btn-outline-danger"
+                                        title="Delete user"
+                                        data-confirm="Permanently delete <?= sanitize($user['first_name'] . ' ' . $user['last_name']) ?> (<?= sanitize($user['username']) ?>)? This cannot be undone.">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </form>
+                            <?php endif; ?>
                         </td>
                     </tr>
                     <?php endforeach; ?>
@@ -381,7 +405,7 @@ if ($formState) {
                                 <option value="<?= $t['id'] ?>"><?= sanitize($t['name']) ?></option>
                                 <?php endforeach; ?>
                             </select>
-                            <div class="form-text" id="teamHelp">Unit managers require a team. Coaches: set a home team, then assign them per event under Teams → Event Coaches.</div>
+                            <div class="form-text" id="teamHelp">Unit managers require a team. Coaches are assigned per team + event under <strong>Teams → Event Coaches</strong> (home team here is optional).</div>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label" for="student_id">Student ID</label>

@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
+requireIntramuralsAccess();
 if (!canManageMatches()) {
     flash('error', 'You do not have permission to update brackets.');
     redirect(BASE_URL . '/intramurals/matches/index.php');
@@ -24,6 +25,8 @@ if ($sportId <= 0) {
     flash('error', 'Select a sport/event to update the bracket.');
     redirect($returnTo);
 }
+
+requireEventMatchAccess($sportId);
 
 $result = advanceBracketFromResults($sportId, $seasonId);
 auditLog($_SESSION['user_id'], 'advance_bracket', 'intramural_sport', $sportId, null, $result);

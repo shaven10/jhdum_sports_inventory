@@ -40,11 +40,11 @@ $flash = getFlash();
         </div>
         <div class="collapse navbar-collapse" id="navbarNav">
             <ul class="navbar-nav me-auto pt-2 pt-lg-0">
-                <?php if (!isIntramuralsOnlyRole()): ?>
                 <li class="nav-item">
                     <a class="nav-link" href="<?= BASE_URL ?>/dashboard.php"><i class="bi bi-speedometer2"></i> Dashboard</a>
                 </li>
 
+                <?php if (canViewInventoryDashboard()): ?>
                 <li class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown" data-bs-auto-close="outside">
                         <i class="bi bi-box-seam"></i> Inventory
@@ -70,6 +70,22 @@ $flash = getFlash();
                 </li>
                 <?php endif; ?>
 
+                <?php if (canViewCompetitionDashboard()): ?>
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown" data-bs-auto-close="outside">
+                        <i class="bi bi-trophy"></i> Results
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/matches/index.php"><i class="bi bi-list-check"></i> Match Results</a></li>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/standings/overall.php"><i class="bi bi-award"></i> Overall Standing</a></li>
+                        <?php if (canManageIntramurals()): ?>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/standings/index.php">Per-Sport Standings</a></li>
+                        <?php endif; ?>
+                    </ul>
+                </li>
+                <?php endif; ?>
+
                 <?php if (canViewIntramurals()): ?>
                 <li class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown" data-bs-auto-close="outside">
@@ -77,15 +93,32 @@ $flash = getFlash();
                     </a>
                     <ul class="dropdown-menu">
                         <li><h6 class="dropdown-header">Overview</h6></li>
-                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/index.php"><i class="bi bi-speedometer2"></i> <?= isIntramuralsOnlyRole() ? 'Dashboard' : 'Intramurals Dashboard' ?></a></li>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/index.php"><i class="bi bi-speedometer2"></i> <?= isCoach() && !canManageIntramurals() ? 'Dashboard' : 'Intramurals Dashboard' ?></a></li>
                         <?php if (canManageIntramurals()): ?>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/seasons/index.php"><i class="bi bi-calendar3"></i> Seasons / Years</a></li>
                         <?php endif; ?>
+                        <?php if (isCoach() && !canManageIntramurals()): ?>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><h6 class="dropdown-header">My Assignments</h6></li>
+                        <?php if (hasCoachAssignments()): ?>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/teams/index.php">My Teams & Events</a></li>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/athletes/index.php">Athletes</a></li>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/roster/index.php">Rosters</a></li>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/roster/import.php">Import Roster</a></li>
+                        <?php else: ?>
+                        <li><span class="dropdown-item-text text-muted small">No event assignments yet. Ask your unit manager to assign you under Teams → Event Coaches.</span></li>
+                        <?php endif; ?>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/sports/guidelines.php"><i class="bi bi-journal-text"></i> Sport Guidelines</a></li>
+                        <?php else: ?>
                         <li><hr class="dropdown-divider"></li>
                         <li><h6 class="dropdown-header">Participants</h6></li>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/athletes/index.php">Athletes</a></li>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/teams/index.php">Teams</a></li>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/sports/index.php">Sports / Events</a></li>
+                        <?php if (canManageIntramurals()): ?>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/sports/managers.php">Tournament Managers</a></li>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/sports/guidelines.php"><i class="bi bi-journal-text"></i> Sport Guidelines</a></li>
+                        <?php endif; ?>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/roster/index.php">Rosters</a></li>
                         <?php if (canManageTeamAthletes() || canManageTeamRoster()): ?>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/roster/import.php">Import Roster</a></li>
@@ -93,16 +126,75 @@ $flash = getFlash();
                         <li><hr class="dropdown-divider"></li>
                         <li><h6 class="dropdown-header">Competition</h6></li>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/matches/index.php">Matches</a></li>
-                        <?php if (canManageMatches()): ?>
+                        <?php if (canGenerateMatches()): ?>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/matches/generate.php"><i class="bi bi-magic"></i> Generate Matches</a></li>
                         <?php endif; ?>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/matches/calendar.php">Calendar</a></li>
+                        <?php if (canViewStandings()): ?>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/standings/index.php">Standings</a></li>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/standings/overall.php">Overall Standing</a></li>
+                        <?php endif; ?>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/points/index.php">Point System</a></li>
                         <li><hr class="dropdown-divider"></li>
                         <li><h6 class="dropdown-header">Reports</h6></li>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/reports/index.php">Intramurals Reports</a></li>
+                        <?php endif; ?>
+                    </ul>
+                </li>
+                <?php endif; ?>
+
+                <?php if (isSecretariat()): ?>
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown" data-bs-auto-close="outside">
+                        <i class="bi bi-calendar3"></i> Competition
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/matches/index.php">All Matches & Results</a></li>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/matches/generate.php"><i class="bi bi-magic"></i> Generate Matches</a></li>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/matches/calendar.php">Calendar</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/standings/index.php">Team Standings</a></li>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/standings/overall.php">Overall Standing</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/reports/index.php">Reports</a></li>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/sports/guidelines.php"><i class="bi bi-journal-text"></i> Sport Guidelines</a></li>
+                    </ul>
+                </li>
+                <?php elseif (isTournamentManager() && !canManageIntramurals()): ?>
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown" data-bs-auto-close="outside">
+                        <i class="bi bi-calendar-event"></i> My Events
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/matches/index.php">Matches & Results</a></li>
+                        <?php if (canGenerateMatches()): ?>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/matches/generate.php"><i class="bi bi-magic"></i> Generate Matches</a></li>
+                        <?php endif; ?>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/matches/calendar.php">Calendar</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/standings/index.php">Per-Sport Standings</a></li>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/standings/overall.php">Overall Standing</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/reports/index.php?type=results">Match Results</a></li>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/reports/index.php?type=standings">Team Standings</a></li>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/sports/guidelines.php"><i class="bi bi-journal-text"></i> Sport Guidelines</a></li>
+                    </ul>
+                </li>
+                <?php elseif (hasRole('unit_manager')): ?>
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown" data-bs-auto-close="outside">
+                        <i class="bi bi-shield"></i> My Team
+                    </a>
+                    <ul class="dropdown-menu">
+                        <?php if (getUserTeamId()): ?>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/teams/view.php?id=<?= (int) getUserTeamId() ?>">Team Profile</a></li>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/teams/coaches.php?id=<?= (int) getUserTeamId() ?>">Event Coaches</a></li>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/teams/coaches.php?id=<?= (int) getUserTeamId() ?>&add_coach=1"><i class="bi bi-person-plus"></i> Add Coach</a></li>
+                        <?php endif; ?>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/athletes/index.php">Athletes</a></li>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/roster/index.php">Rosters</a></li>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/roster/import.php">Import Roster</a></li>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/sports/guidelines.php"><i class="bi bi-journal-text"></i> Sport Guidelines</a></li>
                     </ul>
                 </li>
                 <?php endif; ?>

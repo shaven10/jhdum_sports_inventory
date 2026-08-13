@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
+requireIntramuralsAccess();
 if (!canManageMatches()) {
     flash('error', 'You do not have permission to edit matches.');
     redirect(BASE_URL . '/intramurals/matches/index.php');
@@ -16,6 +17,8 @@ if (!$match) {
     flash('error', 'Match not found.');
     redirect(BASE_URL . '/intramurals/matches/index.php');
 }
+
+requireEventMatchAccess((int) $match['sport_id']);
 
 $sports = $db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll();
 $teams = $db->query('SELECT * FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll();
@@ -57,6 +60,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!$sportId || !$teamA || !$teamB) $errors[] = 'Sport and both teams are required.';
     if ($teamA === $teamB) $errors[] = 'Teams must be different.';
+    if (!canManageEventMatches($sportId)) {
+        $errors[] = 'You do not have permission to manage matches for this event.';
+    }
     if ($scheduledAt !== '' && strtotime($scheduledAt) === false) {
         $errors[] = 'Invalid schedule date/time.';
     }

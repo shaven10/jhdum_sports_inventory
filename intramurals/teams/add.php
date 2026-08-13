@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
+requireIntramuralsAccess();
 requireRole(['admin', 'coordinator', 'staff']);
 
 $db = getDB();

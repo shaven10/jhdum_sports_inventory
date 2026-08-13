@@ -30,27 +30,47 @@ function requireRole(array $roles): void
 }
 
 /**
- * Unit managers and coaches only use the Intramurals module (no inventory).
+ * Roles that use competition/team tools only (no Inventory or full Intramurals module nav).
  */
 function isIntramuralsOnlyRole(): bool
 {
-    return isLoggedIn() && in_array($_SESSION['user_role'] ?? '', ['unit_manager', 'coach', 'tabulator'], true);
+    return isLoggedIn() && in_array($_SESSION['user_role'] ?? '', ['unit_manager', 'coach', 'tabulator', 'secretariat'], true);
+}
+
+/** Secretariat, tournament managers, and unit managers — scoped tools, not the full Intramurals module. */
+function isIntramuralsScopedStaffRole(): bool
+{
+    return isLoggedIn() && in_array($_SESSION['user_role'] ?? '', ['unit_manager', 'tabulator', 'secretariat'], true);
 }
 
 function getHomeUrl(): string
 {
-    if (isIntramuralsOnlyRole()) {
-        return BASE_URL . '/intramurals/index.php';
-    }
     return BASE_URL . '/dashboard.php';
 }
 
-/** Block coaches / unit managers from inventory and other non-intramurals modules. */
+/** Show inventory stats and borrowing widgets on the main dashboard. */
+function canViewInventoryDashboard(): bool
+{
+    return isLoggedIn() && !isIntramuralsOnlyRole();
+}
+
+/** Show match results and overall standings on the main dashboard. */
+function canViewCompetitionDashboard(): bool
+{
+    return isLoggedIn() && (
+        canManageIntramurals()
+        || isSecretariat()
+        || isTournamentManager()
+        || hasRole('unit_manager')
+    );
+}
+
+/** Block intramurals-only roles from inventory and other non-intramurals modules. */
 function requireInventoryModule(): void
 {
     requireLogin();
     if (isIntramuralsOnlyRole()) {
-        flash('error', 'Your account only has access to the Intramurals module.');
+        flash('error', 'Your account does not have access to the Inventory module.');
         redirect(getHomeUrl());
     }
 }
@@ -136,7 +156,8 @@ function getAllRoles(): array
         'staff' => 'Sports Staff',
         'unit_manager' => 'Unit Manager',
         'coach' => 'Coach',
-        'tabulator' => 'Tabulator',
+        'tabulator' => 'Tournament Manager',
+        'secretariat' => 'Secretariat',
         'student' => 'Student',
     ];
 }
@@ -223,7 +244,7 @@ function canCoachEvent(int $teamId, int $sportId): bool
     if (hasRole('unit_manager') && getUserTeamId() === $teamId) {
         return true;
     }
-    if (!hasRole('coach')) {
+    if (!isCoach()) {
         return false;
     }
     foreach (getCoachAssignments() as $a) {
@@ -232,6 +253,69 @@ function canCoachEvent(int $teamId, int $sportId): bool
         }
     }
     return false;
+}
+
+function isCoach(): bool
+{
+    return hasRole('coach');
+}
+
+function hasCoachAssignments(?int $userId = null): bool
+{
+    return !empty(getCoachAssignments($userId));
+}
+
+function requireCoachEventAccess(int $teamId, int $sportId): void
+{
+    if (!canCoachEvent($teamId, $sportId)) {
+        flash('error', 'You are not assigned as coach for this team and event.');
+        redirect(BASE_URL . '/intramurals/index.php');
+    }
+}
+
+/** Restrict roster/match queries to coach-assigned team + event pairs. */
+function appendCoachAssignmentFilter(string &$sql, array &$params, string $teamColumn = 'r.team_id', string $sportColumn = 'r.sport_id'): void
+{
+    if (!isCoach() || canManageIntramurals()) {
+        return;
+    }
+    $assignments = getCoachAssignments();
+    if (empty($assignments)) {
+        $sql .= ' AND 0=1';
+        return;
+    }
+    $parts = [];
+    foreach ($assignments as $a) {
+        $parts[] = "({$teamColumn} = ? AND {$sportColumn} = ?)";
+        $params[] = (int) $a['team_id'];
+        $params[] = (int) $a['sport_id'];
+    }
+    $sql .= ' AND (' . implode(' OR ', $parts) . ')';
+}
+
+function filterTeamsForCoach(array $teams): array
+{
+    if (canManageIntramurals() || !isCoach()) {
+        return $teams;
+    }
+    $allowed = array_flip(getCoachTeamIds());
+    return array_values(array_filter($teams, static fn($t) => isset($allowed[(int) $t['id']])));
+}
+
+function filterSportsForCoach(array $sports, ?int $teamId = null): array
+{
+    if (canManageIntramurals() || !isCoach()) {
+        return $sports;
+    }
+    if ($teamId) {
+        $allowed = array_flip(getCoachSportIdsForTeam($teamId));
+        return array_values(array_filter($sports, static fn($s) => isset($allowed[(int) $s['id']])));
+    }
+    $allowed = [];
+    foreach (getCoachAssignments() as $a) {
+        $allowed[(int) $a['sport_id']] = (int) $a['sport_id'];
+    }
+    return array_values(array_filter($sports, static fn($s) => isset($allowed[(int) $s['id']])));
 }
 
 function isTeamScopedRole(): bool
@@ -254,6 +338,77 @@ function canManageUsers(): bool
     return isLoggedIn() && $_SESSION['user_role'] === 'admin';
 }
 
+/** Unit managers can create coach accounts for their team; intramurals staff and admins can create for any team. */
+function canCreateCoachAccounts(?int $teamId = null): bool
+{
+    if (canManageIntramurals() || canManageUsers()) {
+        return true;
+    }
+    if (!hasRole('unit_manager')) {
+        return false;
+    }
+    $userTeam = getUserTeamId();
+    if (!$userTeam) {
+        return false;
+    }
+    return $teamId === null || $teamId === $userTeam;
+}
+
+/**
+ * Create a coach user account scoped to a team.
+ *
+ * @return array{success:bool, message?:string, id?:int}
+ */
+function createCoachAccount(array $input, int $teamId): array
+{
+    if (!canCreateCoachAccounts($teamId)) {
+        return ['success' => false, 'message' => 'You do not have permission to create coach accounts.'];
+    }
+
+    ensurePasswordPlainColumn();
+
+    $username = trim($input['username'] ?? '');
+    $email = trim($input['email'] ?? '');
+    $password = $input['password'] ?? '';
+    $firstName = trim($input['first_name'] ?? '');
+    $lastName = trim($input['last_name'] ?? '');
+    $department = trim($input['department'] ?? '');
+    $phone = trim($input['phone'] ?? '');
+
+    if ($username === '' || $email === '' || $password === '' || $firstName === '' || $lastName === '') {
+        return ['success' => false, 'message' => 'Username, email, password, first name, and last name are required.'];
+    }
+    if (strlen($password) < 6) {
+        return ['success' => false, 'message' => 'Password must be at least 6 characters.'];
+    }
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        return ['success' => false, 'message' => 'Enter a valid email address.'];
+    }
+
+    $db = getDB();
+    $check = $db->prepare('SELECT id FROM users WHERE username = ? OR email = ?');
+    $check->execute([$username, $email]);
+    if ($check->fetch()) {
+        return ['success' => false, 'message' => 'Username or email already exists.'];
+    }
+
+    $hash = password_hash($password, PASSWORD_DEFAULT);
+    $stmt = $db->prepare('INSERT INTO users (username, email, password, password_plain, first_name, last_name, department, phone, role, team_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    $stmt->execute([$username, $email, $hash, $password, $firstName, $lastName, $department ?: null, $phone ?: null, 'coach', $teamId]);
+    $id = (int) $db->lastInsertId();
+    syncUserTeamAssignment($id, 'coach', $teamId);
+    auditLog($_SESSION['user_id'], 'create_coach', 'user', $id, null, [
+        'team_id' => $teamId,
+        'username' => $username,
+    ]);
+
+    return [
+        'success' => true,
+        'id' => $id,
+        'message' => 'Coach account created successfully.',
+    ];
+}
+
 function canViewReports(): bool
 {
     // Inventory reports — intramurals-only roles use intramurals reports instead
@@ -271,9 +426,57 @@ function canManageIntramurals(): bool
     return isLoggedIn() && in_array($_SESSION['user_role'], ['admin', 'coordinator', 'staff'], true);
 }
 
+/** Access any intramurals page (all roles except students). */
+function canAccessIntramurals(): bool
+{
+    if (!isLoggedIn()) {
+        return false;
+    }
+
+    return in_array($_SESSION['user_role'] ?? '', [
+        'admin',
+        'coordinator',
+        'staff',
+        'unit_manager',
+        'coach',
+        'tabulator',
+        'secretariat',
+    ], true);
+}
+
+/** Show the full Intramurals module in navigation (admin, staff, coaches only). */
 function canViewIntramurals(): bool
 {
-    return isLoggedIn();
+    if (!isLoggedIn()) {
+        return false;
+    }
+
+    return in_array($_SESSION['user_role'] ?? '', [
+        'admin',
+        'coordinator',
+        'staff',
+        'coach',
+    ], true);
+}
+
+/** Block students and other roles without intramurals access from module pages. */
+function requireIntramuralsAccess(): void
+{
+    requireLogin();
+    if (!canAccessIntramurals()) {
+        flash('error', 'You do not have permission to access the Intramurals module.');
+        redirect(getHomeUrl());
+    }
+}
+
+/** Block secretariat, tournament managers, and unit managers from the full Intramurals module UI. */
+function requireIntramuralsModule(): void
+{
+    requireIntramuralsAccess();
+    if (isIntramuralsScopedStaffRole()) {
+        flash('error', 'You do not have access to the Intramurals module.');
+        redirect(getHomeUrl());
+    }
 }
 
 /** Unit managers can register/edit athletes for their own team. */
@@ -314,24 +517,46 @@ function canManageTeamRoster(?int $teamId = null, ?int $sportId = null): bool
     }
 
     if ($_SESSION['user_role'] === 'coach') {
-        $assignments = getCoachAssignments();
-        if (empty($assignments)) {
-            return false;
+        if ($teamId !== null && $sportId !== null) {
+            return canCoachEvent($teamId, $sportId);
         }
-        if ($teamId === null && $sportId === null) {
-            return true;
+        if ($teamId !== null) {
+            return !empty(getCoachSportIdsForTeam($teamId));
         }
-        foreach ($assignments as $a) {
-            $matchTeam = $teamId === null || (int) $a['team_id'] === $teamId;
-            $matchSport = $sportId === null || (int) $a['sport_id'] === $sportId;
-            if ($matchTeam && $matchSport) {
-                return true;
-            }
-        }
-        return false;
+        return hasCoachAssignments();
     }
 
     return false;
+}
+
+/** Only administrators can lock/unlock athlete rosters for a season. */
+function canLockRoster(): bool
+{
+    return canManageSettings();
+}
+
+/** Show roster lock status to all staff roles (not students). */
+function shouldShowRosterLockStatus(): bool
+{
+    return isLoggedIn() && ($_SESSION['user_role'] ?? '') !== 'student';
+}
+
+/** Roster changes allowed when season roster is not locked and user has roster permission. */
+function canModifyRoster(?int $teamId = null, ?int $sportId = null): bool
+{
+    if (isRosterLocked()) {
+        return false;
+    }
+    return canManageTeamRoster($teamId, $sportId);
+}
+
+/** Any roster workflow (import, register, assign) when not locked. */
+function canModifyRosterAny(): bool
+{
+    if (isRosterLocked()) {
+        return false;
+    }
+    return canManageTeamAthletes() || canManageTeamRoster();
 }
 
 function canEditOwnTeam(?int $teamId = null): bool
@@ -346,14 +571,243 @@ function canEditOwnTeam(?int $teamId = null): bool
     return $userTeam && ($teamId === null || $teamId === $userTeam);
 }
 
+function isSecretariat(): bool
+{
+    return hasRole('secretariat');
+}
+
 function canManageMatches(): bool
 {
-    return canManageIntramurals() || hasRole('tabulator');
+    if (canManageIntramurals() || isSecretariat()) {
+        return true;
+    }
+    return isTournamentManager() && !empty(getTmSportIds());
+}
+
+function canManageEventMatches(int $sportId): bool
+{
+    if (canManageIntramurals() || isSecretariat()) {
+        return true;
+    }
+    if (!isTournamentManager()) {
+        return false;
+    }
+    return in_array($sportId, getTmSportIds(), true);
+}
+
+function requireEventMatchAccess(int $sportId): void
+{
+    if (!canManageEventMatches($sportId)) {
+        flash('error', 'You do not have permission to manage matches for this event.');
+        redirect(BASE_URL . '/intramurals/matches/index.php');
+    }
+}
+
+function isTournamentManager(): bool
+{
+    return hasRole('tabulator');
+}
+
+/**
+ * Tournament manager assignments for the current user: [ ['sport_id'=>], ... ]
+ */
+function getTmAssignments(?int $userId = null): array
+{
+    if ($userId === null) {
+        if (!isLoggedIn() || !isTournamentManager()) {
+            return [];
+        }
+        $userId = (int) $_SESSION['user_id'];
+    }
+
+    static $cache = [];
+    $seasonId = function_exists('getCurrentSeasonId') ? getCurrentSeasonId() : null;
+    $cacheKey = $userId . ':' . ($seasonId ?? 0);
+    if (isset($cache[$cacheKey])) {
+        return $cache[$cacheKey];
+    }
+
+    try {
+        $db = getDB();
+        if ($seasonId) {
+            $stmt = $db->prepare('SELECT sport_id FROM intramural_event_managers WHERE manager_user_id = ? AND season_id = ?');
+            $stmt->execute([$userId, $seasonId]);
+        } else {
+            $stmt = $db->prepare('SELECT sport_id FROM intramural_event_managers WHERE manager_user_id = ?');
+            $stmt->execute([$userId]);
+        }
+        $cache[$cacheKey] = $stmt->fetchAll() ?: [];
+    } catch (Throwable $e) {
+        $cache[$cacheKey] = [];
+    }
+
+    return $cache[$cacheKey];
+}
+
+function getTmSportIds(?int $userId = null): array
+{
+    $ids = [];
+    foreach (getTmAssignments($userId) as $a) {
+        $ids[(int) $a['sport_id']] = (int) $a['sport_id'];
+    }
+    return array_values($ids);
+}
+
+function getEventManagerForSport(int $sportId, ?int $seasonId = null): ?int
+{
+    $seasonId = $seasonId ?? getCurrentSeasonId();
+    if (!$seasonId) {
+        return null;
+    }
+
+    try {
+        $db = getDB();
+        $stmt = $db->prepare('SELECT manager_user_id FROM intramural_event_managers WHERE sport_id = ? AND season_id = ?');
+        $stmt->execute([$sportId, $seasonId]);
+        $id = $stmt->fetchColumn();
+        return $id ? (int) $id : null;
+    } catch (Throwable $e) {
+        return null;
+    }
+}
+
+function eventHasManager(int $sportId, ?int $seasonId = null): bool
+{
+    return getEventManagerForSport($sportId, $seasonId) !== null;
+}
+
+/**
+ * Set or clear the tournament manager for a specific event.
+ */
+function assignEventManager(int $sportId, ?int $managerUserId, ?int $seasonId = null): void
+{
+    $db = getDB();
+    $seasonId = $seasonId ?? getCurrentSeasonId();
+    if (!$seasonId) {
+        return;
+    }
+
+    if (!$managerUserId) {
+        $db->prepare('DELETE FROM intramural_event_managers WHERE sport_id = ? AND season_id = ?')
+            ->execute([$sportId, $seasonId]);
+        return;
+    }
+
+    $db->prepare('INSERT INTO intramural_event_managers (sport_id, season_id, manager_user_id) VALUES (?, ?, ?)
+        ON DUPLICATE KEY UPDATE manager_user_id = VALUES(manager_user_id), updated_at = CURRENT_TIMESTAMP')
+        ->execute([$sportId, $seasonId, $managerUserId]);
 }
 
 function canRecordScores(): bool
 {
     return canManageMatches();
+}
+
+/** Generate match fixtures (tabulators: assigned events only). */
+function canGenerateMatches(): bool
+{
+    return canManageMatches();
+}
+
+/** View per-sport standings and overall rankings. */
+function canViewStandings(): bool
+{
+    if (canManageIntramurals() || isSecretariat() || hasRole('unit_manager')) {
+        return true;
+    }
+    if (isTournamentManager()) {
+        return !empty(getTmSportIds());
+    }
+    return false;
+}
+
+/** View match schedules and completed results. */
+function canViewMatchResults(): bool
+{
+    if (canManageIntramurals() || isSecretariat() || hasRole('unit_manager')) {
+        return true;
+    }
+    if (isTournamentManager()) {
+        return !empty(getTmSportIds());
+    }
+    return false;
+}
+
+/** View all intramurals reports (schedules, results, standings, rosters, etc.). */
+function canViewIntramuralsReports(): bool
+{
+    return canManageIntramurals() || isSecretariat();
+}
+
+/** View standings or results for a specific event (tabulators: assigned events only). */
+function canViewEvent(int $sportId): bool
+{
+    if (canManageIntramurals() || isSecretariat()) {
+        return true;
+    }
+    if (isTournamentManager()) {
+        return in_array($sportId, getTmSportIds(), true);
+    }
+    return isLoggedIn();
+}
+
+function requireStandingsAccess(): void
+{
+    if (!canViewStandings()) {
+        flash('error', 'You do not have permission to view standings.');
+        redirect(getHomeUrl());
+    }
+}
+
+function requireMatchResultsAccess(): void
+{
+    if (!canViewMatchResults()) {
+        flash('error', 'You do not have permission to view match results.');
+        redirect(getHomeUrl());
+    }
+}
+
+function requireEventViewAccess(int $sportId): void
+{
+    if (!canViewEvent($sportId)) {
+        flash('error', 'You do not have permission to view this event.');
+        redirect(BASE_URL . '/intramurals/matches/index.php');
+    }
+}
+
+/** Filter sport rows to those accessible by the current tabulator. */
+function filterSportsForUser(array $sports): array
+{
+    if (canManageIntramurals() || isSecretariat()) {
+        return $sports;
+    }
+    if (isTournamentManager()) {
+        $allowed = array_flip(getTmSportIds());
+        return array_values(array_filter($sports, static fn($s) => isset($allowed[(int) $s['id']])));
+    }
+    return $sports;
+}
+
+/** Report types available to tournament managers. */
+function getTabulatorReportTypes(): array
+{
+    return ['schedules', 'results', 'standings', 'medals', 'overall'];
+}
+
+/** Restrict match queries to tabulator-assigned events. */
+function appendTmSportFilter(string &$sql, array &$params, string $column = 'm.sport_id'): void
+{
+    if (!isTournamentManager() || canManageIntramurals()) {
+        return;
+    }
+    $tmSportIds = getTmSportIds();
+    if (empty($tmSportIds)) {
+        $sql .= ' AND 0=1';
+        return;
+    }
+    $placeholders = implode(',', array_fill(0, count($tmSportIds), '?'));
+    $sql .= " AND $column IN ($placeholders)";
+    $params = array_merge($params, $tmSportIds);
 }
 
 function canBorrowEquipment(): bool
@@ -376,7 +830,11 @@ function requireTeamAccess(?int $teamId, bool $allowCoach = true): void
         }
     }
 
-    if ($allowCoach && $role === 'coach' && $teamId && in_array($teamId, getCoachTeamIds(), true)) {
+    if ($allowCoach && isCoach() && $teamId && in_array($teamId, getCoachTeamIds(), true)) {
+        return;
+    }
+
+    if ($allowCoach && isCoach() && !$teamId && hasCoachAssignments()) {
         return;
     }
 
@@ -413,6 +871,81 @@ function syncUserTeamAssignment(int $userId, string $role, ?int $teamId): void
     }
 
     $db->prepare('UPDATE users SET team_id = NULL WHERE id = ?')->execute([$userId]);
+}
+
+/**
+ * Permanently delete a user account (admin only).
+ *
+ * @return array{success:bool, message?:string}
+ */
+function deleteUserAccount(int $userId): array
+{
+    if (!canManageUsers()) {
+        return ['success' => false, 'message' => 'You do not have permission to delete users.'];
+    }
+
+    if ($userId <= 0) {
+        return ['success' => false, 'message' => 'Invalid user.'];
+    }
+
+    if (isLoggedIn() && (int) $_SESSION['user_id'] === $userId) {
+        return ['success' => false, 'message' => 'You cannot delete your own account.'];
+    }
+
+    $db = getDB();
+    $stmt = $db->prepare('SELECT * FROM users WHERE id = ?');
+    $stmt->execute([$userId]);
+    $user = $stmt->fetch();
+
+    if (!$user) {
+        return ['success' => false, 'message' => 'User not found.'];
+    }
+
+    if ($user['role'] === 'admin') {
+        $adminCount = (int) $db->query("SELECT COUNT(*) FROM users WHERE role = 'admin'")->fetchColumn();
+        if ($adminCount <= 1) {
+            return ['success' => false, 'message' => 'Cannot delete the only administrator account.'];
+        }
+    }
+
+    $blocking = [
+        'borrowing_transactions' => 'processed inventory transactions',
+        'damage_reports' => 'damage reports',
+        'maintenance_schedule' => 'maintenance records',
+    ];
+    foreach ($blocking as $table => $label) {
+        $column = $table === 'borrowing_transactions' ? 'processed_by' : ($table === 'damage_reports' ? 'reported_by' : 'created_by');
+        $check = $db->prepare("SELECT COUNT(*) FROM {$table} WHERE {$column} = ?");
+        $check->execute([$userId]);
+        if ((int) $check->fetchColumn() > 0) {
+            return [
+                'success' => false,
+                'message' => 'This user has linked ' . $label . ' and cannot be deleted. Deactivate the account instead.',
+            ];
+        }
+    }
+
+    try {
+        $db->beginTransaction();
+
+        $db->prepare('UPDATE intramural_teams SET unit_manager_id = NULL WHERE unit_manager_id = ?')->execute([$userId]);
+        $db->prepare('UPDATE intramural_teams SET coach_user_id = NULL WHERE coach_user_id = ?')->execute([$userId]);
+        $db->prepare('DELETE FROM users WHERE id = ?')->execute([$userId]);
+
+        auditLog((int) $_SESSION['user_id'], 'delete_user', 'user', $userId, [
+            'username' => $user['username'],
+            'email' => $user['email'],
+            'role' => $user['role'],
+        ]);
+
+        $db->commit();
+        return ['success' => true];
+    } catch (Throwable $e) {
+        if ($db->inTransaction()) {
+            $db->rollBack();
+        }
+        return ['success' => false, 'message' => 'Could not delete user. Deactivate the account instead.'];
+    }
 }
 
 /**

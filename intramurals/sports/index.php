@@ -1,9 +1,11 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
-requireLogin();
+requireIntramuralsModule();
 ensurePlayersPerEventColumn();
 ensureSportCategoryEnum();
 ensureSportVenueColumn();
+ensureSportGuidelinesColumn();
+ensureEventManagersTable();
 
 $db = getDB();
 $formState = null;
@@ -27,6 +29,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && canManageIntramurals()) {
         $description = post('description');
         $scoring = post('scoring_method', 'points');
         $rules = post('rules');
+        $guidelines = trim(post('guidelines'));
         $scheduleNotes = post('schedule_notes');
         $venue = post('venue');
         $tournamentFormat = post('tournament_format', 'round_robin');
@@ -54,8 +57,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && canManageIntramurals()) {
         if (empty($errors)) {
             if ($action === 'add') {
                 try {
-                    $stmt = $db->prepare('INSERT INTO intramural_sports (name, description, category, players_per_event, scoring_method, rules, schedule_notes, venue, tournament_format, format_notes, win_points, draw_points, loss_points, point_scheme_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-                    $stmt->execute([$name, $description, $category, $playersPerEvent, $scoring, $rules, $scheduleNotes, $venue ?: null, $tournamentFormat, $formatNotes ?: null, $winPoints, $drawPoints, $lossPoints, $pointSchemeId]);
+                    $stmt = $db->prepare('INSERT INTO intramural_sports (name, description, category, players_per_event, scoring_method, rules, guidelines, schedule_notes, venue, tournament_format, format_notes, win_points, draw_points, loss_points, point_scheme_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+                    $stmt->execute([$name, $description, $category, $playersPerEvent, $scoring, $rules, $guidelines !== '' ? $guidelines : null, $scheduleNotes, $venue ?: null, $tournamentFormat, $formatNotes ?: null, $winPoints, $drawPoints, $lossPoints, $pointSchemeId]);
                     auditLog($_SESSION['user_id'], 'create', 'intramural_sport', (int) $db->lastInsertId(), null, ['name' => $name, 'category' => $category, 'tournament_format' => $tournamentFormat, 'venue' => $venue]);
                     flash('success', 'Sport added successfully.');
                     redirect(BASE_URL . '/intramurals/sports/index.php');
@@ -86,6 +89,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && canManageIntramurals()) {
                     'description' => $description,
                     'scoring_method' => $scoring,
                     'rules' => $rules,
+                    'guidelines' => $guidelines,
                     'schedule_notes' => $scheduleNotes,
                     'venue' => $venue,
                     'tournament_format' => $tournamentFormat,
@@ -118,11 +122,18 @@ $regCount = $seasonId
 $matchCount = $seasonId
     ? '(SELECT COUNT(*) FROM intramural_matches m WHERE m.sport_id = s.id AND m.season_id = ' . (int) $seasonId . ')'
     : '(SELECT COUNT(*) FROM intramural_matches m WHERE m.sport_id = s.id)';
+$tmJoin = $seasonId
+    ? 'LEFT JOIN intramural_event_managers em ON em.sport_id = s.id AND em.season_id = ' . (int) $seasonId . '
+    LEFT JOIN users tm ON em.manager_user_id = tm.id'
+    : 'LEFT JOIN intramural_event_managers em ON em.sport_id = s.id
+    LEFT JOIN users tm ON em.manager_user_id = tm.id';
 $sports = $db->query("SELECT s.*, ps.name as scheme_name, ps.points_1, ps.points_2, ps.points_3, ps.points_4, ps.points_5, ps.points_6,
+    tm.first_name as tm_first_name, tm.last_name as tm_last_name, tm.username as tm_username,
     $regCount as athlete_count,
     $matchCount as match_count
     FROM intramural_sports s
     LEFT JOIN intramural_point_schemes ps ON s.point_scheme_id = ps.id
+    $tmJoin
     ORDER BY s.name, s.category")->fetchAll();
 $pointSchemes = getAllPointSchemes(true);
 
@@ -132,6 +143,7 @@ $formDefaults = [
     'description' => '',
     'scoring_method' => 'points',
     'rules' => '',
+    'guidelines' => '',
     'schedule_notes' => '',
     'venue' => '',
     'tournament_format' => 'round_robin',
@@ -163,6 +175,7 @@ if ($formState) {
                 'description' => $sport['description'] ?? '',
                 'scoring_method' => $sport['scoring_method'],
                 'rules' => $sport['rules'] ?? '',
+                'guidelines' => $sport['guidelines'] ?? '',
                 'schedule_notes' => $sport['schedule_notes'] ?? '',
                 'venue' => $sport['venue'] ?? '',
                 'tournament_format' => $sport['tournament_format'] ?? 'round_robin',
@@ -190,7 +203,9 @@ require __DIR__ . '/../_season_bar.php';
     </div>
     <div class="d-flex flex-wrap gap-2 ms-auto">
         <a href="<?= BASE_URL ?>/intramurals/points/index.php" class="btn btn-sm btn-outline-primary"><i class="bi bi-calculator"></i> Point System</a>
+        <a href="<?= BASE_URL ?>/intramurals/sports/guidelines.php" class="btn btn-sm btn-outline-primary"><i class="bi bi-journal-text"></i> Sport Guidelines</a>
         <?php if (canManageIntramurals()): ?>
+        <a href="<?= BASE_URL ?>/intramurals/sports/managers.php" class="btn btn-sm btn-outline-primary"><i class="bi bi-person-workspace"></i> Tournament Managers</a>
         <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#sportModal" data-sport-mode="add">
             <i class="bi bi-plus-lg"></i> Add Sport
         </button>
@@ -210,16 +225,17 @@ require __DIR__ . '/../_season_bar.php';
                         <th>Players/Event</th>
                         <th>Venue</th>
                         <th>Tournament Style</th>
+                        <th>Tournament Manager</th>
                         <th>Placement Scheme</th>
                         <th>Match W/D/L</th>
                         <th>Athletes</th>
                         <th>Matches</th>
-                        <?php if (canManageIntramurals()): ?><th class="text-end" style="width: 9rem;">Actions</th><?php endif; ?>
+                        <?php if (canManageIntramurals()): ?><th class="text-end" style="width: 11rem;">Actions</th><?php endif; ?>
                     </tr>
                 </thead>
                 <tbody>
                     <?php if (empty($sports)): ?>
-                    <tr><td colspan="<?= canManageIntramurals() ? 10 : 9 ?>" class="text-center text-muted py-4">No sports yet.</td></tr>
+                    <tr><td colspan="<?= canManageIntramurals() ? 11 : 10 ?>" class="text-center text-muted py-4">No sports yet.</td></tr>
                     <?php else: ?>
                     <?php foreach ($sports as $s): ?>
                     <?php
@@ -230,6 +246,7 @@ require __DIR__ . '/../_season_bar.php';
                         'description' => $s['description'] ?? '',
                         'scoring_method' => $s['scoring_method'],
                         'rules' => $s['rules'] ?? '',
+                        'guidelines' => $s['guidelines'] ?? '',
                         'schedule_notes' => $s['schedule_notes'] ?? '',
                         'venue' => $s['venue'] ?? '',
                         'tournament_format' => $s['tournament_format'] ?? 'round_robin',
@@ -262,6 +279,14 @@ require __DIR__ . '/../_season_bar.php';
                             <?php endif; ?>
                         </td>
                         <td>
+                            <?php if (!empty($s['tm_username'])): ?>
+                            <?= sanitize(trim(($s['tm_first_name'] ?? '') . ' ' . ($s['tm_last_name'] ?? ''))) ?>
+                            <br><small class="text-muted"><?= sanitize($s['tm_username']) ?></small>
+                            <?php else: ?>
+                            <span class="badge bg-warning text-dark">Unassigned</span>
+                            <?php endif; ?>
+                        </td>
+                        <td>
                             <?= sanitize($s['scheme_name'] ?: 'Default') ?>
                             <br><small class="text-muted"><?= $s['scheme_name'] ? sanitize(formatSchemePoints($s)) : '10/7/5/3/2/1' ?></small>
                         </td>
@@ -270,6 +295,20 @@ require __DIR__ . '/../_season_bar.php';
                         <td><?= (int) $s['match_count'] ?></td>
                         <?php if (canManageIntramurals()): ?>
                         <td class="text-end text-nowrap">
+                            <a href="<?= BASE_URL ?>/intramurals/sports/guidelines.php?sport=<?= (int) $s['id'] ?>"
+                               class="btn btn-sm btn-outline-secondary"
+                               title="Guidelines">
+                                <i class="bi bi-journal-text"></i>
+                            </a>
+                            <button type="button"
+                                    class="btn btn-sm btn-outline-secondary btn-copy-sport"
+                                    data-bs-toggle="modal"
+                                    data-bs-target="#sportModal"
+                                    data-sport-mode="copy"
+                                    data-sport="<?= $sportPayload ?>"
+                                    title="Copy sport">
+                                <i class="bi bi-copy"></i>
+                            </button>
                             <button type="button"
                                     class="btn btn-sm btn-outline-primary btn-edit-sport"
                                     data-bs-toggle="modal"
@@ -304,11 +343,15 @@ require __DIR__ . '/../_season_bar.php';
                 <?= csrfField() ?>
                 <input type="hidden" name="action" id="sportAction" value="add">
                 <input type="hidden" name="id" id="sportId" value="">
+                <input type="hidden" name="guidelines" id="sportGuidelines" value="">
                 <div class="modal-header">
                     <h5 class="modal-title" id="sportModalLabel"><i class="bi bi-plus-lg"></i> Add Sport</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
+                    <div id="sportCopyNotice" class="alert alert-info d-none">
+                        <i class="bi bi-copy"></i> Creating a copy — review the name and category, then save to add the new event.
+                    </div>
                     <div id="sportFormErrors" class="alert alert-danger d-none"></div>
                     <div class="row g-3">
                         <div class="col-md-8">
@@ -390,7 +433,7 @@ require __DIR__ . '/../_season_bar.php';
                                 each tie is Singles → Doubles → Singles (best of 3).
                                 Recommended for Badminton, Table Tennis, and Lawn Tennis.
                             </div>
-                            <div class="form-text">Tabulators use this when generating match fixtures.</div>
+                            <div class="form-text">Tournament managers use this when generating match fixtures.</div>
                         </div>
                         <div class="col-12">
                             <label class="form-label" for="formatNotes">Format Notes (agreed details)</label>
@@ -419,8 +462,61 @@ require __DIR__ . '/../_season_bar.php';
     const nameInput = document.getElementById('sportNameInput');
     const formatSelect = document.getElementById('tournamentFormatSelect');
     const sdsHint = document.getElementById('sdsFormatHint');
+    const copyNotice = document.getElementById('sportCopyNotice');
+    const guidelinesInput = document.getElementById('sportGuidelines');
     const racketSports = <?= json_encode(racketSdsSportNames()) ?>;
+    const existingSports = <?= json_encode(array_map(static fn($s) => [
+        'name' => $s['name'],
+        'category' => $s['category'],
+    ], $sports), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>;
     let allowAutoSds = true;
+
+    function sportExists(name, category) {
+        const n = (name || '').trim().toLowerCase();
+        return existingSports.some(function (s) {
+            return s.name.trim().toLowerCase() === n && s.category === category;
+        });
+    }
+
+    function suggestCopyFields(data) {
+        const baseName = (data.name || '').trim();
+        let category = data.category || 'men';
+        if (!sportExists(baseName, category)) {
+            return { name: baseName, category: category };
+        }
+        const categories = ['men', 'women', 'mixed'];
+        for (let i = 0; i < categories.length; i++) {
+            const cat = categories[i];
+            if (cat !== category && !sportExists(baseName, cat)) {
+                return { name: baseName, category: cat };
+            }
+        }
+        let copyName = baseName + ' (Copy)';
+        let suffix = 2;
+        while (sportExists(copyName, category)) {
+            copyName = baseName + ' (Copy ' + suffix + ')';
+            suffix++;
+        }
+        return { name: copyName, category: category };
+    }
+
+    function fillSportForm(data) {
+        nameInput.value = data.name || '';
+        document.getElementById('sportCategory').value = data.category || 'men';
+        document.getElementById('playersPerEvent').value = data.players_per_event ?? '';
+        document.getElementById('scoringMethod').value = data.scoring_method || 'points';
+        document.getElementById('pointSchemeId').value = data.point_scheme_id || '';
+        document.getElementById('winPoints').value = data.win_points ?? 3;
+        document.getElementById('drawPoints').value = data.draw_points ?? 1;
+        document.getElementById('lossPoints').value = data.loss_points ?? 0;
+        document.getElementById('sportDescription').value = data.description || '';
+        document.getElementById('sportRules').value = data.rules || '';
+        document.getElementById('scheduleNotes').value = data.schedule_notes || '';
+        document.getElementById('sportVenue').value = data.venue || '';
+        formatSelect.value = data.tournament_format || 'round_robin';
+        document.getElementById('formatNotes').value = data.format_notes || '';
+        guidelinesInput.value = data.guidelines || '';
+    }
 
     function syncSdsUi() {
         const name = (nameInput.value || '').trim();
@@ -446,34 +542,30 @@ require __DIR__ . '/../_season_bar.php';
 
     function setMode(mode, data) {
         data = data || {};
-        sportAction.value = mode;
-        sportId.value = data.id || '';
+        sportAction.value = mode === 'copy' ? 'add' : mode;
+        sportId.value = mode === 'edit' ? (data.id || '') : '';
         form.reset();
-        allowAutoSds = mode === 'add';
+        allowAutoSds = mode === 'add' || mode === 'copy';
+
+        if (copyNotice) {
+            copyNotice.classList.toggle('d-none', mode !== 'copy');
+        }
 
         if (mode === 'add') {
             modalTitle.innerHTML = '<i class="bi bi-plus-lg"></i> Add Sport';
             formSubmit.textContent = 'Add Sport';
+            fillSportForm({});
+        } else if (mode === 'copy') {
+            modalTitle.innerHTML = '<i class="bi bi-copy"></i> Copy Sport';
+            formSubmit.textContent = 'Create Copy';
+            const suggested = suggestCopyFields(data);
+            fillSportForm(Object.assign({}, data, suggested, { id: '' }));
         } else {
             modalTitle.innerHTML = '<i class="bi bi-pencil"></i> Edit Sport';
             formSubmit.textContent = 'Update Sport';
             allowAutoSds = false;
+            fillSportForm(data);
         }
-
-        nameInput.value = data.name || '';
-        document.getElementById('sportCategory').value = data.category || 'men';
-        document.getElementById('playersPerEvent').value = data.players_per_event ?? '';
-        document.getElementById('scoringMethod').value = data.scoring_method || 'points';
-        document.getElementById('pointSchemeId').value = data.point_scheme_id || '';
-        document.getElementById('winPoints').value = data.win_points ?? 3;
-        document.getElementById('drawPoints').value = data.draw_points ?? 1;
-        document.getElementById('lossPoints').value = data.loss_points ?? 0;
-        document.getElementById('sportDescription').value = data.description || '';
-        document.getElementById('sportRules').value = data.rules || '';
-        document.getElementById('scheduleNotes').value = data.schedule_notes || '';
-        document.getElementById('sportVenue').value = data.venue || '';
-        formatSelect.value = data.tournament_format || 'round_robin';
-        document.getElementById('formatNotes').value = data.format_notes || '';
 
         syncSdsUi();
         showErrors([]);
@@ -483,7 +575,7 @@ require __DIR__ . '/../_season_bar.php';
         trigger.addEventListener('click', function () {
             const mode = this.dataset.sportMode || 'add';
             let data = {};
-            if (mode === 'edit' && this.dataset.sport) {
+            if ((mode === 'edit' || mode === 'copy') && this.dataset.sport) {
                 try {
                     data = JSON.parse(this.dataset.sport);
                 } catch (e) {
@@ -520,7 +612,7 @@ require __DIR__ . '/../_season_bar.php';
     const bootErrors = <?= json_encode($formErrors, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>;
 
     if (bootMode) {
-        setMode(bootMode, bootData);
+        setMode(bootMode === 'copy' ? 'copy' : bootMode, bootData);
         showErrors(bootErrors);
         bootstrap.Modal.getOrCreateInstance(modalEl).show();
     }

@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
-requireLogin();
+requireIntramuralsAccess();
 
 $db = getDB();
 $search = get('search');
@@ -14,6 +14,16 @@ if ($search) {
     $params[] = "%$search%";
     $params[] = "%$search%";
     $params[] = "%$search%";
+}
+if (isCoach() && !canManageIntramurals()) {
+    $coachTeamIds = getCoachTeamIds();
+    if (empty($coachTeamIds)) {
+        $where[] = '0=1';
+    } else {
+        $placeholders = implode(',', array_fill(0, count($coachTeamIds), '?'));
+        $where[] = "t.id IN ($placeholders)";
+        $params = array_merge($params, $coachTeamIds);
+    }
 }
 $whereClause = implode(' AND ', $where);
 
@@ -41,7 +51,7 @@ require __DIR__ . '/../_season_bar.php';
 <div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2">
     <div>
         <h1><i class="bi bi-shield-shaded"></i> Teams / Houses</h1>
-        <p class="text-muted mb-0">Register teams, colors, logos, and rosters</p>
+        <p class="text-muted mb-0"><?= isCoach() && !canManageIntramurals() ? 'Teams and events you are assigned to coach' : 'Register teams, colors, logos, and rosters' ?></p>
     </div>
     <div class="d-flex gap-2">
         <?php if (canManageIntramurals()): ?>

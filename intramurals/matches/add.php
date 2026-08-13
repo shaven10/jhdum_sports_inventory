@@ -1,11 +1,12 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
+requireIntramuralsAccess();
 if (!canManageMatches()) {
     flash('error', 'You do not have permission to schedule matches.');
     redirect(BASE_URL . '/intramurals/matches/index.php');
 }
-// Tabulators generate fixtures then assign date/time — not free-form single matches
-if (hasRole('tabulator') && !canManageIntramurals()) {
+// Tournament managers generate fixtures then assign date/time — not free-form single matches
+if ((hasRole('tabulator') || isSecretariat()) && !canManageIntramurals()) {
     redirect(BASE_URL . '/intramurals/matches/generate.php');
 }
 requireWritableSeason();

@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
-requireLogin();
+requireIntramuralsAccess();
 
 $db = getDB();
 $id = (int) get('id');
@@ -24,32 +24,36 @@ if (!$match) {
     redirect(BASE_URL . '/intramurals/matches/index.php');
 }
 
+requireEventViewAccess((int) $match['sport_id']);
+
 // Quick live score / status update
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && canRecordScores() && verifyCsrf(post('csrf_token'))) {
-    requireWritableSeason();
-    $action = post('action');
-    if ($action === 'live_score') {
-        $scoreA = (int) post('score_a');
-        $scoreB = (int) post('score_b');
-        $status = post('status', 'ongoing');
-        $winner = null;
-        if ($status === 'completed') {
-            $winner = determineMatchWinner($scoreA, $scoreB, (int) $match['team_a_id'], (int) $match['team_b_id'], 'completed');
-        }
-        $db->prepare('UPDATE intramural_matches SET score_a=?, score_b=?, status=?, winner_team_id=? WHERE id=?')
-            ->execute([$scoreA, $scoreB, $status, $winner, $id]);
-        auditLog($_SESSION['user_id'], 'score_update', 'intramural_match', $id, null, ['score_a' => $scoreA, 'score_b' => $scoreB, 'status' => $status]);
-
-        $advanceMsg = '';
-        if (in_array($status, ['completed', 'forfeit'], true) && $seasonId = getCurrentSeasonId()) {
-            $adv = advanceBracketFromResults((int) $match['sport_id'], (int) $seasonId);
-            if ((int) ($adv['updated'] ?? 0) > 0) {
-                $advanceMsg = ' Bracket updated: ' . (int) $adv['updated'] . ' TBD slot(s) filled.';
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
+    if (canRecordScores() && canManageEventMatches((int) $match['sport_id'])) {
+        requireWritableSeason();
+        $action = post('action');
+        if ($action === 'live_score') {
+            $scoreA = (int) post('score_a');
+            $scoreB = (int) post('score_b');
+            $status = post('status', 'ongoing');
+            $winner = null;
+            if ($status === 'completed') {
+                $winner = determineMatchWinner($scoreA, $scoreB, (int) $match['team_a_id'], (int) $match['team_b_id'], 'completed');
             }
-        }
+            $db->prepare('UPDATE intramural_matches SET score_a=?, score_b=?, status=?, winner_team_id=? WHERE id=?')
+                ->execute([$scoreA, $scoreB, $status, $winner, $id]);
+            auditLog($_SESSION['user_id'], 'score_update', 'intramural_match', $id, null, ['score_a' => $scoreA, 'score_b' => $scoreB, 'status' => $status]);
 
-        flash('success', 'Score updated.' . $advanceMsg);
-        redirect(BASE_URL . '/intramurals/matches/view.php?id=' . $id);
+            $advanceMsg = '';
+            if (in_array($status, ['completed', 'forfeit'], true) && $seasonId = getCurrentSeasonId()) {
+                $adv = advanceBracketFromResults((int) $match['sport_id'], (int) $seasonId);
+                if ((int) ($adv['updated'] ?? 0) > 0) {
+                    $advanceMsg = ' Bracket updated: ' . (int) $adv['updated'] . ' TBD slot(s) filled.';
+                }
+            }
+
+            flash('success', 'Score updated.' . $advanceMsg);
+            redirect(BASE_URL . '/intramurals/matches/view.php?id=' . $id);
+        }
     }
 }
 
@@ -64,7 +68,7 @@ require __DIR__ . '/../_season_bar.php';
         <p class="text-muted mb-0"><?= formatDateTime($match['scheduled_at']) ?> · <?= sanitize($match['venue'] ?: 'TBA') ?></p>
     </div>
     <div class="d-flex gap-2">
-        <?php if (canManageMatches()): ?>
+        <?php if (canManageEventMatches((int) $match['sport_id'])): ?>
         <a href="<?= BASE_URL ?>/intramurals/matches/schedule.php?id=<?= $id ?>" class="btn btn-<?= empty($match['scheduled_at']) ? 'warning' : 'outline-primary' ?>">
             <?= empty($match['scheduled_at']) ? 'Set Date/Time' : 'Reschedule' ?>
         </a>

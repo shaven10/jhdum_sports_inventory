@@ -1,11 +1,16 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
-requireLogin();
+requireIntramuralsAccess();
 ensureSportCategoryEnum();
 
 if (!canManageTeamAthletes() && !canManageTeamRoster()) {
     flash('error', 'You do not have permission to import athlete rosters.');
     redirect(BASE_URL . '/intramurals/roster/index.php');
+}
+
+if (isCoach() && !canManageIntramurals() && !hasCoachAssignments()) {
+    flash('error', 'You have no event coach assignments. Ask your unit manager to assign you under Teams → Event Coaches.');
+    redirect(BASE_URL . '/intramurals/index.php');
 }
 
 $download = get('download');
@@ -21,6 +26,7 @@ if ($download === 'csv') {
 }
 
 requireWritableSeason();
+requireUnlockedRoster();
 
 $db = getDB();
 $seasonId = getCurrentSeasonId();
@@ -30,8 +36,8 @@ $scoped = isTeamScopedRole();
 $isCoach = hasRole('coach') && !canManageIntramurals();
 
 $lookups = buildRosterImportLookups();
-$teams = $db->query('SELECT id, name, short_name FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll();
-$sports = $db->query('SELECT id, name, category, players_per_event, venue FROM intramural_sports ORDER BY name, category')->fetchAll();
+$teams = filterTeamsForCoach($db->query('SELECT id, name, short_name FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll());
+$sports = filterSportsForCoach($db->query('SELECT id, name, category, players_per_event, venue FROM intramural_sports ORDER BY name, category')->fetchAll());
 
 $results = null;
 $errors = [];

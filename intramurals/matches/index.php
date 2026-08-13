@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
-requireLogin();
+requireIntramuralsAccess();
+requireMatchResultsAccess();
 
 $db = getDB();
 $seasonId = getCurrentSeasonId();
@@ -32,6 +33,16 @@ if ($status !== '') {
 if ($unscheduled === '1') {
     $where[] = 'm.scheduled_at IS NULL';
 }
+if (isTournamentManager() && !canManageIntramurals()) {
+    $tmSportIds = getTmSportIds();
+    if (empty($tmSportIds)) {
+        $where[] = '0=1';
+    } else {
+        $placeholders = implode(',', array_fill(0, count($tmSportIds), '?'));
+        $where[] = "m.sport_id IN ($placeholders)";
+        $params = array_merge($params, $tmSportIds);
+    }
+}
 $whereClause = implode(' AND ', $where);
 
 $countStmt = $db->prepare("SELECT COUNT(*) FROM intramural_matches m
@@ -55,7 +66,7 @@ $stmt = $db->prepare($sql);
 $stmt->execute($params);
 $matches = $stmt->fetchAll();
 
-$sports = $db->query('SELECT id, name, category, tournament_format FROM intramural_sports ORDER BY name')->fetchAll();
+$sports = filterSportsForUser($db->query('SELECT id, name, category, tournament_format FROM intramural_sports ORDER BY name')->fetchAll());
 
 $pendingCount = 0;
 if ($seasonId) {
@@ -77,7 +88,7 @@ $queryBase = BASE_URL . '/intramurals/matches/index.php?search=' . urlencode($se
         <p class="text-muted mb-0">Generate fixtures by tournament style, auto-schedule, then edit any date/time as needed</p>
     </div>
     <div class="d-flex gap-2 flex-wrap">
-        <?php if (canManageMatches()): ?>
+        <?php if (canGenerateMatches()): ?>
         <a href="<?= BASE_URL ?>/intramurals/matches/generate.php<?= $sportId !== '' ? '?sport=' . (int) $sportId : '' ?>" class="btn btn-primary"><i class="bi bi-magic"></i> Generate Matches</a>
         <?php if ($sportId !== ''): ?>
         <form method="POST" action="<?= BASE_URL ?>/intramurals/matches/advance.php" class="d-inline">

@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
-requireLogin();
+requireIntramuralsAccess();
 
 $db = getDB();
 $id = (int) get('id');
@@ -15,8 +15,11 @@ if (!$athlete) {
 
 $athleteTeamId = !empty($athlete['team_id']) ? (int) $athlete['team_id'] : null;
 $canEditProfile = canManageIntramurals() || ($athleteTeamId !== null && canManageTeamAthletes($athleteTeamId));
-$canEditRoster = canManageIntramurals()
+$canViewRoster = canManageIntramurals()
     || ($athleteTeamId !== null && canManageTeamRoster($athleteTeamId));
+$rosterLockStatus = getRosterLockStatus();
+$rosterLocked = $rosterLockStatus['is_locked'];
+$canEditRoster = $canViewRoster && !$rosterLocked;
 
 if (!$canEditProfile && !$canEditRoster) {
     flash('error', 'You can only manage athletes for your assigned team/events.');
@@ -74,6 +77,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'add_sport') {
         requireWritableSeason();
+        requireUnlockedRoster();
         $sportId = (int) post('sport_id');
         $regTeamId = (int) post('reg_team_id');
         if (hasRole('unit_manager') && $userTeamId) {
@@ -104,6 +108,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'remove_sport') {
         requireWritableSeason();
+        requireUnlockedRoster();
         $regId = (int) post('reg_id');
         $reg = $db->prepare('SELECT * FROM intramural_registrations WHERE id = ? AND athlete_id = ?');
         $reg->execute([$regId, $id]);
@@ -274,13 +279,28 @@ require __DIR__ . '/../_season_bar.php';
     </div>
     <?php endif; ?>
     <div class="col-lg-5">
-        <?php if ($canEditRoster): ?>
+        <?php if ($rosterLocked && shouldShowRosterLockStatus()): ?>
+        <div class="alert alert-warning">
+            <i class="bi bi-lock-fill"></i> The roster is locked<?= !empty($rosterLockStatus['lock_date']) ? ' (effective ' . sanitize(formatDate($rosterLockStatus['lock_date'])) . ')' : '' ?>.
+            Sport assignments cannot be added or removed until an administrator unlocks it.
+        </div>
+        <?php elseif (!$rosterLocked && shouldShowRosterLockStatus() && $rosterLockStatus['is_scheduled'] && !empty($rosterLockStatus['lock_date'])): ?>
+        <div class="alert alert-info">
+            <i class="bi bi-calendar-event"></i> Roster will lock on <strong><?= sanitize(formatDate($rosterLockStatus['lock_date'])) ?></strong>. Complete sport assignments before that date.
+        </div>
+        <?php endif; ?>
+        <?php if ($canViewRoster): ?>
         <div class="card mb-3">
             <div class="card-header">Sport Assignments</div>
             <ul class="list-group list-group-flush">
                 <?php foreach ($regs as $r): ?>
-                <?php $canManageThis = canManageTeamRoster((int) $r['team_id'], (int) $r['sport_id']); ?>
-                <?php if ($isCoach && !$canManageThis) continue; ?>
+                <?php
+                $canSeeThis = canManageTeamRoster((int) $r['team_id'], (int) $r['sport_id']);
+                if ($isCoach && !$canSeeThis) {
+                    continue;
+                }
+                $canManageThis = $canEditRoster && $canSeeThis;
+                ?>
                 <li class="list-group-item">
                     <div class="d-flex justify-content-between align-items-start">
                         <div>
@@ -303,6 +323,7 @@ require __DIR__ . '/../_season_bar.php';
                 <?php endif; ?>
             </ul>
         </div>
+        <?php if ($canEditRoster): ?>
         <div class="card">
             <div class="card-header">Assign to <?= $isCoach ? 'Your Event' : 'Sport' ?></div>
             <div class="card-body">

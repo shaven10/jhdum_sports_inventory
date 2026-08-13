@@ -1,7 +1,12 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
-requireLogin();
+requireIntramuralsAccess();
 ensureSportCategoryEnum();
+
+if (isCoach() && !canManageIntramurals() && !hasCoachAssignments()) {
+    flash('error', 'You have no event coach assignments. Ask your unit manager to assign you under Teams → Event Coaches.');
+    redirect(BASE_URL . '/intramurals/index.php');
+}
 
 $db = getDB();
 $seasonId = getCurrentSeasonId();
@@ -12,8 +17,8 @@ $teamId = get('team');
 $category = get('category');
 $export = get('export');
 
-$sports = $db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll();
-$teams = $db->query('SELECT id, name FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll();
+$sports = filterSportsForCoach($db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll());
+$teams = filterTeamsForCoach($db->query('SELECT id, name FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll());
 $categoryOptions = sportCategoryOptions();
 
 $where = ['a.is_active = 1'];
@@ -39,6 +44,7 @@ if ($category !== '' && array_key_exists($category, $categoryOptions)) {
     $params[] = $category;
 }
 $whereClause = implode(' AND ', $where);
+appendCoachAssignmentFilter($whereClause, $params);
 
 $sql = "SELECT r.*, a.first_name, a.last_name, a.student_id, a.athlete_code, a.gender, a.department, a.year_level,
                s.id as sport_id, s.name as sport_name, s.category as sport_category,
@@ -119,7 +125,7 @@ require __DIR__ . '/../_season_bar.php';
         <p class="text-muted mb-0"><?= count($rows) ?> athlete<?= count($rows) === 1 ? '' : 's' ?> across <?= count($grouped) ?> event<?= count($grouped) === 1 ? '' : 's' ?></p>
     </div>
     <div class="d-flex gap-2 flex-wrap">
-        <?php if (canManageTeamAthletes() || canManageTeamRoster()): ?>
+        <?php if (canModifyRosterAny()): ?>
         <a href="<?= BASE_URL ?>/intramurals/roster/import.php" class="btn btn-primary"><i class="bi bi-file-earmark-arrow-up"></i> Import Excel</a>
         <a href="<?= BASE_URL ?>/intramurals/roster/import.php?download=template" class="btn btn-outline-success"><i class="bi bi-download"></i> Download Template</a>
         <?php endif; ?>

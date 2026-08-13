@@ -188,6 +188,7 @@ function roleBadge(string $role): string
         'unit_manager'  => 'warning',
         'coach'         => 'dark',
         'tabulator'     => 'secondary',
+        'secretariat'   => 'primary',
         'student'       => 'success',
     ];
     $class = $classes[$role] ?? 'secondary';
@@ -430,6 +431,112 @@ function renderReportFooter(?string $extra = null): string
 <div class="report-brand-footer d-none d-print-block">
     <hr class="report-brand-rule">
     <p class="mb-0 text-center small">{$campus} · {$appName}{$extraSafe} · Printed {$when}</p>
+</div>
+HTML;
+}
+
+/** Banner shown to non-student accounts when the active season roster is locked. */
+function renderRosterLockNotice(?int $seasonId = null): string
+{
+    if (!function_exists('shouldShowRosterLockStatus') || !shouldShowRosterLockStatus()) {
+        return '';
+    }
+
+    $status = function_exists('getRosterLockStatus') ? getRosterLockStatus($seasonId) : null;
+    if (!$status || !$status['is_locked']) {
+        return '';
+    }
+
+    $year = sanitize($status['year_label'] ?? '');
+    $by = $status['locked_by_name'] ? sanitize($status['locked_by_name']) : 'Administrator';
+    $lockDate = !empty($status['lock_date']) ? sanitize(formatDate($status['lock_date'])) : null;
+    $when = !empty($status['locked_at']) ? sanitize(formatDateTime($status['locked_at'])) : '—';
+    $dateLine = $lockDate
+        ? "Effective lock date: <strong>{$lockDate}</strong>. Locked by {$by} on {$when}."
+        : "Locked by {$by} on {$when}.";
+
+    return <<<HTML
+<div class="alert alert-warning roster-lock-notice mb-3">
+    <div class="d-flex flex-wrap align-items-start gap-2">
+        <div class="flex-grow-1">
+            <i class="bi bi-lock-fill"></i>
+            <strong>Roster locked</strong> for intramurals {$year}.
+            {$dateLine}
+            Roster changes (imports, registrations, and sport assignments) are disabled until an administrator unlocks the roster.
+        </div>
+    </div>
+</div>
+HTML;
+}
+
+/** Banner when a future roster lock date is scheduled. */
+function renderRosterLockScheduleNotice(?int $seasonId = null): string
+{
+    if (!function_exists('shouldShowRosterLockStatus') || !shouldShowRosterLockStatus()) {
+        return '';
+    }
+
+    $status = function_exists('getRosterLockStatus') ? getRosterLockStatus($seasonId) : null;
+    if (!$status || !$status['is_scheduled'] || empty($status['lock_date'])) {
+        return '';
+    }
+
+    $year = sanitize($status['year_label'] ?? '');
+    $lockDate = sanitize(formatDate($status['lock_date']));
+    $by = $status['locked_by_name'] ? sanitize($status['locked_by_name']) : 'Administrator';
+
+    return <<<HTML
+<div class="alert alert-info roster-lock-schedule-notice mb-3">
+    <div class="d-flex flex-wrap align-items-start gap-2">
+        <div class="flex-grow-1">
+            <i class="bi bi-calendar-event"></i>
+            <strong>Roster lock scheduled</strong> for intramurals {$year}.
+            Rosters will lock on <strong>{$lockDate}</strong> (set by {$by}).
+            Make roster changes before that date.
+        </div>
+    </div>
+</div>
+HTML;
+}
+
+/** Locked and scheduled roster alerts for staff dashboards and intramurals pages. */
+function renderRosterLockAlerts(?int $seasonId = null): string
+{
+    return renderRosterLockNotice($seasonId) . renderRosterLockScheduleNotice($seasonId);
+}
+
+/**
+ * Branded dashboard header with official logo.
+ *
+ * @param array{icon?:string, actions?:string} $options
+ */
+function renderDashboardHero(string $title, string $subtitle = '', array $options = []): string
+{
+    $icon = $options['icon'] ?? 'bi-speedometer2';
+    $actions = $options['actions'] ?? '';
+    $logo = sanitize(appLogoUrl());
+    $campus = sanitize(defined('APP_CAMPUS') ? APP_CAMPUS : 'J.H. Cerilles State College');
+    $appName = sanitize(defined('APP_SHORT_NAME') ? APP_SHORT_NAME : 'JHCSC SDMIS');
+    $titleSafe = sanitize($title);
+    $subtitleSafe = sanitize($subtitle);
+    $actionsHtml = $actions !== ''
+        ? '<div class="dashboard-hero-actions d-flex gap-2 flex-wrap">' . $actions . '</div>'
+        : '';
+
+    return <<<HTML
+<div class="dashboard-hero">
+    <div class="dashboard-hero-inner d-flex flex-wrap justify-content-between align-items-center gap-3">
+        <div class="d-flex align-items-center gap-3">
+            <img src="{$logo}" alt="JHCSC Logo" class="dashboard-brand-logo">
+            <div>
+                <div class="dashboard-campus">{$campus}</div>
+                <div class="dashboard-app-name">{$appName}</div>
+                <h1 class="dashboard-title mb-1"><i class="bi {$icon}"></i> {$titleSafe}</h1>
+                <p class="dashboard-subtitle mb-0">{$subtitleSafe}</p>
+            </div>
+        </div>
+        {$actionsHtml}
+    </div>
 </div>
 HTML;
 }
