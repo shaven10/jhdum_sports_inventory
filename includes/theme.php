@@ -266,6 +266,11 @@ function renderThemeStyles(): string
         $info = adjustHexBrightness($primary, 25);
     }
 
+    $successRgb = hexToRgb($success);
+    $infoRgb = hexToRgb($info);
+    $warningRgb = hexToRgb($warning);
+    $dangerRgb = hexToRgb($danger);
+
     $css = ":root {
         --theme-primary: {$primary};
         --theme-secondary: {$secondary};
@@ -283,9 +288,13 @@ function renderThemeStyles(): string
         --bs-secondary: {$secondary};
         --bs-secondary-rgb: {$secondaryRgb};
         --bs-success: {$success};
+        --bs-success-rgb: {$successRgb};
         --bs-info: {$info};
+        --bs-info-rgb: {$infoRgb};
         --bs-warning: {$warning};
+        --bs-warning-rgb: {$warningRgb};
         --bs-danger: {$danger};
+        --bs-danger-rgb: {$dangerRgb};
         --bs-link-color: {$primary};
         --bs-link-hover-color: " . adjustHexBrightness($primary, -15) . ";
         --jhcsc-primary: {$primary};
@@ -294,12 +303,12 @@ function renderThemeStyles(): string
     }";
 
     $css .= "
-    .bg-primary { background-color: {$primary} !important; }
-    .bg-secondary { background-color: {$secondary} !important; }
-    .bg-success { background-color: {$success} !important; }
-    .bg-info { background-color: {$info} !important; }
-    .bg-warning { background-color: {$warning} !important; }
-    .bg-danger { background-color: {$danger} !important; }
+    .bg-primary { background-color: rgba({$primaryRgb}, var(--bs-bg-opacity, 1)) !important; }
+    .bg-secondary { background-color: rgba({$secondaryRgb}, var(--bs-bg-opacity, 1)) !important; }
+    .bg-success { background-color: rgba({$successRgb}, var(--bs-bg-opacity, 1)) !important; }
+    .bg-info { background-color: rgba({$infoRgb}, var(--bs-bg-opacity, 1)) !important; }
+    .bg-warning { background-color: rgba({$warningRgb}, var(--bs-bg-opacity, 1)) !important; }
+    .bg-danger { background-color: rgba({$dangerRgb}, var(--bs-bg-opacity, 1)) !important; }
     .text-primary { color: {$primary} !important; }
     .text-secondary { color: {$secondary} !important; }
     .text-success { color: {$success} !important; }
@@ -307,7 +316,7 @@ function renderThemeStyles(): string
     .text-warning { color: {$warning} !important; }
     .text-danger { color: {$danger} !important; }
     .border-primary { border-color: {$primary} !important; }
-    .navbar.bg-primary { background-color: {$primary} !important; }
+    .navbar.bg-primary { background-color: rgba({$primaryRgb}, var(--bs-bg-opacity, 1)) !important; }
     .page-link { color: {$primary}; }
     .page-item.active .page-link {
         background-color: {$primary};
@@ -324,12 +333,43 @@ function renderThemeStyles(): string
         border-color: {$secondary};
         box-shadow: 0 0 0 0.2rem rgba({$primaryRgb}, 0.2);
     }
-    .badge.bg-primary { background-color: {$primary} !important; }
-    .badge.bg-secondary { background-color: {$secondary} !important; }
-    .badge.bg-success { background-color: {$success} !important; }
-    .badge.bg-info { background-color: {$info} !important; color: " . contrastTextColor($info) . " !important; }
-    .badge.bg-warning { background-color: {$warning} !important; color: " . contrastTextColor($warning) . " !important; }
-    .badge.bg-danger { background-color: {$danger} !important; }
+    .badge.bg-primary { background-color: rgba({$primaryRgb}, var(--bs-bg-opacity, 1)) !important; }
+    .badge.bg-secondary { background-color: rgba({$secondaryRgb}, var(--bs-bg-opacity, 1)) !important; }
+    .badge.bg-success { background-color: rgba({$successRgb}, var(--bs-bg-opacity, 1)) !important; }
+    .badge.bg-info { background-color: rgba({$infoRgb}, var(--bs-bg-opacity, 1)) !important; color: " . contrastTextColor($info) . " !important; }
+    .badge.bg-warning { background-color: rgba({$warningRgb}, var(--bs-bg-opacity, 1)) !important; color: " . contrastTextColor($warning) . " !important; }
+    .badge.bg-danger { background-color: rgba({$dangerRgb}, var(--bs-bg-opacity, 1)) !important; }
+
+    /* Dashboard stat icons: light tint + solid glyph (never same color on solid bg) */
+    .stat-card .stat-icon.bg-primary {
+        background-color: rgba({$primaryRgb}, 0.12) !important;
+        color: {$primary} !important;
+    }
+    .stat-card .stat-icon.bg-secondary {
+        background-color: rgba({$secondaryRgb}, 0.12) !important;
+        color: {$secondary} !important;
+    }
+    .stat-card .stat-icon.bg-success {
+        background-color: rgba({$successRgb}, 0.12) !important;
+        color: {$success} !important;
+    }
+    .stat-card .stat-icon.bg-info {
+        background-color: rgba({$infoRgb}, 0.12) !important;
+        color: {$info} !important;
+    }
+    .stat-card .stat-icon.bg-warning {
+        background-color: rgba({$warningRgb}, 0.12) !important;
+        color: {$warning} !important;
+    }
+    .stat-card .stat-icon.bg-danger {
+        background-color: rgba({$dangerRgb}, 0.12) !important;
+        color: {$danger} !important;
+    }
+    .stat-card .stat-icon i,
+    .stat-card .stat-icon i::before,
+    .stat-card .stat-icon.bi::before {
+        color: inherit !important;
+    }
     ";
 
     $css .= buildThemeButtonCss('primary', $primary);

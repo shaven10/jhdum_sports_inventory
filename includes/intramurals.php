@@ -3185,6 +3185,24 @@ function eventHasManualRanks(int $sportId, int $seasonId): bool
 }
 
 /**
+ * Whether the event already has a match schedule (any non-cancelled fixture).
+ * Those events use match results for placement instead of manual ranks.
+ */
+function eventHasScheduledMatches(int $sportId, int $seasonId): bool
+{
+    if ($sportId <= 0 || $seasonId <= 0) {
+        return false;
+    }
+
+    $db = getDB();
+    $stmt = $db->prepare("SELECT COUNT(*) FROM intramural_matches
+        WHERE sport_id = ? AND season_id = ? AND status <> 'cancelled'");
+    $stmt->execute([$sportId, $seasonId]);
+
+    return (int) $stmt->fetchColumn() > 0;
+}
+
+/**
  * Team IDs that belong in the event ranking UI (roster first, else all active teams).
  *
  * @return list<int>
@@ -3219,6 +3237,9 @@ function saveEventRanks(int $sportId, int $seasonId, array $ranksByTeam, ?int $u
     $errors = [];
     if ($sportId <= 0 || $seasonId <= 0) {
         return ['Select a season and event before saving ranks.'];
+    }
+    if (eventHasScheduledMatches($sportId, $seasonId)) {
+        return ['Manual ranking is not allowed for events that already have scheduled matches. Placement follows match results.'];
     }
 
     $clean = [];
@@ -3425,6 +3446,9 @@ function computeSportStandings(?int $sportId = null, ?int $seasonId = null): arr
         });
 
         $manualRanks = $seasonId ? getEventRanks($sid, (int) $seasonId) : [];
+        if ($manualRanks && $seasonId && eventHasScheduledMatches($sid, (int) $seasonId)) {
+            $manualRanks = [];
+        }
         $rank = 1;
         foreach ($rows as &$row) {
             $row['rank'] = $rank++;
@@ -3564,6 +3588,55 @@ function athleteFullName(array $athlete): string
     return trim(($athlete['first_name'] ?? '') . ' ' . ($athlete['last_name'] ?? ''));
 }
 
+/** Official JHCSC course / program options for athlete records. */
+function athleteCourseOptions(): array
+{
+    return [
+        'Bachelor of Elementary Education (BEEd)',
+        'Bachelor of Secondary Education (BSEd)',
+        'Bachelor of Physical Education (BPEd)',
+        'Bachelor of Early Childhood Education (BECEd)',
+        'Bachelor of Technology and Livelihood Education (BTLEd)',
+        'Bachelor of Science in Information Technology (BSIT)',
+        'Bachelor of Science in Computer Science (BSCS)',
+        'Bachelor of Science in Agriculture (BSA)',
+        'Bachelor of Science in Forestry (BSF)',
+        'Bachelor of Science in Environmental Science (BSES)',
+        'Bachelor of Agricultural Technology (BAT)',
+        'Bachelor of Science in Criminology (BSCrim)',
+        'Bachelor of Science in Business Administration (BSBA)',
+        'Bachelor of Science in Accountancy (BSA)',
+        'Bachelor of Science in Hospitality Management (BSHM)',
+        'Bachelor of Science in Tourism Management (BSTM)',
+        'Diploma / Certificate Program',
+    ];
+}
+
+function athleteYearLevelOptions(): array
+{
+    return ['1st Year', '2nd Year', '3rd Year', '4th Year', '5th Year', 'Graduate'];
+}
+
+function renderAthleteCourseSelect(string $selected = '', string $name = 'department'): string
+{
+    $options = athleteCourseOptions();
+    $html = '<select name="' . sanitize($name) . '" class="form-select">';
+    $html .= '<option value="">Select course</option>';
+    $matched = false;
+    foreach ($options as $opt) {
+        $isSelected = $selected === $opt;
+        if ($isSelected) {
+            $matched = true;
+        }
+        $html .= '<option value="' . sanitize($opt) . '"' . ($isSelected ? ' selected' : '') . '>' . sanitize($opt) . '</option>';
+    }
+    if ($selected !== '' && !$matched) {
+        $html .= '<option value="' . sanitize($selected) . '" selected>' . sanitize($selected) . '</option>';
+    }
+    $html .= '</select>';
+    return $html;
+}
+
 /**
  * Official event roster for one team (locked/registered athletes only).
  *
@@ -3578,7 +3651,7 @@ function getOfficialEventRoster(int $sportId, int $teamId, ?int $seasonId = null
 
     $db = getDB();
     $stmt = $db->prepare('SELECT r.id, r.jersey_number, r.position, r.event_category, r.athlete_id,
-            a.first_name, a.last_name, a.student_id, a.athlete_code, a.gender, a.year_level, a.department, a.photo
+            a.first_name, a.last_name, a.student_id, a.athlete_code, a.gender, a.year_level, a.department, a.photo, a.birthdate
         FROM intramural_registrations r
         JOIN intramural_athletes a ON r.athlete_id = a.id
         WHERE r.sport_id = ? AND r.team_id = ? AND r.season_id = ? AND a.is_active = 1
@@ -3638,8 +3711,8 @@ function rosterImportHeaders(): array
 function rosterImportSampleRows(): array
 {
     return [
-        ['2024-0001', 'Juan', 'Dela Cruz', 'male', '2004-05-12', 'College of Education', '2nd Year', 'Blue Eagles', 'juan@example.com', '09171234567', 'Basketball 5x5', 'men', '7', 'Guard', ''],
-        ['2024-0002', 'Maria', 'Santos', 'female', '2005-01-20', 'College of Arts and Sciences', '1st Year', 'Red Lions', '', '', 'Volleyball', 'women', '10', 'Setter', ''],
+        ['2024-0001', 'Juan', 'Dela Cruz', 'male', '2004-05-12', 'Bachelor of Elementary Education (BEEd)', '2nd Year', 'Blue Eagles', 'juan@example.com', '09171234567', 'Basketball 5x5', 'men', '7', 'Guard', ''],
+        ['2024-0002', 'Maria', 'Santos', 'female', '2005-01-20', 'Bachelor of Science in Criminology (BSCrim)', '1st Year', 'Red Lions', '', '', 'Volleyball', 'women', '10', 'Setter', ''],
     ];
 }
 
@@ -3753,9 +3826,9 @@ function athleteImportSampleRows(?string $teamName = null): array
 {
     $team = $teamName ?: 'Blue Eagles';
     return [
-        ['2024-0001', 'Juan', 'Dela Cruz', 'male', '2004-05-12', 'College of Education', '2nd Year', $team, 'juan@example.com', '09171234567', 'Basketball 5x5', 'men', '7', 'Guard', ''],
-        ['2024-0002', 'Maria', 'Santos', 'female', '2005-01-20', 'College of Arts and Sciences', '1st Year', $team, '', '', 'Volleyball', 'women', '10', 'Setter', ''],
-        ['2024-0003', 'Pedro', 'Reyes', 'male', '2004-08-03', 'College of Business', '3rd Year', $team, '', '', '', '', '', '', ''],
+        ['2024-0001', 'Juan', 'Dela Cruz', 'male', '2004-05-12', 'Bachelor of Elementary Education (BEEd)', '2nd Year', $team, 'juan@example.com', '09171234567', 'Basketball 5x5', 'men', '7', 'Guard', ''],
+        ['2024-0002', 'Maria', 'Santos', 'female', '2005-01-20', 'Bachelor of Science in Criminology (BSCrim)', '1st Year', $team, '', '', 'Volleyball', 'women', '10', 'Setter', ''],
+        ['2024-0003', 'Pedro', 'Reyes', 'male', '2004-08-03', 'Bachelor of Science in Business Administration (BSBA)', '3rd Year', $team, '', '', '', '', '', '', ''],
     ];
 }
 
@@ -3954,6 +4027,8 @@ function normalizeImportHeader(string $header): string
         'birth_date' => 'birthdate',
         'dob' => 'birthdate',
         'year' => 'year_level',
+        'course' => 'department',
+        'program' => 'department',
         'team_name' => 'team',
         'house' => 'team',
         'sport_name' => 'sport',

@@ -232,6 +232,7 @@ if ($formState) {
         <p class="text-muted mb-0"><?= count($users) ?> user<?= count($users) === 1 ? '' : 's' ?></p>
     </div>
     <div class="d-flex flex-wrap align-items-end gap-2 ms-auto">
+        <a href="<?= BASE_URL ?>/admin/index.php" class="btn btn-outline-secondary"><i class="bi bi-shield-lock"></i> Admin Panel</a>
         <form method="GET" class="d-flex flex-wrap align-items-end gap-2">
             <div>
                 <label class="form-label visually-hidden" for="userSearch">Search</label>

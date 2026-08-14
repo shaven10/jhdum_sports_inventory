@@ -128,7 +128,7 @@ if ($coachAssignments) {
     <div class="col-6 col-md-4 col-xl-2">
         <div class="card stat-card h-100">
             <div class="card-body d-flex align-items-center gap-3">
-                <div class="stat-icon bg-primary bg-opacity-10 text-primary"><i class="bi bi-people"></i></div>
+                <div class="stat-icon bg-primary bg-opacity-10 text-primary bi bi-people-fill" aria-hidden="true"></div>
                 <div>
                     <div class="stat-value"><?= $stats['total_athletes'] ?></div>
                     <div class="stat-label">Athletes</div>
@@ -139,7 +139,7 @@ if ($coachAssignments) {
     <div class="col-6 col-md-4 col-xl-2">
         <div class="card stat-card h-100">
             <div class="card-body d-flex align-items-center gap-3">
-                <div class="stat-icon bg-danger bg-opacity-10 text-danger"><i class="bi bi-shield"></i></div>
+                <div class="stat-icon bg-danger bg-opacity-10 text-danger bi bi-shield-fill" aria-hidden="true"></div>
                 <div>
                     <div class="stat-value"><?= $stats['total_teams'] ?></div>
                     <div class="stat-label">Teams</div>
@@ -150,7 +150,7 @@ if ($coachAssignments) {
     <div class="col-6 col-md-4 col-xl-2">
         <div class="card stat-card h-100">
             <div class="card-body d-flex align-items-center gap-3">
-                <div class="stat-icon bg-success bg-opacity-10 text-success"><i class="bi bi-dribbble"></i></div>
+                <div class="stat-icon bg-success bg-opacity-10 text-success bi bi-trophy-fill" aria-hidden="true"></div>
                 <div>
                     <div class="stat-value"><?= $stats['total_sports'] ?></div>
                     <div class="stat-label">Sports</div>
@@ -161,7 +161,7 @@ if ($coachAssignments) {
     <div class="col-6 col-md-4 col-xl-2">
         <div class="card stat-card h-100">
             <div class="card-body d-flex align-items-center gap-3">
-                <div class="stat-icon bg-info bg-opacity-10 text-info"><i class="bi bi-calendar-event"></i></div>
+                <div class="stat-icon bg-info bg-opacity-10 text-info bi bi-calendar2-event-fill" aria-hidden="true"></div>
                 <div>
                     <div class="stat-value"><?= $stats['scheduled_games'] ?></div>
                     <div class="stat-label">Scheduled</div>
@@ -172,7 +172,7 @@ if ($coachAssignments) {
     <div class="col-6 col-md-4 col-xl-2">
         <div class="card stat-card h-100">
             <div class="card-body d-flex align-items-center gap-3">
-                <div class="stat-icon bg-warning bg-opacity-10 text-warning"><i class="bi bi-play-circle"></i></div>
+                <div class="stat-icon bg-warning bg-opacity-10 text-warning bi bi-play-circle-fill" aria-hidden="true"></div>
                 <div>
                     <div class="stat-value"><?= $stats['ongoing_games'] ?></div>
                     <div class="stat-label">Ongoing</div>
@@ -183,7 +183,7 @@ if ($coachAssignments) {
     <div class="col-6 col-md-4 col-xl-2">
         <div class="card stat-card h-100">
             <div class="card-body d-flex align-items-center gap-3">
-                <div class="stat-icon bg-secondary bg-opacity-10 text-secondary"><i class="bi bi-flag"></i></div>
+                <div class="stat-icon bg-secondary bg-opacity-10 text-secondary bi bi-flag-fill" aria-hidden="true"></div>
                 <div>
                     <div class="stat-value"><?= $stats['completed_games'] ?></div>
                     <div class="stat-label">Completed</div>
@@ -199,6 +199,7 @@ if ($coachAssignments) {
     <div class="col-lg-3 col-6"><a class="btn btn-outline-primary w-100" href="<?= BASE_URL ?>/intramurals/teams/index.php"><i class="bi bi-shield-shaded"></i> Teams</a></div>
     <div class="col-lg-3 col-6"><a class="btn btn-outline-primary w-100" href="<?= BASE_URL ?>/intramurals/sports/index.php"><i class="bi bi-trophy"></i> Sports</a></div>
     <div class="col-lg-3 col-6"><a class="btn btn-outline-primary w-100" href="<?= BASE_URL ?>/intramurals/roster/index.php"><i class="bi bi-list-ul"></i> Rosters</a></div>
+    <div class="col-lg-3 col-6"><a class="btn btn-outline-primary w-100" href="<?= BASE_URL ?>/intramurals/roster/gallery.php"><i class="bi bi-images"></i> Entry Gallery</a></div>
     <?php endif; ?>
     <?php if (canViewMatchResults()): ?>
     <div class="col-lg-3 col-6"><a class="btn btn-outline-primary w-100" href="<?= BASE_URL ?>/intramurals/matches/index.php"><i class="bi bi-calendar3"></i> Matches</a></div>

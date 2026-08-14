@@ -138,6 +138,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $birthdate = post('birthdate') ?: null;
     $department = post('department');
     $yearLevel = post('year_level');
+    $allowedCourses = athleteCourseOptions();
+    if ($department !== '' && !in_array($department, $allowedCourses, true) && $department !== (string) ($athlete['department'] ?? '')) {
+        $errors[] = 'Please select a valid course.';
+    }
+    if ($yearLevel !== '' && !in_array($yearLevel, athleteYearLevelOptions(), true) && $yearLevel !== (string) ($athlete['year_level'] ?? '')) {
+        $errors[] = 'Please select a valid year level.';
+    }
     $teamId = (int) post('team_id') ?: null;
     $email = post('email');
     $phone = post('phone');
@@ -169,11 +176,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if (empty($errors)) {
-        $stmt = $db->prepare('UPDATE intramural_athletes SET student_id=?, first_name=?, last_name=?, gender=?, birthdate=?, department=?, year_level=?, team_id=?, photo=?, email=?, phone=? WHERE id=?');
-        $stmt->execute([$studentId, $firstName, $lastName, $gender, $birthdate, $department, $yearLevel, $teamId, $photo, $email, $phone, $id]);
-        auditLog($_SESSION['user_id'], 'update', 'intramural_athlete', $id, null, ['student_id' => $studentId]);
-        flash('success', 'Athlete updated.');
-        redirect(BASE_URL . '/intramurals/athletes/view.php?id=' . $id);
+        try {
+            $stmt = $db->prepare('UPDATE intramural_athletes SET student_id=?, first_name=?, last_name=?, gender=?, birthdate=?, department=?, year_level=?, team_id=?, photo=?, email=?, phone=? WHERE id=?');
+            $stmt->execute([
+                $studentId,
+                $firstName,
+                $lastName,
+                $gender,
+                $birthdate ?: null,
+                $department !== '' ? $department : null,
+                $yearLevel !== '' ? $yearLevel : null,
+                $teamId,
+                $photo,
+                $email !== '' ? $email : null,
+                $phone !== '' ? $phone : null,
+                $id,
+            ]);
+            auditLog($_SESSION['user_id'], 'update', 'intramural_athlete', $id, null, ['student_id' => $studentId]);
+            flash('success', 'Athlete updated.');
+            redirect(BASE_URL . '/intramurals/athletes/view.php?id=' . $id);
+        } catch (PDOException $e) {
+            $errors[] = 'Could not save athlete information. Please check the fields and try again.';
+        }
     }
 }
 
@@ -221,7 +245,7 @@ require __DIR__ . '/../_season_bar.php';
                             <label class="form-label">Gender</label>
                             <select name="gender" class="form-select">
                                 <?php foreach (['male', 'female', 'other'] as $g): ?>
-                                <option value="<?= $g ?>" <?= $athlete['gender'] === $g ? 'selected' : '' ?>><?= ucfirst($g) ?></option>
+                                <option value="<?= $g ?>" <?= ($athlete['gender'] ?? '') === $g ? 'selected' : '' ?>><?= ucfirst($g) ?></option>
                                 <?php endforeach; ?>
                             </select>
                         </div>
@@ -231,7 +255,23 @@ require __DIR__ . '/../_season_bar.php';
                         </div>
                         <div class="col-md-3">
                             <label class="form-label">Year Level</label>
-                            <input type="text" name="year_level" class="form-control" value="<?= sanitize($athlete['year_level'] ?? '') ?>">
+                            <select name="year_level" class="form-select">
+                                <option value="">Select year</option>
+                                <?php
+                                $currentYear = (string) ($athlete['year_level'] ?? '');
+                                $yearMatched = false;
+                                foreach (athleteYearLevelOptions() as $yl):
+                                    $isYear = $currentYear === $yl;
+                                    if ($isYear) {
+                                        $yearMatched = true;
+                                    }
+                                ?>
+                                <option value="<?= sanitize($yl) ?>" <?= $isYear ? 'selected' : '' ?>><?= sanitize($yl) ?></option>
+                                <?php endforeach; ?>
+                                <?php if ($currentYear !== '' && !$yearMatched): ?>
+                                <option value="<?= sanitize($currentYear) ?>" selected><?= sanitize($currentYear) ?></option>
+                                <?php endif; ?>
+                            </select>
                         </div>
                         <div class="col-md-3">
                             <label class="form-label">Team / House</label>
@@ -243,8 +283,8 @@ require __DIR__ . '/../_season_bar.php';
                             </select>
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label">Department</label>
-                            <input type="text" name="department" class="form-control" value="<?= sanitize($athlete['department'] ?? '') ?>">
+                            <label class="form-label">Course</label>
+                            <?= renderAthleteCourseSelect((string) ($athlete['department'] ?? '')) ?>
                         </div>
                         <div class="col-md-3">
                             <label class="form-label">Email</label>
@@ -360,6 +400,7 @@ require __DIR__ . '/../_season_bar.php';
                 <?php endif; ?>
             </div>
         </div>
+        <?php endif; ?>
         <?php endif; ?>
     </div>
 </div>

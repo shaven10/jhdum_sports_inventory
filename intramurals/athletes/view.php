@@ -59,7 +59,7 @@ require __DIR__ . '/../_season_bar.php';
                 <dl class="row mb-0">
                     <dt class="col-5">Gender</dt><dd class="col-7"><?= ucfirst($athlete['gender']) ?></dd>
                     <dt class="col-5">Birthdate</dt><dd class="col-7"><?= $athlete['birthdate'] ? formatDate($athlete['birthdate']) : '-' ?></dd>
-                    <dt class="col-5">Department</dt><dd class="col-7"><?= sanitize($athlete['department'] ?: '-') ?></dd>
+                    <dt class="col-5">Course</dt><dd class="col-7"><?= sanitize($athlete['department'] ?: '-') ?></dd>
                     <dt class="col-5">Year Level</dt><dd class="col-7"><?= sanitize($athlete['year_level'] ?: '-') ?></dd>
                     <dt class="col-5">Email</dt><dd class="col-7"><?= sanitize($athlete['email'] ?: '-') ?></dd>
                     <dt class="col-5">Phone</dt><dd class="col-7"><?= sanitize($athlete['phone'] ?: '-') ?></dd>

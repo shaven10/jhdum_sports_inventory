@@ -89,7 +89,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $lastName = trim($row['last_name'] ?? '');
                 $gender = strtolower(trim($row['gender'] ?? 'male'));
                 $birthdate = trim($row['birthdate'] ?? '');
-                $department = trim($row['department'] ?? '');
+                $department = trim($row['course'] ?? $row['department'] ?? '');
                 $yearLevel = trim($row['year_level'] ?? '');
                 $teamName = trim($row['team'] ?? '');
                 $email = trim($row['email'] ?? '');

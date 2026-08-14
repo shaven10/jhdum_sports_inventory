@@ -40,7 +40,7 @@ $pageTitle = 'Login';
 <div class="login-page">
     <div class="login-card mx-auto">
         <div class="login-header">
-            <img src="<?= sanitize(appLogoUrl()) ?>" alt="JHCSC Logo" class="login-brand-logo">
+            <img src="<?= sanitize(appLogoUrl()) ?>" alt="Sports Development Logo" class="login-brand-logo">
             <h2 class="mt-3"><?= sanitize(APP_NAME) ?></h2>
             <p class="mb-0"><?= sanitize(APP_CAMPUS) ?></p>
             <p class="login-tagline"><?= sanitize(APP_TAGLINE) ?></p>

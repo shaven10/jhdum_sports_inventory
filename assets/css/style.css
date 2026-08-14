@@ -42,22 +42,22 @@ main {
 }
 
 .app-brand-logo {
-    height: 38px;
-    width: 38px;
-    object-fit: contain;
+    height: 42px;
+    width: 42px;
+    object-fit: cover;
     background: #fff;
     border-radius: 50%;
-    padding: 3px;
+    padding: 0;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
 }
 
 .login-brand-logo {
-    height: 96px;
-    width: 96px;
-    object-fit: contain;
+    height: 112px;
+    width: 112px;
+    object-fit: cover;
     background: #fff;
     border-radius: 50%;
-    padding: 6px;
+    padding: 0;
     box-shadow: 0 2px 10px rgba(0,0,0,0.15);
 }
 
@@ -77,12 +77,12 @@ main {
 }
 
 .dashboard-brand-logo {
-    height: 72px;
-    width: 72px;
-    object-fit: contain;
+    height: 80px;
+    width: 80px;
+    object-fit: cover;
     background: #fff;
     border-radius: 50%;
-    padding: 4px;
+    padding: 0;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
     flex-shrink: 0;
 }
@@ -135,9 +135,11 @@ main {
 }
 
 .report-brand-logo {
-    height: 78px;
-    width: 78px;
-    object-fit: contain;
+    height: 84px;
+    width: 84px;
+    object-fit: cover;
+    background: #fff;
+    border-radius: 50%;
     flex-shrink: 0;
 }
 
@@ -195,10 +197,16 @@ main {
     width: 48px;
     height: 48px;
     border-radius: 12px;
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 1.5rem;
+    flex-shrink: 0;
+    font-size: 1.35rem;
+    line-height: 1;
+}
+
+.stat-card .stat-icon::before {
+    line-height: 1;
 }
 
 .stat-card .stat-value {
@@ -289,6 +297,14 @@ main {
 
 .standings-scroll-wrap .table {
     margin-bottom: 0;
+    width: max-content;
+    min-width: 100%;
+}
+
+.standings-scroll-wrap .table th,
+.standings-scroll-wrap .table td {
+    text-align: center;
+    vertical-align: middle;
 }
 
 .standings-scroll-wrap thead th {
@@ -300,31 +316,87 @@ main {
     white-space: nowrap;
 }
 
+.standings-scroll-wrap thead th.event-col-header {
+    white-space: nowrap;
+    width: auto;
+    min-width: max-content;
+    max-width: none;
+    padding: 0.4rem 0.55rem;
+    text-align: center;
+    line-height: 1.2;
+}
+
+.standings-scroll-wrap thead tr.event-header-sport th.event-col-name {
+    vertical-align: bottom;
+    font-size: 0.78rem;
+    font-weight: 600;
+    box-shadow: none;
+}
+
+.standings-scroll-wrap thead tr.event-header-category th.event-col-cat {
+    top: 2.6rem;
+    vertical-align: middle;
+    font-size: 0.68rem;
+    font-weight: 500;
+    color: var(--bs-secondary-color, #6c757d);
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    padding-top: 0.3rem;
+    padding-bottom: 0.3rem;
+    border-top: 1px solid var(--bs-border-color, #dee2e6);
+    border-bottom: 2px solid var(--bs-border-color, #dee2e6);
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.08);
+}
+
+.standings-scroll-wrap thead tr.event-header-sport th[rowspan="2"] {
+    vertical-align: middle;
+}
+
 .standings-scroll-wrap .sticky-col {
     position: sticky;
     left: 0;
     z-index: 3;
+    width: 2.75rem;
+    min-width: 2.75rem;
+    max-width: 2.75rem;
+    box-sizing: border-box;
+    background-clip: padding-box;
     background: var(--theme-card-bg, #fff);
-    box-shadow: 2px 0 4px rgba(0, 0, 0, 0.06);
+    box-shadow: none;
 }
 
 .standings-scroll-wrap thead .sticky-col {
-    z-index: 4;
+    z-index: 5;
     background: var(--bs-table-bg, #f8f9fa);
 }
 
 .standings-scroll-wrap .sticky-col-2 {
-    left: 3rem;
+    left: 2.75rem; /* must equal .sticky-col width */
     z-index: 3;
+    width: auto;
+    min-width: max-content;
+    max-width: none;
+    box-sizing: border-box;
+    background-clip: padding-box;
+    background: var(--theme-card-bg, #fff);
+    white-space: nowrap;
+    border-right: 2px solid rgba(0, 0, 0, 0.12);
+    box-shadow: 4px 0 8px -2px rgba(0, 0, 0, 0.14);
 }
 
 .standings-scroll-wrap thead .sticky-col-2 {
-    z-index: 4;
+    z-index: 5;
+    background: var(--bs-table-bg, #f8f9fa);
 }
 
 .standings-scroll-wrap tbody tr.table-success .sticky-col,
 .standings-scroll-wrap tbody tr.table-success .sticky-col-2 {
     background: var(--bs-success-bg-subtle, #d1e7dd);
+}
+
+.standings-scroll-wrap tbody tr.table-warning .sticky-col,
+.standings-scroll-wrap tbody tr.table-warning .sticky-col-2 {
+    background: var(--bs-warning-bg-subtle, #fff3cd);
 }
 
 .theme-dark .standings-scroll-wrap thead th,
@@ -387,6 +459,144 @@ main {
 
 .brand-full {
     display: inline;
+}
+
+.dropdown-menu-nav {
+    max-height: min(70vh, 520px);
+    overflow-y: auto;
+}
+
+/* Mobile offcanvas navigation */
+.app-nav-offcanvas {
+    width: min(100vw, 320px);
+    --bs-offcanvas-bg: var(--theme-primary, #12361a);
+}
+
+.app-nav-offcanvas .offcanvas-body {
+    background: linear-gradient(180deg, #12361a 0%, #0d2812 100%);
+}
+
+.mobile-nav-scroll {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 0.75rem 0;
+}
+
+.mobile-nav-section {
+    padding: 0.35rem 0 0.75rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.mobile-nav-section-title {
+    padding: 0.5rem 1.1rem 0.35rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.mobile-nav-subheader {
+    padding: 0.55rem 1.1rem 0.2rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.mobile-nav-note {
+    padding: 0.35rem 1.1rem 0.65rem;
+    font-size: 0.8rem;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.mobile-nav-link {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.7rem 1.1rem;
+    color: rgba(255, 255, 255, 0.92);
+    text-decoration: none;
+    min-height: 44px;
+}
+
+.mobile-nav-link i {
+    width: 1.25rem;
+    text-align: center;
+    opacity: 0.9;
+}
+
+.mobile-nav-link:hover,
+.mobile-nav-link:focus {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+}
+
+.mobile-nav-footer {
+    padding: 0.5rem 0 0.85rem;
+    background: rgba(0, 0, 0, 0.2);
+}
+
+/* Admin panel */
+.admin-stat-card {
+    border: none;
+    border-radius: 12px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+}
+
+.admin-stat-label {
+    font-size: 0.8rem;
+    color: #6c757d;
+    margin-bottom: 0.25rem;
+}
+
+.admin-stat-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--theme-text, #2c3e50);
+}
+
+.admin-link-card {
+    border: none;
+    border-radius: 12px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+    color: inherit;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.admin-link-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
+    color: inherit;
+}
+
+.admin-link-icon {
+    font-size: 1.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.admin-link-title {
+    font-weight: 700;
+    margin-bottom: 0.2rem;
+}
+
+.admin-link-desc {
+    font-size: 0.82rem;
+    color: #6c757d;
+    line-height: 1.35;
+}
+
+.admin-link-meta {
+    margin-top: 0.45rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--theme-primary, #1b5e20);
+}
+
+.admin-quick-links .btn {
+    white-space: normal;
+    min-height: 44px;
 }
 
 .nav-icon-btn {
@@ -549,30 +759,6 @@ main {
 
 /* ── Responsive: Tablet & below ── */
 @media (max-width: 991.98px) {
-    .navbar-collapse {
-        max-height: calc(100vh - 60px);
-        overflow-y: auto;
-    }
-
-    .navbar-nav .nav-link {
-        padding: 0.65rem 0.5rem;
-    }
-
-    .navbar-nav .dropdown-menu {
-        border: none;
-        background: rgba(255, 255, 255, 0.08);
-        margin-left: 0.5rem;
-    }
-
-    .navbar-nav .dropdown-item {
-        color: rgba(255, 255, 255, 0.85);
-    }
-
-    .navbar-nav .dropdown-item:hover {
-        background: rgba(255, 255, 255, 0.12);
-        color: #fff;
-    }
-
     .notification-dropdown {
         width: 100%;
         max-width: none;
@@ -584,6 +770,64 @@ main {
 
     .chart-container-sm {
         height: 240px;
+    }
+
+    .dropdown-menu-nav {
+        max-height: none;
+    }
+
+    .app-main {
+        padding-bottom: max(1rem, env(safe-area-inset-bottom));
+    }
+}
+
+/* Landscape phones / short viewports */
+@media (max-height: 500px) and (orientation: landscape) {
+    .login-brand-logo {
+        height: 64px;
+        width: 64px;
+    }
+
+    .dashboard-hero {
+        padding: 0.75rem 1rem;
+        margin-bottom: 0.75rem;
+    }
+
+    .dashboard-brand-logo {
+        height: 48px;
+        width: 48px;
+    }
+
+    .dashboard-title {
+        font-size: 1.15rem;
+    }
+
+    .app-nav-offcanvas {
+        width: min(100vw, 280px);
+    }
+
+    .mobile-nav-link {
+        padding: 0.45rem 1rem;
+        min-height: 38px;
+    }
+
+    .stat-card .stat-value {
+        font-size: 1.25rem;
+    }
+}
+
+/* Portrait phones */
+@media (max-width: 767.98px) and (orientation: portrait) {
+    .admin-link-card .card-body {
+        padding: 0.9rem;
+    }
+
+    .admin-link-title {
+        font-size: 0.95rem;
+    }
+
+    .admin-link-desc {
+        font-size: 0.75rem;
     }
 }
 

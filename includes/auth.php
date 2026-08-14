@@ -335,7 +335,13 @@ function canApproveRequests(): bool
 
 function canManageUsers(): bool
 {
-    return isLoggedIn() && $_SESSION['user_role'] === 'admin';
+    return isAdmin();
+}
+
+/** True when the logged-in user is a system administrator. */
+function isAdmin(): bool
+{
+    return isLoggedIn() && ($_SESSION['user_role'] ?? '') === 'admin';
 }
 
 /** Unit managers can create coach accounts for their team; intramurals staff and admins can create for any team. */
@@ -417,7 +423,7 @@ function canViewReports(): bool
 
 function canManageSettings(): bool
 {
-    return isLoggedIn() && $_SESSION['user_role'] === 'admin';
+    return isAdmin();
 }
 
 /** Delete auto-generated fixtures (admin only). */

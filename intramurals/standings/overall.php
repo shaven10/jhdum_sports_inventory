@@ -82,6 +82,15 @@ foreach ($medalTally as $r) {
     }
 }
 
+$eventHeaders = [];
+foreach ($labels as $label) {
+    if (preg_match('/^(.+?)\s*\(([^)]+)\)$/', $label, $m)) {
+        $eventHeaders[] = ['name' => $m[1], 'category' => $m[2]];
+    } else {
+        $eventHeaders[] = ['name' => $label, 'category' => ''];
+    }
+}
+
 $pageTitle = 'Overall Intramurals Standing';
 require_once __DIR__ . '/../../includes/header.php';
 require __DIR__ . '/../_season_bar.php';
@@ -190,16 +199,21 @@ require __DIR__ . '/../_season_bar.php';
         <div class="standings-scroll-wrap">
             <table class="table table-bordered table-hover mb-0">
                 <thead class="table-light">
-                    <tr>
-                        <th class="sticky-col">#</th>
-                        <th class="sticky-col sticky-col-2">Team</th>
-                        <?php foreach ($labels as $label): ?>
-                        <th><?= sanitize($label) ?></th>
+                    <tr class="event-header-sport">
+                        <th rowspan="2" class="sticky-col">#</th>
+                        <th rowspan="2" class="sticky-col sticky-col-2">Team</th>
+                        <?php foreach ($eventHeaders as $eh): ?>
+                        <th class="event-col-header event-col-name"><?= sanitize($eh['name']) ?></th>
                         <?php endforeach; ?>
-                        <th>Total</th>
-                        <th class="medal-tally-col gold">G</th>
-                        <th class="medal-tally-col silver">S</th>
-                        <th class="medal-tally-col bronze">B</th>
+                        <th rowspan="2">Total</th>
+                        <th rowspan="2" class="medal-tally-col gold">G</th>
+                        <th rowspan="2" class="medal-tally-col silver">S</th>
+                        <th rowspan="2" class="medal-tally-col bronze">B</th>
+                    </tr>
+                    <tr class="event-header-category">
+                        <?php foreach ($eventHeaders as $eh): ?>
+                        <th class="event-col-header event-col-cat"><?= sanitize($eh['category']) ?></th>
+                        <?php endforeach; ?>
                     </tr>
                 </thead>
                 <tbody>

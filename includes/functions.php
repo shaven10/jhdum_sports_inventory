@@ -372,10 +372,10 @@ function ensurePasswordPlainColumn(): void
     }
 }
 
-/** Absolute URL to the official JHCSC logo. */
+/** Absolute URL to the official Sports Development logo. */
 function appLogoUrl(): string
 {
-    return defined('APP_LOGO') ? APP_LOGO : (BASE_URL . '/assets/img/jhcsc-logo.png');
+    return defined('APP_LOGO') ? APP_LOGO : (BASE_URL . '/assets/img/sports-development-logo.png');
 }
 
 /**
@@ -404,7 +404,7 @@ function renderReportHeader(string $title, array $options = []): string
     return <<<HTML
 <div class="report-brand-header{$visibility}">
     <div class="report-brand-inner">
-        <img src="{$logo}" alt="JHCSC Logo" class="report-brand-logo">
+        <img src="{$logo}" alt="Sports Development Logo" class="report-brand-logo">
         <div class="report-brand-text">
             <div class="report-brand-campus">{$campus}</div>
             <div class="report-brand-app">{$appName}</div>
@@ -527,7 +527,7 @@ function renderDashboardHero(string $title, string $subtitle = '', array $option
 <div class="dashboard-hero">
     <div class="dashboard-hero-inner d-flex flex-wrap justify-content-between align-items-center gap-3">
         <div class="d-flex align-items-center gap-3">
-            <img src="{$logo}" alt="JHCSC Logo" class="dashboard-brand-logo">
+            <img src="{$logo}" alt="Sports Development Logo" class="dashboard-brand-logo">
             <div>
                 <div class="dashboard-campus">{$campus}</div>
                 <div class="dashboard-app-name">{$appName}</div>

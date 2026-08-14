@@ -105,12 +105,38 @@ if (hasRole('unit_manager') && getUserTeamId()) {
 if (isSecretariat()) {
     $dashboardActions .= '<a href="' . BASE_URL . '/intramurals/matches/generate.php" class="btn btn-outline-light"><i class="bi bi-magic"></i> Generate Matches</a>';
 }
+if (isAdmin()) {
+    $dashboardActions .= '<a href="' . BASE_URL . '/admin/index.php" class="btn btn-outline-light"><i class="bi bi-shield-lock"></i> Admin Panel</a>';
+}
 
 echo renderDashboardHero('Dashboard', $dashboardSubtitle, [
     'icon' => 'bi-speedometer2',
     'actions' => $dashboardActions,
 ]);
 ?>
+
+<?php if (isAdmin()): ?>
+<div class="row g-3 mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span><i class="bi bi-shield-lock"></i> Admin Quick Links</span>
+                <a href="<?= BASE_URL ?>/admin/index.php" class="btn btn-sm btn-outline-primary">Open Admin Panel</a>
+            </div>
+            <div class="card-body">
+                <div class="row g-2 admin-quick-links">
+                    <div class="col-6 col-md-3 col-xl-2"><a class="btn btn-outline-secondary w-100" href="<?= BASE_URL ?>/users/index.php"><i class="bi bi-people"></i> Users</a></div>
+                    <div class="col-6 col-md-3 col-xl-2"><a class="btn btn-outline-secondary w-100" href="<?= BASE_URL ?>/settings/index.php"><i class="bi bi-gear"></i> Settings</a></div>
+                    <div class="col-6 col-md-3 col-xl-2"><a class="btn btn-outline-secondary w-100" href="<?= BASE_URL ?>/settings/theme.php"><i class="bi bi-palette"></i> Theme</a></div>
+                    <div class="col-6 col-md-3 col-xl-2"><a class="btn btn-outline-secondary w-100" href="<?= BASE_URL ?>/audit/index.php"><i class="bi bi-journal-check"></i> Audit</a></div>
+                    <div class="col-6 col-md-3 col-xl-2"><a class="btn btn-outline-secondary w-100" href="<?= BASE_URL ?>/intramurals/seasons/index.php"><i class="bi bi-calendar3"></i> Seasons</a></div>
+                    <div class="col-6 col-md-3 col-xl-2"><a class="btn btn-outline-secondary w-100" href="<?= BASE_URL ?>/intramurals/roster/lock.php"><i class="bi bi-lock"></i> Roster Lock</a></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
 
 <?php if (shouldShowRosterLockStatus()): ?>
 <?= renderRosterLockAlerts() ?>
@@ -121,7 +147,7 @@ echo renderDashboardHero('Dashboard', $dashboardSubtitle, [
     <div class="col-6 col-md-3">
         <div class="card stat-card h-100">
             <div class="card-body d-flex align-items-center gap-3">
-                <div class="stat-icon bg-primary bg-opacity-10 text-primary"><i class="bi bi-calendar-event"></i></div>
+                <div class="stat-icon bg-primary bg-opacity-10 text-primary bi bi-calendar2-event-fill" aria-hidden="true"></div>
                 <div>
                     <div class="stat-value"><?= $competitionStats['scheduled_games'] ?? 0 ?></div>
                     <div class="stat-label">Scheduled</div>
@@ -132,7 +158,7 @@ echo renderDashboardHero('Dashboard', $dashboardSubtitle, [
     <div class="col-6 col-md-3">
         <div class="card stat-card h-100">
             <div class="card-body d-flex align-items-center gap-3">
-                <div class="stat-icon bg-warning bg-opacity-10 text-warning"><i class="bi bi-play-circle"></i></div>
+                <div class="stat-icon bg-warning bg-opacity-10 text-warning bi bi-play-circle-fill" aria-hidden="true"></div>
                 <div>
                     <div class="stat-value"><?= $competitionStats['ongoing_games'] ?? 0 ?></div>
                     <div class="stat-label">Ongoing</div>
@@ -143,7 +169,7 @@ echo renderDashboardHero('Dashboard', $dashboardSubtitle, [
     <div class="col-6 col-md-3">
         <div class="card stat-card h-100">
             <div class="card-body d-flex align-items-center gap-3">
-                <div class="stat-icon bg-success bg-opacity-10 text-success"><i class="bi bi-check2-circle"></i></div>
+                <div class="stat-icon bg-success bg-opacity-10 text-success bi bi-check-circle-fill" aria-hidden="true"></div>
                 <div>
                     <div class="stat-value"><?= $competitionStats['completed_games'] ?? 0 ?></div>
                     <div class="stat-label">Completed</div>
@@ -154,7 +180,7 @@ echo renderDashboardHero('Dashboard', $dashboardSubtitle, [
     <div class="col-6 col-md-3">
         <div class="card stat-card h-100">
             <div class="card-body d-flex align-items-center gap-3">
-                <div class="stat-icon bg-danger bg-opacity-10 text-danger"><i class="bi bi-shield"></i></div>
+                <div class="stat-icon bg-danger bg-opacity-10 text-danger bi bi-shield-fill" aria-hidden="true"></div>
                 <div>
                     <div class="stat-value"><?= $competitionStats['total_teams'] ?? 0 ?></div>
                     <div class="stat-label">Teams</div>
@@ -170,7 +196,7 @@ echo renderDashboardHero('Dashboard', $dashboardSubtitle, [
     <div class="col-6 col-md-4 col-xl-2">
         <div class="card stat-card h-100">
             <div class="card-body d-flex align-items-center gap-3">
-                <div class="stat-icon bg-primary bg-opacity-10 text-primary"><i class="bi bi-box-seam"></i></div>
+                <div class="stat-icon bg-primary bg-opacity-10 text-primary bi bi-box-seam-fill" aria-hidden="true"></div>
                 <div>
                     <div class="stat-value"><?= $inventoryStats['total_equipment'] ?></div>
                     <div class="stat-label">Equipment Types</div>
@@ -181,7 +207,7 @@ echo renderDashboardHero('Dashboard', $dashboardSubtitle, [
     <div class="col-6 col-md-4 col-xl-2">
         <div class="card stat-card h-100">
             <div class="card-body d-flex align-items-center gap-3">
-                <div class="stat-icon bg-success bg-opacity-10 text-success"><i class="bi bi-check-circle"></i></div>
+                <div class="stat-icon bg-success bg-opacity-10 text-success bi bi-check2-circle" aria-hidden="true"></div>
                 <div>
                     <div class="stat-value"><?= $inventoryStats['available_items'] ?></div>
                     <div class="stat-label">Available</div>
@@ -192,7 +218,7 @@ echo renderDashboardHero('Dashboard', $dashboardSubtitle, [
     <div class="col-6 col-md-4 col-xl-2">
         <div class="card stat-card h-100">
             <div class="card-body d-flex align-items-center gap-3">
-                <div class="stat-icon bg-info bg-opacity-10 text-info"><i class="bi bi-arrow-right-circle"></i></div>
+                <div class="stat-icon bg-info bg-opacity-10 text-info bi bi-box-arrow-right" aria-hidden="true"></div>
                 <div>
                     <div class="stat-value"><?= $inventoryStats['borrowed_items'] ?></div>
                     <div class="stat-label">Borrowed</div>
@@ -203,7 +229,7 @@ echo renderDashboardHero('Dashboard', $dashboardSubtitle, [
     <div class="col-6 col-md-4 col-xl-2">
         <div class="card stat-card h-100">
             <div class="card-body d-flex align-items-center gap-3">
-                <div class="stat-icon bg-warning bg-opacity-10 text-warning"><i class="bi bi-hourglass-split"></i></div>
+                <div class="stat-icon bg-warning bg-opacity-10 text-warning bi bi-hourglass-split" aria-hidden="true"></div>
                 <div>
                     <div class="stat-value"><?= $inventoryStats['pending_requests'] ?></div>
                     <div class="stat-label">Pending</div>
@@ -214,7 +240,7 @@ echo renderDashboardHero('Dashboard', $dashboardSubtitle, [
     <div class="col-6 col-md-4 col-xl-2">
         <div class="card stat-card h-100">
             <div class="card-body d-flex align-items-center gap-3">
-                <div class="stat-icon bg-danger bg-opacity-10 text-danger"><i class="bi bi-exclamation-triangle"></i></div>
+                <div class="stat-icon bg-danger bg-opacity-10 text-danger bi bi-exclamation-triangle-fill" aria-hidden="true"></div>
                 <div>
                     <div class="stat-value"><?= $inventoryStats['overdue_borrowings'] ?></div>
                     <div class="stat-label">Overdue</div>
@@ -225,7 +251,7 @@ echo renderDashboardHero('Dashboard', $dashboardSubtitle, [
     <div class="col-6 col-md-4 col-xl-2">
         <div class="card stat-card h-100">
             <div class="card-body d-flex align-items-center gap-3">
-                <div class="stat-icon bg-secondary bg-opacity-10 text-secondary"><i class="bi bi-tools"></i></div>
+                <div class="stat-icon bg-secondary bg-opacity-10 text-secondary bi bi-wrench-adjustable" aria-hidden="true"></div>
                 <div>
                     <div class="stat-value"><?= $inventoryStats['maintenance_items'] ?></div>
                     <div class="stat-label">Maintenance</div>

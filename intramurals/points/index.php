@@ -414,8 +414,8 @@ require __DIR__ . '/../_season_bar.php';
 <?php endif; ?>
 
 <div class="alert alert-info mb-0">
-    <strong>How ranking works:</strong> Match results determine each event’s finish order (Champion, 1st Runner Up, …),
-    or staff can <a href="<?= BASE_URL ?>/intramurals/rankings/index.php">enter official ranks directly</a> (used for medal tally).
+    <strong>How ranking works:</strong> Match results determine each event’s finish order (Champion, 1st Runner Up, …).
+    Staff can <a href="<?= BASE_URL ?>/intramurals/rankings/index.php">enter official ranks directly</a> only for events that do not have scheduled matches.
     Overall intramurals standing sums the <em>placement points</em> from each event’s assigned scheme.
     Change scheme values anytime — rankings recalculate automatically.
 </div>

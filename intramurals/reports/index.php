@@ -52,7 +52,7 @@ if ($type === 'athletes') {
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
     $data = $stmt->fetchAll();
-    $headers = ['Code', 'Student ID', 'Name', 'Gender', 'Team', 'Department', 'Year Level'];
+    $headers = ['Code', 'Student ID', 'Name', 'Gender', 'Team', 'Course', 'Year Level'];
     foreach ($data as $r) {
         $rows[] = [$r['athlete_code'], $r['student_id'], athleteFullName($r), ucfirst($r['gender']), $r['team_name'] ?: '', $r['department'] ?: '', $r['year_level'] ?: ''];
         $htmlRows[] = $rows[count($rows) - 1];

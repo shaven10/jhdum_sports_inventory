@@ -31,6 +31,10 @@ foreach ($sports as $s) {
 }
 
 $canEdit = $sportId && canManageEventMatches($sportId) && $seasonId;
+$hasScheduledMatches = $sportId && $seasonId && eventHasScheduledMatches($sportId, (int) $seasonId);
+if ($hasScheduledMatches) {
+    $canEdit = false;
+}
 $scheme = $sport ? getPointSchemeForSport($sport) : defaultPointScheme();
 $labels = placementLabels();
 $errors = [];
@@ -48,6 +52,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!canManageEventMatches($sportId)) {
         flash('error', 'You do not have permission to save ranks for this event.');
         redirect(BASE_URL . '/intramurals/rankings/index.php');
+    }
+    if (eventHasScheduledMatches($sportId, (int) $seasonId)) {
+        flash('error', 'Manual ranking is not allowed for events that already have scheduled matches. Placement follows match results.');
+        redirect(BASE_URL . '/intramurals/rankings/index.php?sport=' . $sportId);
     }
 
     $action = post('action', 'save');
@@ -102,7 +110,7 @@ require __DIR__ . '/../_season_bar.php';
 <div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2">
     <div>
         <h1><i class="bi bi-list-ol"></i> Event Rankings</h1>
-        <p class="text-muted mb-0">Manually rank participating teams for an event — Champion / runners-up feed the medal tally</p>
+        <p class="text-muted mb-0">Manually rank teams for events without a match schedule — Champion / runners-up feed the medal tally</p>
     </div>
     <div class="d-flex gap-2 flex-wrap">
         <a href="<?= BASE_URL ?>/intramurals/standings/overall.php" class="btn btn-outline-warning"><i class="bi bi-trophy"></i> Medal Tally</a>
@@ -118,10 +126,18 @@ require __DIR__ . '/../_season_bar.php';
 
 <div class="alert alert-secondary py-2">
     <i class="bi bi-info-circle"></i>
-    Assign <strong>1st (Champion / Gold)</strong>, <strong>2nd (Silver)</strong>, and <strong>3rd (Bronze)</strong> for the selected event.
+    Assign <strong>1st (Champion / Gold)</strong>, <strong>2nd (Silver)</strong>, and <strong>3rd (Bronze)</strong> for events that do not have scheduled matches.
     Placement points follow the event’s point scheme and are included in Overall Standing.
     Saved ranks override automatic match-based order for medals.
 </div>
+
+<?php if (!empty($hasScheduledMatches)): ?>
+<div class="alert alert-warning">
+    <i class="bi bi-lock"></i>
+    Manual ranking is locked for this event because it already has scheduled matches.
+    Placement follows <a href="<?= BASE_URL ?>/intramurals/matches/index.php?sport=<?= (int) $sportId ?>" class="alert-link">match results</a>.
+</div>
+<?php endif; ?>
 
 <div class="card mb-3">
     <div class="card-body">
@@ -236,6 +252,8 @@ require __DIR__ . '/../_season_bar.php';
         <div class="card-footer text-muted small">
             <?php if (!isViewingActiveSeason()): ?>
             Historical seasons are view-only.
+            <?php elseif (!empty($hasScheduledMatches)): ?>
+            Manual ranking is disabled while this event has scheduled matches.
             <?php else: ?>
             You can view ranks. Tournament managers and intramurals staff can edit this event.
             <?php endif; ?>

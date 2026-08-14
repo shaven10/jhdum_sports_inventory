@@ -57,6 +57,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($lastName === '') $errors[] = 'Last name is required.';
     if ($scoped && !$teamId) $errors[] = 'Your account is not assigned to a team.';
     if ($teamId && !canManageTeamAthletes($teamId)) $errors[] = 'You can only register athletes for your team.';
+    if ($department !== '' && !in_array($department, athleteCourseOptions(), true)) {
+        $errors[] = 'Please select a valid course.';
+    }
+    if ($yearLevel !== '' && !in_array($yearLevel, athleteYearLevelOptions(), true)) {
+        $errors[] = 'Please select a valid year level.';
+    }
 
     if ($studentId !== '') {
         $dup = $db->prepare('SELECT id FROM intramural_athletes WHERE student_id = ?');
@@ -77,23 +83,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if (empty($errors)) {
-        $code = generateAthleteCode();
-        $stmt = $db->prepare('INSERT INTO intramural_athletes (athlete_code, student_id, first_name, last_name, gender, birthdate, department, year_level, team_id, photo, email, phone) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-        $stmt->execute([$code, $studentId, $firstName, $lastName, $gender, $birthdate, $department, $yearLevel, $teamId, $photo, $email, $phone]);
-        $id = (int) $db->lastInsertId();
+        try {
+            $code = generateAthleteCode();
+            $stmt = $db->prepare('INSERT INTO intramural_athletes (athlete_code, student_id, first_name, last_name, gender, birthdate, department, year_level, team_id, photo, email, phone) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+            $stmt->execute([
+                $code,
+                $studentId,
+                $firstName,
+                $lastName,
+                $gender,
+                $birthdate ?: null,
+                $department !== '' ? $department : null,
+                $yearLevel !== '' ? $yearLevel : null,
+                $teamId,
+                $photo,
+                $email !== '' ? $email : null,
+                $phone !== '' ? $phone : null,
+            ]);
+            $id = (int) $db->lastInsertId();
 
-        if ($sportId && $regTeamId && $seasonId) {
-            try {
-                $db->prepare('INSERT INTO intramural_registrations (season_id, athlete_id, sport_id, team_id, event_category, jersey_number, position) VALUES (?, ?, ?, ?, ?, ?, ?)')
-                    ->execute([$seasonId, $id, $sportId, $regTeamId, $eventCategory ?: null, $jersey ?: null, $position ?: null]);
-            } catch (PDOException $e) {
-                // ignore duplicate sport assignment
+            if ($sportId && $regTeamId && $seasonId) {
+                try {
+                    $db->prepare('INSERT INTO intramural_registrations (season_id, athlete_id, sport_id, team_id, event_category, jersey_number, position) VALUES (?, ?, ?, ?, ?, ?, ?)')
+                        ->execute([$seasonId, $id, $sportId, $regTeamId, $eventCategory ?: null, $jersey ?: null, $position ?: null]);
+                } catch (PDOException $e) {
+                    // ignore duplicate sport assignment
+                }
             }
-        }
 
-        auditLog($_SESSION['user_id'], 'create', 'intramural_athlete', $id, null, ['student_id' => $studentId, 'name' => "$firstName $lastName"]);
-        flash('success', 'Athlete registered successfully.');
-        redirect(BASE_URL . '/intramurals/athletes/view.php?id=' . $id);
+            auditLog($_SESSION['user_id'], 'create', 'intramural_athlete', $id, null, ['student_id' => $studentId, 'name' => "$firstName $lastName"]);
+            flash('success', 'Athlete registered successfully.');
+            redirect(BASE_URL . '/intramurals/athletes/view.php?id=' . $id);
+        } catch (PDOException $e) {
+            $errors[] = 'Could not save athlete information. Please check the fields and try again.';
+        }
     }
 }
 
@@ -141,7 +164,12 @@ require __DIR__ . '/../_season_bar.php';
                         </div>
                         <div class="col-md-3">
                             <label class="form-label">Year Level</label>
-                            <input type="text" name="year_level" class="form-control" value="<?= sanitize(post('year_level')) ?>" placeholder="e.g. 2nd Year">
+                            <select name="year_level" class="form-select">
+                                <option value="">Select year</option>
+                                <?php foreach (athleteYearLevelOptions() as $yl): ?>
+                                <option value="<?= sanitize($yl) ?>" <?= post('year_level') === $yl ? 'selected' : '' ?>><?= sanitize($yl) ?></option>
+                                <?php endforeach; ?>
+                            </select>
                         </div>
                         <div class="col-md-3">
                             <label class="form-label">Team / House<?= $scoped ? ' *' : '' ?></label>
@@ -153,8 +181,8 @@ require __DIR__ . '/../_season_bar.php';
                             </select>
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label">Department</label>
-                            <input type="text" name="department" class="form-control" value="<?= sanitize(post('department')) ?>">
+                            <label class="form-label">Course</label>
+                            <?= renderAthleteCourseSelect(post('department')) ?>
                         </div>
                         <div class="col-md-3">
                             <label class="form-label">Email</label>

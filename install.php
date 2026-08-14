@@ -130,7 +130,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <div class="col-md-6">
             <div class="card shadow">
                 <div class="card-header bg-primary text-white text-center">
-                    <img src="<?= htmlspecialchars(APP_LOGO) ?>" alt="JHCSC" style="height:64px;width:auto;background:#fff;border-radius:50%;padding:4px;margin-bottom:0.5rem">
+                    <img src="<?= htmlspecialchars(APP_LOGO) ?>" alt="Sports Development" style="height:72px;width:72px;object-fit:cover;background:#fff;border-radius:50%;padding:0;margin-bottom:0.5rem">
                     <h4 class="mb-0"><?= htmlspecialchars(APP_NAME) ?></h4>
                     <small>Installation</small>
                 </div>

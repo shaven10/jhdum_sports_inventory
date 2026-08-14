@@ -93,7 +93,7 @@ foreach ($rows as $r) {
 }
 
 if ($export === 'excel' || $export === 'csv') {
-    $headers = ['Event', 'Category', 'Jersey No.', 'Student ID', 'Athlete Name', 'Gender', 'Team', 'Department', 'Year Level', 'Position', 'Division'];
+    $headers = ['Event', 'Category', 'Jersey No.', 'Student ID', 'Athlete Name', 'Gender', 'Team', 'Course', 'Year Level', 'Position', 'Division'];
     $csvRows = [];
     foreach ($grouped as $group) {
         $catLabel = $categoryOptions[$group['sport_category']] ?? ucfirst($group['sport_category']);
@@ -134,6 +134,7 @@ require __DIR__ . '/../_season_bar.php';
         <a href="<?= BASE_URL ?>/intramurals/roster/import.php" class="btn btn-primary"><i class="bi bi-file-earmark-arrow-up"></i> Import Excel</a>
         <a href="<?= BASE_URL ?>/intramurals/roster/import.php?download=template" class="btn btn-outline-success"><i class="bi bi-download"></i> Download Template</a>
         <?php endif; ?>
+        <a href="<?= BASE_URL ?>/intramurals/roster/gallery.php" class="btn btn-outline-primary"><i class="bi bi-images"></i> Entry Form Gallery</a>
         <a href="?<?= $querySuffix ?>&export=excel" class="btn btn-outline-success"><i class="bi bi-file-earmark-excel"></i> Export Excel</a>
         <button type="button" class="btn btn-outline-secondary" onclick="printReport()"><i class="bi bi-printer"></i> Print / PDF</button>
         <a href="<?= BASE_URL ?>/intramurals/index.php" class="btn btn-outline-secondary">Back</a>

@@ -4,6 +4,7 @@ requireIntramuralsAccess();
 requireStandingsAccess();
 
 $db = getDB();
+$seasonId = getCurrentSeasonId();
 $sportId = (int) get('sport');
 $export = get('export');
 $sports = filterSportsForUser($db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll());
@@ -39,7 +40,7 @@ require __DIR__ . '/../_season_bar.php';
         <p class="text-muted mb-0">Automatic rankings, points, and medals per sport</p>
     </div>
     <div class="d-flex gap-2">
-        <?php if (canManageMatches()): ?>
+        <?php if (canManageMatches() && $sportId && $seasonId && !eventHasScheduledMatches($sportId, (int) $seasonId)): ?>
         <a href="<?= BASE_URL ?>/intramurals/rankings/index.php<?= $sportId ? '?sport=' . (int) $sportId : '' ?>" class="btn btn-outline-warning"><i class="bi bi-list-ol"></i> Enter Event Ranks</a>
         <?php endif; ?>
         <a href="<?= BASE_URL ?>/intramurals/standings/overall.php" class="btn btn-outline-primary">Overall Standing</a>
@@ -136,7 +137,7 @@ require __DIR__ . '/../_season_bar.php';
     </div>
 </div>
 <p class="text-muted small no-print">Event Pts (Champion → 5th Runner Up) feed the <a href="<?= BASE_URL ?>/intramurals/standings/overall.php">Overall Standing</a>.
-Use <a href="<?= BASE_URL ?>/intramurals/rankings/index.php<?= $sportId ? '?sport=' . (int) $sportId : '' ?>">Event Rankings</a> to enter places directly for medal tally.
+Use <a href="<?= BASE_URL ?>/intramurals/rankings/index.php<?= $sportId ? '?sport=' . (int) $sportId : '' ?>">Event Rankings</a> to enter places directly for events without scheduled matches.
 <?php if (canManageIntramurals()): ?> Manage point values in <a href="<?= BASE_URL ?>/intramurals/points/index.php">Point System</a>.<?php endif; ?></p>
 <?= renderReportFooter($block ? sportLabel($block['sport']) : 'Result Tabulation') ?>
 <?php endif; ?>

@@ -152,7 +152,7 @@ require __DIR__ . '/../_season_bar.php';
                         <th>Name</th>
                         <th>Gender</th>
                         <th>Team</th>
-                        <th>Department</th>
+                        <th>Course</th>
                         <th>Year Level</th>
                         <th>Events</th>
                         <th class="text-end" style="width:9rem;">Actions</th>
