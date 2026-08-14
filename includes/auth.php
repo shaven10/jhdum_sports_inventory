@@ -295,11 +295,34 @@ function appendCoachAssignmentFilter(string &$sql, array &$params, string $teamC
 
 function filterTeamsForCoach(array $teams): array
 {
-    if (canManageIntramurals() || !isCoach()) {
+    if (canManageIntramurals()) {
+        return $teams;
+    }
+    if (hasRole('unit_manager')) {
+        $tid = getUserTeamId();
+        if (!$tid) {
+            return [];
+        }
+        return array_values(array_filter($teams, static fn($t) => (int) $t['id'] === (int) $tid));
+    }
+    if (!isCoach()) {
         return $teams;
     }
     $allowed = array_flip(getCoachTeamIds());
     return array_values(array_filter($teams, static fn($t) => isset($allowed[(int) $t['id']])));
+}
+
+/**
+ * Force unit managers onto their assigned team for roster/form queries.
+ */
+function applyUnitManagerTeamScope(string &$teamId): void
+{
+    if (canManageIntramurals() || !hasRole('unit_manager')) {
+        return;
+    }
+    $tid = getUserTeamId();
+    // Assigned team only; "0" yields no rows if the account has no team.
+    $teamId = $tid ? (string) $tid : '0';
 }
 
 function filterSportsForCoach(array $sports, ?int $teamId = null): array

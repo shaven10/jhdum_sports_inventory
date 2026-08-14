@@ -3583,9 +3583,20 @@ function exportCsv(string $filename, array $headers, array $rows): void
     exit;
 }
 
-function athleteFullName(array $athlete): string
+function athleteFullName(array $athlete, bool $uppercase = false): string
 {
-    return trim(($athlete['first_name'] ?? '') . ' ' . ($athlete['last_name'] ?? ''));
+    $name = trim(($athlete['first_name'] ?? '') . ' ' . ($athlete['last_name'] ?? ''));
+    if ($uppercase && $name !== '') {
+        return function_exists('mb_strtoupper') ? mb_strtoupper($name, 'UTF-8') : strtoupper($name);
+    }
+
+    return $name;
+}
+
+/** Athlete display name for printable reports and official forms. */
+function athleteFullNameReport(array $athlete): string
+{
+    return athleteFullName($athlete, true);
 }
 
 /** Official JHCSC course / program options for athlete records. */

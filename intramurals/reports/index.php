@@ -54,7 +54,7 @@ if ($type === 'athletes') {
     $data = $stmt->fetchAll();
     $headers = ['Code', 'Student ID', 'Name', 'Gender', 'Team', 'Course', 'Year Level'];
     foreach ($data as $r) {
-        $rows[] = [$r['athlete_code'], $r['student_id'], athleteFullName($r), ucfirst($r['gender']), $r['team_name'] ?: '', $r['department'] ?: '', $r['year_level'] ?: ''];
+        $rows[] = [$r['athlete_code'], $r['student_id'], athleteFullNameReport($r), ucfirst($r['gender']), $r['team_name'] ?: '', $r['department'] ?: '', $r['year_level'] ?: ''];
         $htmlRows[] = $rows[count($rows) - 1];
     }
 } elseif ($type === 'rosters') {
@@ -74,7 +74,7 @@ if ($type === 'athletes') {
     $data = $stmt->fetchAll();
     $headers = ['Sport', 'Category', 'Team', 'Athlete', 'Student ID', 'Jersey', 'Position', 'Event'];
     foreach ($data as $r) {
-        $rows[] = [$r['sport_name'], ucfirst($r['category']), $r['team_name'], athleteFullName($r), $r['student_id'], $r['jersey_number'] ?: '', $r['position'] ?: '', $r['event_category'] ?: ''];
+        $rows[] = [$r['sport_name'], ucfirst($r['category']), $r['team_name'], athleteFullNameReport($r), $r['student_id'], $r['jersey_number'] ?: '', $r['position'] ?: '', $r['event_category'] ?: ''];
         $htmlRows[] = $rows[count($rows) - 1];
     }
 } elseif ($type === 'schedules') {

@@ -200,6 +200,7 @@ if ($coachAssignments) {
     <div class="col-lg-3 col-6"><a class="btn btn-outline-primary w-100" href="<?= BASE_URL ?>/intramurals/sports/index.php"><i class="bi bi-trophy"></i> Sports</a></div>
     <div class="col-lg-3 col-6"><a class="btn btn-outline-primary w-100" href="<?= BASE_URL ?>/intramurals/roster/index.php"><i class="bi bi-list-ul"></i> Rosters</a></div>
     <div class="col-lg-3 col-6"><a class="btn btn-outline-primary w-100" href="<?= BASE_URL ?>/intramurals/roster/gallery.php"><i class="bi bi-images"></i> Entry Gallery</a></div>
+    <div class="col-lg-3 col-6"><a class="btn btn-outline-primary w-100" href="<?= BASE_URL ?>/intramurals/roster/team_list.php"><i class="bi bi-people"></i> Team Athlete List</a></div>
     <?php endif; ?>
     <?php if (canViewMatchResults()): ?>
     <div class="col-lg-3 col-6"><a class="btn btn-outline-primary w-100" href="<?= BASE_URL ?>/intramurals/matches/index.php"><i class="bi bi-calendar3"></i> Matches</a></div>

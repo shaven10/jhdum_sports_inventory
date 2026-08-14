@@ -14,10 +14,11 @@ $season = getCurrentSeason();
 $sportId = get('sport');
 $teamId = get('team');
 $category = get('category');
+$export = get('export');
 applyUnitManagerTeamScope($teamId);
 
 $sports = filterSportsForUser(filterSportsForCoach($db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll()));
-$teams = filterTeamsForCoach($db->query('SELECT id, name, color FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll());
+$teams = filterTeamsForCoach($db->query('SELECT id, name, color, department FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll());
 $categoryOptions = sportCategoryOptions();
 $lockTeamFilter = hasRole('unit_manager') && !canManageIntramurals() && getUserTeamId();
 
@@ -43,12 +44,13 @@ $whereClause = implode(' AND ', $where);
 appendCoachAssignmentFilter($whereClause, $params);
 appendTmSportFilter($whereClause, $params, 'r.sport_id');
 if ($sportId !== '' && !canViewEvent((int) $sportId)) {
-    flash('error', 'You do not have permission to view this event gallery.');
-    redirect(BASE_URL . '/intramurals/roster/gallery.php');
+    flash('error', 'You do not have permission to view this event athlete list.');
+    redirect(BASE_URL . '/intramurals/roster/team_list.php');
 }
 
-$sql = "SELECT r.*, a.first_name, a.last_name, a.student_id, a.birthdate, a.department, a.year_level, a.photo, a.gender,
-               s.id AS sport_id, s.name AS sport_name, s.category AS sport_category, s.players_per_event,
+$sql = "SELECT r.*, a.id AS athlete_id, a.first_name, a.last_name, a.student_id, a.athlete_code,
+               a.gender, a.department, a.year_level, a.birthdate,
+               s.id AS sport_id, s.name AS sport_name, s.category AS sport_category,
                t.id AS team_id, t.name AS team_name, t.color AS team_color, t.department AS team_department
         FROM intramural_registrations r
         JOIN intramural_athletes a ON r.athlete_id = a.id
@@ -60,7 +62,7 @@ $stmt = $db->prepare($sql);
 $stmt->execute($params);
 $rows = $stmt->fetchAll();
 
-/** Group by sport + team for one official entry form each. */
+/** Group by sport/event + team (one printable sheet each). */
 $forms = [];
 foreach ($rows as $r) {
     $key = (int) $r['sport_id'] . '|' . (int) $r['team_id'];
@@ -69,15 +71,39 @@ foreach ($rows as $r) {
             'sport_id' => (int) $r['sport_id'],
             'sport_name' => $r['sport_name'],
             'sport_category' => $r['sport_category'],
-            'players_per_event' => (int) ($r['players_per_event'] ?? 0),
             'team_id' => (int) $r['team_id'],
             'team_name' => $r['team_name'],
-            'team_color' => $r['team_color'],
+            'team_color' => $r['team_color'] ?? '#c62828',
             'team_department' => $r['team_department'] ?? '',
             'athletes' => [],
         ];
     }
     $forms[$key]['athletes'][] = $r;
+}
+
+if ($export === 'excel' || $export === 'csv') {
+    $headers = ['Team', 'School', '#', 'Athlete Name', 'Student ID', 'Gender', 'Course', 'Year Level', 'Sport/Event', 'Category'];
+    $csvRows = [];
+    foreach ($forms as $form) {
+        $catKey = strtolower((string) $form['sport_category']);
+        $catLabel = $categoryOptions[$catKey] ?? ucfirst((string) $form['sport_category']);
+        $school = trim((string) ($form['team_department'] ?? '')) ?: $form['team_name'];
+        foreach ($form['athletes'] as $i => $athlete) {
+            $csvRows[] = [
+                $form['team_name'],
+                $school,
+                $i + 1,
+                athleteFullNameReport($athlete),
+                $athlete['student_id'],
+                ucfirst((string) ($athlete['gender'] ?? '')),
+                $athlete['department'] ?? '',
+                $athlete['year_level'] ?? '',
+                $form['sport_name'],
+                $catLabel,
+            ];
+        }
+    }
+    exportCsv('team-athlete-list-' . date('Ymd') . '.csv', $headers, $csvRows);
 }
 
 $seasonLabel = $season ? seasonLabel($season) : 'No active season';
@@ -93,29 +119,7 @@ if ($season && !empty($season['start_date']) && !empty($season['end_date'])) {
 $collegeLogo = BASE_URL . '/assets/img/jhcsc-logo.png';
 $sdoLogo = appLogoUrl();
 
-/**
- * Pad athlete list to the event/category roster size (players_per_event).
- *
- * @param list<array> $athletes
- * @return list<array|null>
- */
-$padAthletes = static function (array $athletes, int $playersPerEvent): array {
-    $count = count($athletes);
-    $slots = $playersPerEvent > 0 ? $playersPerEvent : max($count, 1);
-    $slots = max($slots, $count);
-    while (count($athletes) < $slots) {
-        $athletes[] = null;
-    }
-    return $athletes;
-};
-
-/**
- * @param array|null $athlete
- */
-$courseYear = static function (?array $athlete): string {
-    if (!$athlete) {
-        return '';
-    }
+$courseYear = static function (array $athlete): string {
     $parts = array_filter([
         trim((string) ($athlete['department'] ?? '')),
         trim((string) ($athlete['year_level'] ?? '')),
@@ -123,19 +127,20 @@ $courseYear = static function (?array $athlete): string {
     return implode(' · ', $parts);
 };
 
-$pageTitle = 'Official Entry Form & Gallery';
+$pageTitle = 'Team Athlete List';
 require_once __DIR__ . '/../../includes/header.php';
 require __DIR__ . '/../_season_bar.php';
 ?>
 
 <div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2 no-print">
     <div>
-        <h1><i class="bi bi-images"></i> Official Entry Form &amp; Gallery</h1>
-        <p class="text-muted mb-0">Player gallery from official rosters · <?= count($forms) ?> team form<?= count($forms) === 1 ? '' : 's' ?></p>
+        <h1><i class="bi bi-people"></i> Team Athlete List</h1>
+        <p class="text-muted mb-0">Athletes grouped by sport/event · <?= count($forms) ?> form<?= count($forms) === 1 ? '' : 's' ?></p>
     </div>
     <div class="d-flex gap-2 flex-wrap">
         <a href="<?= BASE_URL ?>/intramurals/roster/index.php" class="btn btn-outline-primary"><i class="bi bi-list-ul"></i> Athlete Roster</a>
-        <a href="<?= BASE_URL ?>/intramurals/roster/team_list.php" class="btn btn-outline-primary"><i class="bi bi-people"></i> Team Athlete List</a>
+        <a href="<?= BASE_URL ?>/intramurals/roster/gallery.php" class="btn btn-outline-primary"><i class="bi bi-images"></i> Entry Gallery</a>
+        <a href="?sport=<?= urlencode($sportId) ?>&team=<?= urlencode($teamId) ?>&category=<?= urlencode($category) ?>&export=excel" class="btn btn-outline-success"><i class="bi bi-file-earmark-excel"></i> Excel</a>
         <button type="button" class="btn btn-outline-secondary" onclick="printReport()"><i class="bi bi-printer"></i> Print / PDF</button>
         <a href="<?= BASE_URL ?>/intramurals/index.php" class="btn btn-outline-secondary">Back</a>
     </div>
@@ -177,14 +182,14 @@ require __DIR__ . '/../_season_bar.php';
         </div>
         <div class="col-md-2"><button class="btn btn-primary w-100">Generate</button></div>
     </form>
-    <p class="text-muted small mb-0 mt-2">Tip: Select an event and team for a single printable entry form. Leave blank to print all matching team forms.</p>
+    <p class="text-muted small mb-0 mt-2">Tip: Select an event and team for a single printable sheet. Leave blank to print all matching forms.</p>
 </div>
 
 <?php if (empty($forms)): ?>
-<div class="alert alert-info no-print">No official roster entries found for the selected filters.</div>
+<div class="alert alert-info no-print">No roster athletes found for the selected filters.</div>
 <?php endif; ?>
 
-<div class="entry-gallery-print-root">
+<div class="team-list-print-root">
 <?php
 $formIndex = 0;
 $totalForms = count($forms);
@@ -193,16 +198,10 @@ foreach ($forms as $form):
     $catKey = strtolower((string) $form['sport_category']);
     $catLabel = strtoupper($categoryOptions[$catKey] ?? $form['sport_category']);
     $sportName = strtoupper((string) $form['sport_name']);
-    $athletes = $padAthletes($form['athletes'], (int) $form['players_per_event']);
-    $pages = array_chunk($athletes, 12);
-    $pageCount = count($pages);
+    $school = trim((string) ($form['team_department'] ?? '')) ?: $form['team_name'];
+    $athleteCount = count($form['athletes']);
 ?>
-<?php foreach ($pages as $pageNo => $pageAthletes): ?>
-<?php
-    $rowsOfSix = array_chunk($pageAthletes, 6);
-    $pageLabel = ($pageNo + 1) . ' of ' . $pageCount;
-?>
-<section class="entry-form-sheet<?= $formIndex < $totalForms || $pageNo + 1 < $pageCount ? ' entry-form-sheet-break' : '' ?>">
+<section class="entry-form-sheet<?= $formIndex < $totalForms ? ' entry-form-sheet-break' : '' ?>">
     <header class="entry-form-header">
         <div class="entry-form-header-top">
             <div class="entry-form-header-spacer"></div>
@@ -219,9 +218,9 @@ foreach ($forms as $form):
                 <img src="<?= sanitize($sdoLogo) ?>" alt="Sports Development Office" class="entry-form-sdo-logo">
             </div>
             <div class="entry-form-meta-boxes">
-                <div class="entry-form-code">JHCSCDC - SDO Form 2</div>
+                <div class="entry-form-code">JHCSCDC - SDO Form 1</div>
                 <div class="entry-form-of-box">
-                    <div class="entry-form-of-label">OFFICIAL ENTRY FORM AND GALLERY OF</div>
+                    <div class="entry-form-of-label">OFFICIAL LIST OF ATHLETES</div>
                     <div class="entry-form-of-sport"><?= sanitize($sportName) ?></div>
                 </div>
             </div>
@@ -229,7 +228,7 @@ foreach ($forms as $form):
         <div class="entry-form-fields">
             <div class="entry-form-field-school">
                 <span class="entry-form-field-label">SCHOOL:</span>
-                <span class="entry-form-field-value"><?= sanitize(trim((string) ($form['team_department'] ?? '')) ?: $form['team_name']) ?></span>
+                <span class="entry-form-field-value"><?= sanitize($school) ?></span>
             </div>
             <div class="entry-form-field-team">
                 <span class="entry-form-team-badge">TEAM</span>
@@ -242,88 +241,51 @@ foreach ($forms as $form):
         </div>
     </header>
 
-    <div class="entry-form-gallery" style="--entry-watermark:url('<?= sanitize($collegeLogo) ?>')">
-        <?php foreach ($rowsOfSix as $rowIndex => $rowAthletes): ?>
-        <?php
-            $colCount = count($rowAthletes);
-            $seqBase = ($pageNo * 12) + ($rowIndex * 6);
-        ?>
-        <table class="entry-form-table">
-            <colgroup>
-                <col class="entry-form-label-col">
-                <?php for ($c = 0; $c < $colCount; $c++): ?>
-                <col>
-                <?php endfor; ?>
-            </colgroup>
+    <div class="team-list-body">
+        <table class="team-list-table">
             <thead>
-                <tr class="entry-form-head-row">
-                    <th class="entry-form-corner" scope="col"></th>
-                    <?php foreach ($rowAthletes as $i => $_): ?>
-                    <th scope="col">PARTICIPANT <?= $seqBase + $i + 1 ?></th>
-                    <?php endforeach; ?>
+                <tr>
+                    <th class="col-num col-header-strong">#</th>
+                    <th class="col-name col-header-strong">Athlete Name</th>
+                    <th class="col-id">Student ID</th>
+                    <th class="col-gender">Gender</th>
+                    <th class="col-course">Course &amp; Year</th>
+                    <th class="col-event col-header-strong">Sport / Event</th>
+                    <th class="col-category col-header-strong">Category</th>
                 </tr>
             </thead>
             <tbody>
-                <tr class="entry-form-photo-row">
-                    <th scope="row"></th>
-                    <?php foreach ($rowAthletes as $athlete): ?>
-                    <td>
-                        <div class="entry-form-photo-frame">
-                            <?php if ($athlete && !empty($athlete['photo'])): ?>
-                            <img src="<?= sanitize(UPLOAD_URL_ATHLETES . $athlete['photo']) ?>" alt="<?= sanitize(athleteFullNameReport($athlete)) ?>" class="entry-form-photo">
-                            <?php else: ?>
-                            <div class="entry-form-photo-placeholder">Attach Recent<br>Photo 1x1</div>
-                            <?php endif; ?>
-                        </div>
-                    </td>
-                    <?php endforeach; ?>
+                <?php foreach ($form['athletes'] as $i => $athlete): ?>
+                <tr>
+                    <td class="col-num"><?= $i + 1 ?></td>
+                    <td class="col-name"><?= sanitize(athleteFullNameReport($athlete)) ?></td>
+                    <td class="col-id"><?= sanitize((string) $athlete['student_id']) ?></td>
+                    <td class="col-gender"><?= sanitize(ucfirst((string) ($athlete['gender'] ?? '')) ?: '—') ?></td>
+                    <td class="col-course"><?= sanitize($courseYear($athlete) ?: '—') ?></td>
+                    <td class="col-event"><?= sanitize($sportName) ?></td>
+                    <td class="col-category"><?= sanitize($catLabel) ?></td>
                 </tr>
-                <tr class="entry-form-info-row">
-                    <th scope="row">Name</th>
-                    <?php foreach ($rowAthletes as $athlete): ?>
-                    <td><?= $athlete ? sanitize(athleteFullNameReport($athlete)) : '' ?></td>
-                    <?php endforeach; ?>
-                </tr>
-                <tr class="entry-form-info-row">
-                    <th scope="row">Date of Birth</th>
-                    <?php foreach ($rowAthletes as $athlete): ?>
-                    <td><?= $athlete && !empty($athlete['birthdate']) ? sanitize(formatDate($athlete['birthdate'], 'm/d/Y')) : '' ?></td>
-                    <?php endforeach; ?>
-                </tr>
-                <tr class="entry-form-info-row">
-                    <th scope="row">Student ID Number</th>
-                    <?php foreach ($rowAthletes as $athlete): ?>
-                    <td><?= $athlete ? sanitize((string) $athlete['student_id']) : '' ?></td>
-                    <?php endforeach; ?>
-                </tr>
-                <tr class="entry-form-info-row entry-form-info-row-last">
-                    <th scope="row">Course &amp; Year</th>
-                    <?php foreach ($rowAthletes as $athlete): ?>
-                    <td><?= sanitize($courseYear($athlete)) ?></td>
-                    <?php endforeach; ?>
-                </tr>
+                <?php endforeach; ?>
+                <?php if ($athleteCount === 0): ?>
+                <tr><td colspan="7" class="text-muted p-3">No athletes on roster for this event.</td></tr>
+                <?php endif; ?>
             </tbody>
         </table>
-        <?php endforeach; ?>
     </div>
 
     <footer class="entry-form-footer">
-        <span><?= sanitize($seasonLabel) ?> · <?= sanitize($form['team_name']) ?> · <?= sanitize($sportName) ?></span>
-        <span>Page <?= sanitize($pageLabel) ?><?= $totalForms > 1 ? ' · Form ' . $formIndex . ' of ' . $totalForms : '' ?></span>
+        <span><?= sanitize($seasonLabel) ?> · <?= sanitize($form['team_name']) ?> · <?= sanitize($sportName) ?> · <?= (int) $athleteCount ?> athlete<?= $athleteCount === 1 ? '' : 's' ?></span>
+        <span><?= $totalForms > 1 ? 'Form ' . $formIndex . ' of ' . $totalForms : 'Team Athlete List' ?></span>
     </footer>
 </section>
-<?php endforeach; ?>
 <?php endforeach; ?>
 </div>
 
 <style>
-.entry-gallery-print-root {
+.team-list-print-root {
     --ef-border: #222;
     --ef-accent: #c62828;
     --ef-label-bg: #f3f3f3;
-    --ef-photo-size: 1.2in;
-    --ef-row-h: 34px;
-    --ef-label-w: 8.25rem;
 }
 
 .entry-form-sheet {
@@ -355,7 +317,8 @@ foreach ($forms as $form):
     min-width: 0;
 }
 
-.entry-form-logo {
+.entry-form-logo,
+.entry-form-sdo-logo {
     width: 72px;
     height: 72px;
     object-fit: cover;
@@ -373,22 +336,21 @@ foreach ($forms as $form):
     min-width: 0;
 }
 
-.entry-form-sdo-logo {
-    width: 72px;
-    height: 72px;
-    object-fit: cover;
-    border-radius: 50%;
-    background: #fff;
-    border: 1px solid #ddd;
-    flex-shrink: 0;
-}
-
 .entry-form-meta-boxes {
     display: flex;
     flex-direction: column;
     gap: 0.4rem;
     justify-self: end;
     width: min(100%, 240px);
+}
+
+.entry-form-republic {
+    font-family: "Times New Roman", Times, Georgia, serif;
+    font-size: 0.95rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    line-height: 1.2;
+    margin-bottom: 0.12rem;
 }
 
 .entry-form-office-heading {
@@ -400,15 +362,6 @@ foreach ($forms as $form):
     text-transform: uppercase;
     margin-top: 0.15rem;
     margin-bottom: 0;
-}
-
-.entry-form-republic {
-    font-family: "Times New Roman", Times, Georgia, serif;
-    font-size: 0.95rem;
-    font-weight: 600;
-    letter-spacing: 0.03em;
-    line-height: 1.2;
-    margin-bottom: 0.12rem;
 }
 
 .entry-form-event-title {
@@ -524,132 +477,84 @@ foreach ($forms as $form):
     padding: 0 0.25rem 0.1rem;
 }
 
-.entry-form-gallery {
-    position: relative;
-}
-
-.entry-form-gallery::before {
-    content: "";
-    position: absolute;
-    inset: 10% 16%;
-    background-image: var(--entry-watermark);
-    background-repeat: no-repeat;
-    background-position: center;
-    background-size: contain;
-    opacity: 0.06;
-    pointer-events: none;
-    z-index: 0;
-}
-
-.entry-form-table {
-    position: relative;
-    z-index: 1;
+.team-list-table {
     width: 100%;
-    table-layout: fixed;
     border-collapse: collapse;
     border: 1.5px solid var(--ef-border);
-    margin-bottom: 0.85rem;
-    background: rgba(255, 255, 255, 0.92);
+    font-size: 0.82rem;
 }
 
-.entry-form-table .entry-form-label-col {
-    width: var(--ef-label-w);
-}
-
-.entry-form-table th,
-.entry-form-table td {
+.team-list-table th,
+.team-list-table td {
     border: 1px solid var(--ef-border);
+    padding: 0.4rem 0.45rem;
     vertical-align: middle;
+}
+
+.team-list-table thead th {
+    background: var(--ef-label-bg);
+    font-size: 0.92rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
     text-align: center;
-    overflow: hidden;
+    text-transform: uppercase;
 }
 
-.entry-form-head-row th {
-    height: 28px;
-    font-size: 0.72rem;
+.team-list-table thead th.col-header-strong {
     font-weight: 800;
-    letter-spacing: 0.03em;
-    background: var(--ef-label-bg);
-    padding: 0.2rem 0.15rem;
+    font-size: 1rem;
 }
 
-.entry-form-corner {
-    background: var(--ef-label-bg) !important;
+.team-list-table .col-num {
+    width: 2.5rem;
+    text-align: center;
+    font-weight: 700;
 }
 
-.entry-form-photo-row th,
-.entry-form-info-row th {
-    width: var(--ef-label-w);
-    background: var(--ef-label-bg);
-    font-size: 0.78rem;
+.team-list-table .col-name {
+    width: 22%;
     font-weight: 700;
     text-align: left;
-    padding: 0.35rem 0.45rem;
-    white-space: nowrap;
 }
 
-.entry-form-photo-row td {
-    height: calc(var(--ef-photo-size) + 0.12in);
-    padding: 0.06in;
-    background: #fff;
-}
-
-.entry-form-photo-frame {
-    width: var(--ef-photo-size);
-    height: var(--ef-photo-size);
-    min-width: var(--ef-photo-size);
-    min-height: var(--ef-photo-size);
-    border: 1px solid #999;
-    box-sizing: border-box;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: #fafafa;
-    overflow: hidden;
-    margin: 0 auto;
-    aspect-ratio: 1 / 1;
-    flex-shrink: 0;
-}
-
-.entry-form-photo {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-}
-
-.entry-form-photo-placeholder {
-    font-size: 0.7rem;
-    color: #666;
+.team-list-table .col-id {
+    width: 12%;
     text-align: center;
-    line-height: 1.3;
-    padding: 0.35rem;
 }
 
-.entry-form-info-row td {
-    height: var(--ef-row-h);
-    padding: 0.25rem 0.3rem;
-    font-size: 0.78rem;
+.team-list-table .col-gender {
+    width: 8%;
+    text-align: center;
+}
+
+.team-list-table .col-course {
+    width: 22%;
+    text-align: left;
+}
+
+.team-list-table .col-event {
+    width: 16%;
+    text-align: left;
     font-weight: 600;
-    line-height: 1.2;
-    word-break: break-word;
-    background: #fff;
+}
+
+.team-list-table .col-category {
+    width: 10%;
+    text-align: center;
+    font-weight: 700;
+    color: #111;
 }
 
 .entry-form-footer {
     display: flex;
     justify-content: space-between;
     gap: 1rem;
-    margin-top: 0.15rem;
+    margin-top: 0.55rem;
     font-size: 0.75rem;
     color: #555;
 }
 
 @media (max-width: 991.98px) {
-    .entry-gallery-print-root {
-        --ef-row-h: 32px;
-        --ef-label-w: 7.5rem;
-    }
     .entry-form-header-top {
         grid-template-columns: 1fr;
         justify-items: center;
@@ -657,7 +562,6 @@ foreach ($forms as $form):
     }
     .entry-form-meta-boxes {
         width: 100%;
-        justify-content: center;
         justify-self: center;
     }
     .entry-form-header-spacer {
@@ -673,12 +577,12 @@ foreach ($forms as $form):
     .entry-form-field-category {
         justify-content: flex-start;
     }
-    .entry-form-gallery {
+    .team-list-body {
         overflow-x: auto;
         -webkit-overflow-scrolling: touch;
     }
-    .entry-form-table {
-        min-width: calc(var(--ef-label-w) + (var(--ef-photo-size) * 6) + 1.5rem);
+    .team-list-table {
+        min-width: 720px;
     }
 }
 
@@ -688,9 +592,6 @@ foreach ($forms as $form):
         font-size: 0.9rem;
     }
     .entry-form-event-title {
-        font-size: 1rem;
-    }
-    .entry-form-of-sport {
         font-size: 1rem;
     }
 }
@@ -704,11 +605,6 @@ foreach ($forms as $form):
         margin: 0 !important;
         max-width: none !important;
     }
-    .entry-gallery-print-root {
-        --ef-photo-size: 1.2in;
-        --ef-row-h: 0.28in;
-        --ef-label-w: 1.15in;
-    }
     .entry-form-sheet {
         border: none !important;
         border-radius: 0 !important;
@@ -721,32 +617,26 @@ foreach ($forms as $form):
         page-break-after: always;
         break-after: page;
     }
-    .entry-form-gallery {
-        overflow: visible !important;
-    }
-    .entry-form-table {
-        min-width: 0 !important;
-        page-break-inside: avoid;
-        break-inside: avoid;
-    }
     .entry-form-header-top {
         grid-template-columns: 1fr auto 1fr !important;
         align-items: center !important;
     }
-    .entry-form-sdo-logo,
-    .entry-form-logo {
+    .entry-form-logo,
+    .entry-form-sdo-logo {
         width: 0.8in;
         height: 0.8in;
     }
     .entry-form-fields {
         grid-template-columns: 1.5fr auto 0.9fr !important;
     }
-    .entry-form-gallery::before {
-        opacity: 0.07;
+    .team-list-table {
+        min-width: 0 !important;
     }
-    .entry-form-info-row td,
-    .entry-form-info-row th,
-    .entry-form-head-row th {
+    .team-list-table tr {
+        page-break-inside: avoid;
+        break-inside: avoid;
+    }
+    .team-list-table thead th {
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
     }

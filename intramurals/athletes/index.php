@@ -13,12 +13,13 @@ $userTeamId = getUserTeamId();
 $isCoach = hasRole('coach') && !canManageIntramurals();
 $coachTeamIds = $isCoach ? getCoachTeamIds() : [];
 
-// Unit managers default to their team; coaches see athletes on teams they coach
-if (hasRole('unit_manager') && $userTeamId) {
-    $teamId = (string) $userTeamId;
+// Unit managers are locked to their assigned team; coaches default when they have one team
+if (hasRole('unit_manager') && !canManageIntramurals()) {
+    $teamId = $userTeamId ? (string) $userTeamId : '0';
 } elseif ($isCoach && count($coachTeamIds) === 1 && $teamId === '') {
     $teamId = (string) $coachTeamIds[0];
 }
+$lockTeamFilter = hasRole('unit_manager') && !canManageIntramurals() && (bool) $userTeamId;
 
 $where = ['a.is_active = 1'];
 $params = [];
@@ -117,14 +118,16 @@ require __DIR__ . '/../_season_bar.php';
         </div>
         <div class="col-md-3">
             <label class="form-label">Team / House</label>
-            <select name="team" class="form-select" <?= hasRole('unit_manager') && !canManageIntramurals() ? 'disabled' : '' ?>>
+            <select name="team" class="form-select" <?= !empty($lockTeamFilter) ? 'disabled' : '' ?>>
+                <?php if (empty($lockTeamFilter)): ?>
                 <option value="">All Teams</option>
+                <?php endif; ?>
                 <?php foreach ($teams as $t): ?>
                 <?php if ($isCoach && !in_array((int) $t['id'], $coachTeamIds, true)) continue; ?>
                 <option value="<?= $t['id'] ?>" <?= $teamId === (string) $t['id'] ? 'selected' : '' ?>><?= sanitize($t['name']) ?></option>
                 <?php endforeach; ?>
             </select>
-            <?php if (hasRole('unit_manager') && !canManageIntramurals() && $userTeamId): ?>
+            <?php if (!empty($lockTeamFilter)): ?>
             <input type="hidden" name="team" value="<?= (int) $userTeamId ?>">
             <?php endif; ?>
         </div>

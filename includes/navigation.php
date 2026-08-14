@@ -68,6 +68,7 @@ function buildAppNavigation(): array
                 $items[] = ['label' => 'Rosters', 'href' => BASE_URL . '/intramurals/roster/index.php', 'icon' => 'bi-person-lines-fill'];
                 $items[] = ['label' => 'Import Roster', 'href' => BASE_URL . '/intramurals/roster/import.php', 'icon' => 'bi-upload'];
                 $items[] = ['label' => 'Entry Form Gallery', 'href' => BASE_URL . '/intramurals/roster/gallery.php', 'icon' => 'bi-images'];
+                $items[] = ['label' => 'Team Athlete List', 'href' => BASE_URL . '/intramurals/roster/team_list.php', 'icon' => 'bi-people'];
             } else {
                 $items[] = ['type' => 'text', 'label' => 'No event assignments yet. Ask your unit manager under Teams → Event Coaches.'];
             }
@@ -86,6 +87,7 @@ function buildAppNavigation(): array
                 $items[] = ['label' => 'Import Roster', 'href' => BASE_URL . '/intramurals/roster/import.php', 'icon' => 'bi-upload'];
             }
             $items[] = ['label' => 'Entry Form Gallery', 'href' => BASE_URL . '/intramurals/roster/gallery.php', 'icon' => 'bi-images'];
+            $items[] = ['label' => 'Team Athlete List', 'href' => BASE_URL . '/intramurals/roster/team_list.php', 'icon' => 'bi-people'];
 
             $items[] = ['type' => 'header', 'label' => 'Competition'];
             $items[] = ['label' => 'Matches', 'href' => BASE_URL . '/intramurals/matches/index.php', 'icon' => 'bi-calendar-event'];
@@ -118,6 +120,7 @@ function buildAppNavigation(): array
                 ['label' => 'Calendar', 'href' => BASE_URL . '/intramurals/matches/calendar.php', 'icon' => 'bi-calendar3'],
                 ['label' => 'Official Rosters', 'href' => BASE_URL . '/intramurals/roster/index.php', 'icon' => 'bi-person-lines-fill'],
                 ['label' => 'Entry Form Gallery', 'href' => BASE_URL . '/intramurals/roster/gallery.php', 'icon' => 'bi-images'],
+                ['label' => 'Team Athlete List', 'href' => BASE_URL . '/intramurals/roster/team_list.php', 'icon' => 'bi-people'],
                 ['type' => 'header', 'label' => 'Standings'],
                 ['label' => 'Team Standings', 'href' => BASE_URL . '/intramurals/standings/index.php', 'icon' => 'bi-bar-chart-steps'],
                 ['label' => 'Overall Standing', 'href' => BASE_URL . '/intramurals/standings/overall.php', 'icon' => 'bi-award'],
@@ -137,6 +140,7 @@ function buildAppNavigation(): array
             ['label' => 'Calendar', 'href' => BASE_URL . '/intramurals/matches/calendar.php', 'icon' => 'bi-calendar3'],
             ['label' => 'Official Rosters', 'href' => BASE_URL . '/intramurals/roster/index.php', 'icon' => 'bi-person-lines-fill'],
             ['label' => 'Entry Form Gallery', 'href' => BASE_URL . '/intramurals/roster/gallery.php', 'icon' => 'bi-images'],
+            ['label' => 'Team Athlete List', 'href' => BASE_URL . '/intramurals/roster/team_list.php', 'icon' => 'bi-people'],
             ['type' => 'header', 'label' => 'Standings'],
             ['label' => 'Per-Sport Standings', 'href' => BASE_URL . '/intramurals/standings/index.php', 'icon' => 'bi-bar-chart-steps'],
             ['label' => 'Overall Standing', 'href' => BASE_URL . '/intramurals/standings/overall.php', 'icon' => 'bi-award'],
@@ -159,6 +163,7 @@ function buildAppNavigation(): array
             ['label' => 'Rosters', 'href' => BASE_URL . '/intramurals/roster/index.php', 'icon' => 'bi-person-lines-fill'],
             ['label' => 'Import Roster', 'href' => BASE_URL . '/intramurals/roster/import.php', 'icon' => 'bi-upload'],
             ['label' => 'Entry Form Gallery', 'href' => BASE_URL . '/intramurals/roster/gallery.php', 'icon' => 'bi-images'],
+            ['label' => 'Team Athlete List', 'href' => BASE_URL . '/intramurals/roster/team_list.php', 'icon' => 'bi-people'],
             ['label' => 'Sport Guidelines', 'href' => BASE_URL . '/intramurals/sports/guidelines.php', 'icon' => 'bi-journal-text'],
         ]);
         $nav[] = ['type' => 'group', 'label' => 'My Team', 'icon' => 'bi-shield', 'items' => $items];

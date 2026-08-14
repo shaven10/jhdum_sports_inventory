@@ -51,9 +51,9 @@ $canOpenAthlete = $canOpenAthlete ?? true;
                             <?php endif; ?>
                             <div>
                                 <?php if ($canOpenAthlete && !empty($p['athlete_id'])): ?>
-                                <a href="<?= BASE_URL ?>/intramurals/athletes/view.php?id=<?= (int) $p['athlete_id'] ?>"><?= sanitize(athleteFullName($p)) ?></a>
+                                <a href="<?= BASE_URL ?>/intramurals/athletes/view.php?id=<?= (int) $p['athlete_id'] ?>"><?= sanitize(athleteFullNameReport($p)) ?></a>
                                 <?php else: ?>
-                                <?= sanitize(athleteFullName($p)) ?>
+                                <?= sanitize(athleteFullNameReport($p)) ?>
                                 <?php endif; ?>
                                 <div class="small text-muted"><?= sanitize(ucfirst((string) ($p['gender'] ?? ''))) ?><?php if (!empty($p['event_category'])): ?> · <?= sanitize($p['event_category']) ?><?php endif; ?></div>
                             </div>

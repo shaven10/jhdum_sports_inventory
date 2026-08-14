@@ -16,10 +16,12 @@ $sportId = get('sport');
 $teamId = get('team');
 $category = get('category');
 $export = get('export');
+applyUnitManagerTeamScope($teamId);
 
 $sports = filterSportsForUser(filterSportsForCoach($db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll()));
 $teams = filterTeamsForCoach($db->query('SELECT id, name FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll());
 $categoryOptions = sportCategoryOptions();
+$lockTeamFilter = hasRole('unit_manager') && !canManageIntramurals() && getUserTeamId();
 
 $where = ['a.is_active = 1'];
 $params = [];
@@ -103,7 +105,7 @@ if ($export === 'excel' || $export === 'csv') {
                 $catLabel,
                 $r['jersey_number'] ?: '',
                 $r['student_id'],
-                athleteFullName($r),
+                athleteFullNameReport($r),
                 ucfirst($r['gender'] ?: ''),
                 $r['team_name'],
                 $r['department'] ?: '',
@@ -135,6 +137,7 @@ require __DIR__ . '/../_season_bar.php';
         <a href="<?= BASE_URL ?>/intramurals/roster/import.php?download=template" class="btn btn-outline-success"><i class="bi bi-download"></i> Download Template</a>
         <?php endif; ?>
         <a href="<?= BASE_URL ?>/intramurals/roster/gallery.php" class="btn btn-outline-primary"><i class="bi bi-images"></i> Entry Form Gallery</a>
+        <a href="<?= BASE_URL ?>/intramurals/roster/team_list.php" class="btn btn-outline-primary"><i class="bi bi-people"></i> Team Athlete List</a>
         <a href="?<?= $querySuffix ?>&export=excel" class="btn btn-outline-success"><i class="bi bi-file-earmark-excel"></i> Export Excel</a>
         <button type="button" class="btn btn-outline-secondary" onclick="printReport()"><i class="bi bi-printer"></i> Print / PDF</button>
         <a href="<?= BASE_URL ?>/intramurals/index.php" class="btn btn-outline-secondary">Back</a>
@@ -167,12 +170,17 @@ require __DIR__ . '/../_season_bar.php';
         </div>
         <div class="col-md-2">
             <label class="form-label">Team</label>
-            <select name="team" class="form-select">
+            <select name="team" class="form-select" <?= !empty($lockTeamFilter) ? 'disabled' : '' ?>>
+                <?php if (empty($lockTeamFilter)): ?>
                 <option value="">All Teams</option>
+                <?php endif; ?>
                 <?php foreach ($teams as $t): ?>
                 <option value="<?= $t['id'] ?>" <?= $teamId === (string) $t['id'] ? 'selected' : '' ?>><?= sanitize($t['name']) ?></option>
                 <?php endforeach; ?>
             </select>
+            <?php if (!empty($lockTeamFilter)): ?>
+            <input type="hidden" name="team" value="<?= (int) $teamId ?>">
+            <?php endif; ?>
         </div>
         <div class="col-md-2"><button class="btn btn-primary w-100">Apply</button></div>
     </form>
@@ -253,8 +261,8 @@ require __DIR__ . '/../_season_bar.php';
                             <td><?= sanitize($r['jersey_number'] ?: '—') ?></td>
                             <td><?= sanitize($r['student_id']) ?></td>
                             <td>
-                                <span class="d-print-none"><a class="roster-athlete-link" href="<?= BASE_URL ?>/intramurals/athletes/view.php?id=<?= $r['athlete_id'] ?>"><?= sanitize(athleteFullName($r)) ?></a></span>
-                                <span class="d-none d-print-inline"><?= sanitize(athleteFullName($r)) ?></span>
+                                <span class="d-print-none"><a class="roster-athlete-link" href="<?= BASE_URL ?>/intramurals/athletes/view.php?id=<?= $r['athlete_id'] ?>"><?= sanitize(athleteFullNameReport($r)) ?></a></span>
+                                <span class="d-none d-print-inline"><?= sanitize(athleteFullNameReport($r)) ?></span>
                             </td>
                             <td><?= sanitize(ucfirst($r['gender'] ?: '—')) ?></td>
                             <td><span class="roster-team-name"><?= sanitize($r['team_name']) ?></span></td>
