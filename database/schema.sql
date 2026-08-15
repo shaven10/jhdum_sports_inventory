@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS users (
     student_id VARCHAR(20) DEFAULT NULL,
     department VARCHAR(100) DEFAULT NULL,
     phone VARCHAR(20) DEFAULT NULL,
-    role ENUM('admin', 'coordinator', 'staff', 'unit_manager', 'coach', 'tabulator', 'secretariat', 'student') NOT NULL DEFAULT 'student',
+    role ENUM('admin', 'coordinator', 'staff', 'unit_manager', 'coach', 'tabulator', 'secretariat', 'publication', 'student') NOT NULL DEFAULT 'student',
     team_id INT DEFAULT NULL,
     avatar VARCHAR(255) DEFAULT NULL,
     is_active TINYINT(1) NOT NULL DEFAULT 1,
@@ -144,6 +144,39 @@ CREATE TABLE IF NOT EXISTS notifications (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
+-- System announcements (staff modules only; students excluded)
+CREATE TABLE IF NOT EXISTS announcements (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    title VARCHAR(200) NOT NULL,
+    message TEXT NOT NULL,
+    type ENUM('info', 'success', 'warning', 'danger') NOT NULL DEFAULT 'info',
+    target_roles JSON DEFAULT NULL,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    created_by INT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+-- Incident reports (tournament / unit managers → admin)
+CREATE TABLE IF NOT EXISTS incident_reports (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    reporter_user_id INT NOT NULL,
+    subject VARCHAR(200) NOT NULL,
+    category VARCHAR(50) NOT NULL DEFAULT 'query',
+    message TEXT NOT NULL,
+    status ENUM('open', 'in_progress', 'resolved', 'closed') NOT NULL DEFAULT 'open',
+    admin_response TEXT DEFAULT NULL,
+    responded_by INT DEFAULT NULL,
+    responded_at DATETIME DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (reporter_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (responded_by) REFERENCES users(id) ON DELETE SET NULL,
+    INDEX idx_incident_status (status),
+    INDEX idx_incident_reporter (reporter_user_id)
+) ENGINE=InnoDB;
+
 -- Audit logs
 CREATE TABLE IF NOT EXISTS audit_logs (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -198,6 +231,8 @@ INSERT INTO users (username, email, password, password_plain, first_name, last_n
 ('admin', 'admin@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'admin123', 'System', 'Administrator', 'admin'),
 ('coordinator', 'coordinator@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'admin123', 'Sports', 'Coordinator', 'coordinator'),
 ('staff', 'staff@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'admin123', 'Sports', 'Staff', 'staff'),
+('secretariat', 'secretariat@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'admin123', 'Intramurals', 'Secretariat', 'secretariat'),
+('publication', 'publication@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'admin123', 'Intramurals', 'Publication', 'publication'),
 ('student', 'student@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'admin123', 'Juan', 'Dela Cruz', 'student');
 
 -- Insert sample equipment
@@ -250,9 +285,39 @@ CREATE TABLE IF NOT EXISTS intramural_seasons (
     roster_lock_date DATE DEFAULT NULL,
     roster_locked_at DATETIME DEFAULT NULL,
     roster_locked_by INT DEFAULT NULL,
+    results_locked TINYINT(1) NOT NULL DEFAULT 0,
+    results_lock_date DATE DEFAULT NULL,
+    results_locked_at DATETIME DEFAULT NULL,
+    results_locked_by INT DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uq_season_year_label (year_label)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS intramural_event_results_locks (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    season_id INT NOT NULL,
+    sport_id INT NOT NULL,
+    locked_at DATETIME DEFAULT NULL,
+    locked_by INT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_event_results_lock (season_id, sport_id),
+    INDEX idx_event_results_lock_sport (sport_id),
+    FOREIGN KEY (season_id) REFERENCES intramural_seasons(id) ON DELETE CASCADE,
+    FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE,
+    FOREIGN KEY (locked_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS intramural_divisions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    description TEXT,
+    sort_order INT NOT NULL DEFAULT 0,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_division_name (name)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS intramural_teams (
@@ -262,6 +327,7 @@ CREATE TABLE IF NOT EXISTS intramural_teams (
     color VARCHAR(20) DEFAULT '#1a5276',
     logo VARCHAR(255) DEFAULT NULL,
     department VARCHAR(100) DEFAULT NULL,
+    division_id INT DEFAULT NULL,
     coach_name VARCHAR(100) DEFAULT NULL,
     unit_manager_id INT DEFAULT NULL,
     coach_user_id INT DEFAULT NULL,
@@ -269,7 +335,8 @@ CREATE TABLE IF NOT EXISTS intramural_teams (
     is_active TINYINT(1) NOT NULL DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY uq_team_name (name)
+    UNIQUE KEY uq_team_name (name),
+    FOREIGN KEY (division_id) REFERENCES intramural_divisions(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS intramural_point_schemes (
@@ -309,6 +376,31 @@ CREATE TABLE IF NOT EXISTS intramural_sports (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uq_sport_name_category (name, category),
     FOREIGN KEY (point_scheme_id) REFERENCES intramural_point_schemes(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS intramural_division_sports (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    division_id INT NOT NULL,
+    sport_id INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_division_sport (division_id, sport_id),
+    FOREIGN KEY (division_id) REFERENCES intramural_divisions(id) ON DELETE CASCADE,
+    FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS intramural_event_team_positions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    division_id INT NOT NULL,
+    sport_id INT NOT NULL,
+    team_id INT NOT NULL,
+    position TINYINT UNSIGNED NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_div_sport_position (division_id, sport_id, position),
+    UNIQUE KEY uq_div_sport_team (division_id, sport_id, team_id),
+    FOREIGN KEY (division_id) REFERENCES intramural_divisions(id) ON DELETE CASCADE,
+    FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE,
+    FOREIGN KEY (team_id) REFERENCES intramural_teams(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS intramural_athletes (
@@ -384,6 +476,7 @@ CREATE TABLE IF NOT EXISTS intramural_matches (
     id INT AUTO_INCREMENT PRIMARY KEY,
     season_id INT NOT NULL,
     sport_id INT NOT NULL,
+    division_id INT DEFAULT NULL,
     round_number INT NOT NULL DEFAULT 1,
     round_label VARCHAR(80) DEFAULT NULL,
     match_order INT NOT NULL DEFAULT 0,
@@ -404,6 +497,7 @@ CREATE TABLE IF NOT EXISTS intramural_matches (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (season_id) REFERENCES intramural_seasons(id) ON DELETE RESTRICT,
     FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE,
+    FOREIGN KEY (division_id) REFERENCES intramural_divisions(id) ON DELETE SET NULL,
     FOREIGN KEY (team_a_id) REFERENCES intramural_teams(id) ON DELETE RESTRICT,
     FOREIGN KEY (team_b_id) REFERENCES intramural_teams(id) ON DELETE RESTRICT,
     FOREIGN KEY (winner_team_id) REFERENCES intramural_teams(id) ON DELETE SET NULL,

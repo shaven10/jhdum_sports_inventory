@@ -4,7 +4,9 @@ requireIntramuralsAccess();
 requireRole(['admin', 'coordinator', 'staff']);
 
 $db = getDB();
+ensureIntramuralDivisionsSchema();
 $errors = [];
+$divisions = getDivisions(true);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!verifyCsrf(post('csrf_token'))) {
@@ -16,11 +18,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $shortName = post('short_name');
     $color = post('color', '#1a5276');
     $department = post('department');
+    $divisionId = (int) post('division_id') ?: null;
     $coachName = post('coach_name');
     $description = post('description');
 
     if ($name === '') {
         $errors[] = 'Team name is required.';
+    }
+    if ($divisionId && !getDivisionById($divisionId)) {
+        $errors[] = 'Selected division is invalid.';
+        $divisionId = null;
     }
 
     $logo = null;
@@ -33,8 +40,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (empty($errors)) {
         try {
-            $stmt = $db->prepare('INSERT INTO intramural_teams (name, short_name, color, logo, department, coach_name, description) VALUES (?, ?, ?, ?, ?, ?, ?)');
-            $stmt->execute([$name, $shortName, $color, $logo, $department, $coachName, $description]);
+            $stmt = $db->prepare('INSERT INTO intramural_teams (name, short_name, color, logo, department, division_id, coach_name, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+            $stmt->execute([$name, $shortName, $color, $logo, $department, $divisionId, $coachName, $description]);
             $id = (int) $db->lastInsertId();
             auditLog($_SESSION['user_id'], 'create', 'intramural_team', $id, null, ['name' => $name]);
             flash('success', 'Team registered successfully.');
@@ -76,6 +83,18 @@ require_once __DIR__ . '/../../includes/header.php';
                         <div class="col-md-6">
                             <label class="form-label">Department / College</label>
                             <input type="text" name="department" class="form-control" value="<?= sanitize(post('department')) ?>">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Division</label>
+                            <select name="division_id" class="form-select">
+                                <option value="">None (any event)</option>
+                                <?php foreach ($divisions as $d): ?>
+                                <option value="<?= (int) $d['id'] ?>" <?= (int) post('division_id') === (int) $d['id'] ? 'selected' : '' ?>>
+                                    <?= sanitize($d['name']) ?>
+                                </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <div class="form-text">High School, College, etc. Manage under Admin → Divisions.</div>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label">Coach</label>

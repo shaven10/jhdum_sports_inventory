@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
-requireIntramuralsAccess();
+requireAthletesDirectoryAccess();
 
 $db = getDB();
 $seasonId = getCurrentSeasonId();
@@ -67,12 +67,29 @@ $countStmt = $db->prepare("SELECT COUNT(*) FROM intramural_athletes a WHERE $whe
 $countStmt->execute($params);
 $pagination = paginate((int) $countStmt->fetchColumn(), $perPage, $page);
 
-$sportCountSql = $seasonId
-    ? '(SELECT COUNT(*) FROM intramural_registrations r WHERE r.athlete_id = a.id AND r.season_id = ' . (int) $seasonId . ')'
-    : '(SELECT COUNT(*) FROM intramural_registrations r WHERE r.athlete_id = a.id)';
+$sportNamesSql = $seasonId
+    ? '(SELECT GROUP_CONCAT(DISTINCT s.name ORDER BY s.name SEPARATOR \'||\')
+        FROM intramural_registrations r
+        JOIN intramural_sports s ON s.id = r.sport_id
+        WHERE r.athlete_id = a.id AND r.season_id = ' . (int) $seasonId . ')'
+    : '(SELECT GROUP_CONCAT(DISTINCT s.name ORDER BY s.name SEPARATOR \'||\')
+        FROM intramural_registrations r
+        JOIN intramural_sports s ON s.id = r.sport_id
+        WHERE r.athlete_id = a.id)';
+
+$sportCategoriesSql = $seasonId
+    ? '(SELECT GROUP_CONCAT(DISTINCT s.category ORDER BY s.category SEPARATOR \'||\')
+        FROM intramural_registrations r
+        JOIN intramural_sports s ON s.id = r.sport_id
+        WHERE r.athlete_id = a.id AND r.season_id = ' . (int) $seasonId . ')'
+    : '(SELECT GROUP_CONCAT(DISTINCT s.category ORDER BY s.category SEPARATOR \'||\')
+        FROM intramural_registrations r
+        JOIN intramural_sports s ON s.id = r.sport_id
+        WHERE r.athlete_id = a.id)';
 
 $sql = "SELECT a.*, t.name as team_name, t.color as team_color,
-        $sportCountSql as sport_count
+        $sportNamesSql as sport_names,
+        $sportCategoriesSql as sport_categories
         FROM intramural_athletes a
         LEFT JOIN intramural_teams t ON a.team_id = t.id
         WHERE $whereClause
@@ -81,6 +98,12 @@ $sql = "SELECT a.*, t.name as team_name, t.color as team_color,
 $stmt = $db->prepare($sql);
 $stmt->execute($params);
 $athletes = $stmt->fetchAll();
+
+foreach ($athletes as &$athleteRow) {
+    $athleteRow['sport_name_list'] = array_values(array_filter(array_map('trim', explode('||', (string) ($athleteRow['sport_names'] ?? '')))));
+    $athleteRow['sport_category_list'] = array_values(array_filter(array_map('trim', explode('||', (string) ($athleteRow['sport_categories'] ?? '')))));
+}
+unset($athleteRow);
 
 $teams = filterTeamsForCoach($db->query('SELECT id, name FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll());
 $sports = filterSportsForCoach($db->query('SELECT id, name, category FROM intramural_sports ORDER BY name, category')->fetchAll());
@@ -157,7 +180,8 @@ require __DIR__ . '/../_season_bar.php';
                         <th>Team</th>
                         <th>Course</th>
                         <th>Year Level</th>
-                        <th>Events</th>
+                        <th>Sport / Event</th>
+                        <th>Category</th>
                         <th class="text-end" style="width:9rem;">Actions</th>
                     </tr>
                 </thead>
@@ -184,7 +208,28 @@ require __DIR__ . '/../_season_bar.php';
                         </td>
                         <td><?= sanitize($a['department'] ?: '—') ?></td>
                         <td><?= sanitize($a['year_level'] ?: '—') ?></td>
-                        <td><?= (int) $a['sport_count'] ?></td>
+                        <td>
+                            <?php if (!empty($a['sport_name_list'])): ?>
+                            <div class="d-flex flex-wrap gap-1">
+                                <?php foreach ($a['sport_name_list'] as $sportName): ?>
+                                <span class="badge bg-primary-subtle text-primary-emphasis border"><?= sanitize($sportName) ?></span>
+                                <?php endforeach; ?>
+                            </div>
+                            <?php else: ?>
+                            <span class="text-muted">—</span>
+                            <?php endif; ?>
+                        </td>
+                        <td>
+                            <?php if (!empty($a['sport_category_list'])): ?>
+                            <div class="d-flex flex-wrap gap-1">
+                                <?php foreach ($a['sport_category_list'] as $sportCategory): ?>
+                                <span class="badge bg-secondary"><?= sanitize(ucfirst($sportCategory)) ?></span>
+                                <?php endforeach; ?>
+                            </div>
+                            <?php else: ?>
+                            <span class="text-muted">—</span>
+                            <?php endif; ?>
+                        </td>
                         <td class="text-end text-nowrap">
                             <a href="<?= BASE_URL ?>/intramurals/athletes/view.php?id=<?= $a['id'] ?>" class="btn btn-sm btn-outline-primary">View</a>
                             <?php
@@ -200,7 +245,7 @@ require __DIR__ . '/../_season_bar.php';
                     </tr>
                     <?php endforeach; ?>
                     <?php if (empty($athletes)): ?>
-                    <tr><td colspan="9" class="text-muted p-3">No athletes found.</td></tr>
+                    <tr><td colspan="10" class="text-muted p-3">No athletes found.</td></tr>
                     <?php endif; ?>
                 </tbody>
             </table>

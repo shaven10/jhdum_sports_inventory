@@ -13,9 +13,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
         $firstName = post('first_name');
         $lastName = post('last_name');
         $email = post('email');
-        $phone = post('phone');
-        $department = post('department');
-        $studentId = post('student_id');
+        $isStudent = ($user['role'] ?? '') === 'student';
+        $phone = $isStudent ? post('phone') : null;
+        $department = $isStudent ? post('department') : null;
+        $studentId = $isStudent ? post('student_id') : null;
 
         $stmt = getDB()->prepare('UPDATE users SET first_name=?, last_name=?, email=?, phone=?, department=?, student_id=? WHERE id=?');
         $stmt->execute([$firstName, $lastName, $email, $phone, $department, $studentId, $user['id']]);
@@ -67,9 +68,11 @@ require_once __DIR__ . '/includes/header.php';
                         <div class="col-md-6"><label class="form-label">Assigned Team</label><input type="text" class="form-control" value="<?= sanitize($user['team_name']) ?>" disabled></div>
                         <?php endif; ?>
                         <div class="col-12"><label class="form-label">Email</label><input type="email" name="email" class="form-control" value="<?= sanitize($user['email']) ?>" required></div>
+                        <?php if (($user['role'] ?? '') === 'student'): ?>
                         <div class="col-md-6"><label class="form-label">Student ID</label><input type="text" name="student_id" class="form-control" value="<?= sanitize($user['student_id'] ?? '') ?>"></div>
                         <div class="col-md-6"><label class="form-label">Department</label><input type="text" name="department" class="form-control" value="<?= sanitize($user['department'] ?? '') ?>"></div>
                         <div class="col-md-6"><label class="form-label">Phone</label><input type="text" name="phone" class="form-control" value="<?= sanitize($user['phone'] ?? '') ?>"></div>
+                        <?php endif; ?>
                     </div>
                     <button type="submit" class="btn btn-primary mt-3">Save Profile</button>
                 </form>

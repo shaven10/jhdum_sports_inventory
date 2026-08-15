@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
-requireIntramuralsAccess();
+requireAthletesDirectoryAccess();
 
 $db = getDB();
 $id = (int) get('id');

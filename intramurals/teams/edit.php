@@ -3,6 +3,7 @@ require_once __DIR__ . '/../../includes/auth.php';
 requireIntramuralsAccess();
 
 $db = getDB();
+ensureIntramuralDivisionsSchema();
 $id = (int) get('id');
 $stmt = $db->prepare('SELECT * FROM intramural_teams WHERE id = ?');
 $stmt->execute([$id]);
@@ -20,6 +21,7 @@ if (!canEditOwnTeam($id)) {
 
 $isFullAdmin = canManageIntramurals();
 $errors = [];
+$divisions = getDivisions(true);
 
 $managers = $db->query("SELECT id, first_name, last_name, username FROM users WHERE role = 'unit_manager' AND is_active = 1 ORDER BY first_name, last_name")->fetchAll();
 $coaches = $db->query("SELECT id, first_name, last_name, username FROM users WHERE role = 'coach' AND is_active = 1 ORDER BY first_name, last_name")->fetchAll();
@@ -41,6 +43,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $shortName = $isFullAdmin ? post('short_name') : ($team['short_name'] ?? '');
     $color = post('color', '#1a5276');
     $department = post('department');
+    $divisionId = $isFullAdmin
+        ? ((int) post('division_id') ?: null)
+        : (!empty($team['division_id']) ? (int) $team['division_id'] : null);
     $coachName = post('coach_name');
     $description = post('description');
     $isActive = $isFullAdmin ? (post('is_active') === '1' ? 1 : 0) : (int) $team['is_active'];
@@ -53,6 +58,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($name === '') {
         $errors[] = 'Team name is required.';
+    }
+    if ($isFullAdmin && $divisionId && !getDivisionById($divisionId)) {
+        $errors[] = 'Selected division is invalid.';
+        $divisionId = null;
     }
 
     $logo = $team['logo'];
@@ -68,8 +77,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (empty($errors)) {
         try {
-            $stmt = $db->prepare('UPDATE intramural_teams SET name=?, short_name=?, color=?, logo=?, department=?, coach_name=?, unit_manager_id=?, coach_user_id=?, description=?, is_active=? WHERE id=?');
-            $stmt->execute([$name, $shortName, $color, $logo, $department, $coachName, $unitManagerId, $coachUserId, $description, $isActive, $id]);
+            $stmt = $db->prepare('UPDATE intramural_teams SET name=?, short_name=?, color=?, logo=?, department=?, division_id=?, coach_name=?, unit_manager_id=?, coach_user_id=?, description=?, is_active=? WHERE id=?');
+            $stmt->execute([$name, $shortName, $color, $logo, $department, $divisionId, $coachName, $unitManagerId, $coachUserId, $description, $isActive, $id]);
 
             if ($isFullAdmin) {
                 if ($unitManagerId) {
@@ -125,6 +134,26 @@ require_once __DIR__ . '/../../includes/header.php';
                             <label class="form-label">Department / College</label>
                             <input type="text" name="department" class="form-control" value="<?= sanitize($team['department'] ?? '') ?>">
                         </div>
+                        <?php if ($isFullAdmin): ?>
+                        <div class="col-md-6">
+                            <label class="form-label">Division</label>
+                            <select name="division_id" class="form-select">
+                                <option value="">None (any event)</option>
+                                <?php foreach ($divisions as $d): ?>
+                                <option value="<?= (int) $d['id'] ?>" <?= (int) ($team['division_id'] ?? 0) === (int) $d['id'] ? 'selected' : '' ?>>
+                                    <?= sanitize($d['name']) ?>
+                                </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <div class="form-text">Or assign several teams at once under Admin → Divisions.</div>
+                        </div>
+                        <?php elseif (!empty($team['division_id'])): ?>
+                        <?php $teamDiv = getDivisionById((int) $team['division_id']); ?>
+                        <div class="col-md-6">
+                            <label class="form-label">Division</label>
+                            <input type="text" class="form-control" readonly value="<?= sanitize($teamDiv['name'] ?? 'Assigned') ?>">
+                        </div>
+                        <?php endif; ?>
                         <div class="col-md-6">
                             <label class="form-label">Notes / Display Label</label>
                             <input type="text" name="coach_name" class="form-control" value="<?= sanitize($team['coach_name'] ?? '') ?>" placeholder="Optional team note">

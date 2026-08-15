@@ -52,6 +52,7 @@ if (isSecretariat()) {
     $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/matches/generate.php" class="btn btn-light"><i class="bi bi-magic"></i> Generate Matches</a>';
     $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/matches/index.php" class="btn btn-outline-light"><i class="bi bi-calendar3"></i> All Matches</a>';
     $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/standings/overall.php" class="btn btn-outline-light"><i class="bi bi-award"></i> Overall Standing</a>';
+    $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/reports/certificates.php" class="btn btn-outline-light"><i class="bi bi-award-fill"></i> Certificates</a>';
     $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/reports/index.php" class="btn btn-outline-light"><i class="bi bi-printer"></i> Reports</a>';
 }
 if (canModifyRosterAny()) {
@@ -64,7 +65,6 @@ if (canGenerateMatches() && !isSecretariat()) {
     $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/matches/generate.php" class="btn btn-light"><i class="bi bi-magic"></i> Generate Matches</a>';
 }
 if (isTournamentManager() && !canManageIntramurals() && canViewStandings()) {
-    $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/roster/index.php" class="btn btn-outline-light"><i class="bi bi-person-lines-fill"></i> Official Rosters</a>';
     $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/standings/overall.php" class="btn btn-outline-light"><i class="bi bi-award"></i> Overall Standing</a>';
     $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/reports/index.php?type=results" class="btn btn-outline-light"><i class="bi bi-list-check"></i> Match Results</a>';
 }
@@ -209,7 +209,7 @@ if ($coachAssignments) {
     <div class="col-lg-3 col-6"><a class="btn btn-outline-primary w-100" href="<?= BASE_URL ?>/intramurals/standings/index.php"><i class="bi bi-bar-chart-steps"></i> Standings</a></div>
     <div class="col-lg-3 col-6"><a class="btn btn-outline-primary w-100" href="<?= BASE_URL ?>/intramurals/standings/overall.php"><i class="bi bi-award"></i> Overall</a></div>
     <?php endif; ?>
-    <?php if (canManageMatches()): ?>
+    <?php if (canManageEventRankings()): ?>
     <div class="col-lg-3 col-6"><a class="btn btn-outline-warning w-100" href="<?= BASE_URL ?>/intramurals/rankings/index.php"><i class="bi bi-list-ol"></i> Event Rankings</a></div>
     <?php endif; ?>
     <?php if (canManageIntramurals()): ?>

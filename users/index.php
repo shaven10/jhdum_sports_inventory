@@ -40,6 +40,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
     if (!in_array($role, ['unit_manager', 'coach'], true)) {
         $teamId = null;
     }
+    if ($role !== 'student') {
+        $studentId = null;
+        $department = null;
+        $phone = null;
+    }
 
     if ($formMode === 'add') {
         $username = post('username');
@@ -408,15 +413,15 @@ if ($formState) {
                             </select>
                             <div class="form-text" id="teamHelp">Unit managers require a team. Coaches are assigned per team + event under <strong>Teams → Event Coaches</strong> (home team here is optional).</div>
                         </div>
-                        <div class="col-md-6">
+                        <div class="col-md-6 student-only-field">
                             <label class="form-label" for="student_id">Student ID</label>
                             <input type="text" name="student_id" id="student_id" class="form-control">
                         </div>
-                        <div class="col-md-6">
+                        <div class="col-md-6 student-only-field">
                             <label class="form-label" for="department">Department</label>
                             <input type="text" name="department" id="department" class="form-control">
                         </div>
-                        <div class="col-md-6">
+                        <div class="col-md-6 student-only-field">
                             <label class="form-label" for="phone">Phone</label>
                             <input type="text" name="phone" id="phone" class="form-control">
                         </div>
@@ -465,6 +470,18 @@ if ($formState) {
         teamField.style.display = needsTeam ? '' : 'none';
     }
 
+    function toggleStudentFields() {
+        const isStudent = roleSelect.value === 'student';
+        document.querySelectorAll('.student-only-field').forEach(function (el) {
+            el.style.display = isStudent ? '' : 'none';
+        });
+        if (!isStudent) {
+            document.getElementById('student_id').value = '';
+            document.getElementById('department').value = '';
+            document.getElementById('phone').value = '';
+        }
+    }
+
     function setMode(mode, data) {
         data = data || {};
         formMode.value = mode;
@@ -502,17 +519,19 @@ if ($formState) {
         document.getElementById('first_name').value = data.first_name || '';
         document.getElementById('last_name').value = data.last_name || '';
         document.getElementById('email').value = data.email || '';
-        document.getElementById('student_id').value = data.student_id || '';
-        document.getElementById('department').value = data.department || '';
-        document.getElementById('phone').value = data.phone || '';
         document.getElementById('team_id').value = data.team_id || '';
         roleSelect.value = data.role || 'student';
+        const isStudent = roleSelect.value === 'student';
+        document.getElementById('student_id').value = isStudent ? (data.student_id || '') : '';
+        document.getElementById('department').value = isStudent ? (data.department || '') : '';
+        document.getElementById('phone').value = isStudent ? (data.phone || '') : '';
 
         if (mode === 'add' && data.username) {
             usernameInput.value = data.username;
         }
 
         toggleTeamField();
+        toggleStudentFields();
         errorsBox.classList.add('d-none');
         errorsBox.innerHTML = '';
     }
@@ -543,7 +562,10 @@ if ($formState) {
         });
     });
 
-    roleSelect.addEventListener('change', toggleTeamField);
+    roleSelect.addEventListener('change', function () {
+        toggleTeamField();
+        toggleStudentFields();
+    });
 
     modalEl.addEventListener('hidden.bs.modal', function () {
         if (window.history.replaceState) {

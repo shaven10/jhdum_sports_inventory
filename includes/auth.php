@@ -34,13 +34,13 @@ function requireRole(array $roles): void
  */
 function isIntramuralsOnlyRole(): bool
 {
-    return isLoggedIn() && in_array($_SESSION['user_role'] ?? '', ['unit_manager', 'coach', 'tabulator', 'secretariat'], true);
+    return isLoggedIn() && in_array($_SESSION['user_role'] ?? '', ['unit_manager', 'coach', 'tabulator', 'secretariat', 'publication'], true);
 }
 
-/** Secretariat, tournament managers, and unit managers — scoped tools, not the full Intramurals module. */
+/** Secretariat, publication, tournament managers, and unit managers — scoped tools, not the full Intramurals module. */
 function isIntramuralsScopedStaffRole(): bool
 {
-    return isLoggedIn() && in_array($_SESSION['user_role'] ?? '', ['unit_manager', 'tabulator', 'secretariat'], true);
+    return isLoggedIn() && in_array($_SESSION['user_role'] ?? '', ['unit_manager', 'tabulator', 'secretariat', 'publication'], true);
 }
 
 function getHomeUrl(): string
@@ -60,6 +60,7 @@ function canViewCompetitionDashboard(): bool
     return isLoggedIn() && (
         canManageIntramurals()
         || isSecretariat()
+        || isPublication()
         || isTournamentManager()
         || hasRole('unit_manager')
     );
@@ -158,6 +159,7 @@ function getAllRoles(): array
         'coach' => 'Coach',
         'tabulator' => 'Tournament Manager',
         'secretariat' => 'Secretariat',
+        'publication' => 'Publication',
         'student' => 'Student',
     ];
 }
@@ -401,8 +403,6 @@ function createCoachAccount(array $input, int $teamId): array
     $password = $input['password'] ?? '';
     $firstName = trim($input['first_name'] ?? '');
     $lastName = trim($input['last_name'] ?? '');
-    $department = trim($input['department'] ?? '');
-    $phone = trim($input['phone'] ?? '');
 
     if ($username === '' || $email === '' || $password === '' || $firstName === '' || $lastName === '') {
         return ['success' => false, 'message' => 'Username, email, password, first name, and last name are required.'];
@@ -422,8 +422,8 @@ function createCoachAccount(array $input, int $teamId): array
     }
 
     $hash = password_hash($password, PASSWORD_DEFAULT);
-    $stmt = $db->prepare('INSERT INTO users (username, email, password, password_plain, first_name, last_name, department, phone, role, team_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-    $stmt->execute([$username, $email, $hash, $password, $firstName, $lastName, $department ?: null, $phone ?: null, 'coach', $teamId]);
+    $stmt = $db->prepare('INSERT INTO users (username, email, password, password_plain, first_name, last_name, role, team_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    $stmt->execute([$username, $email, $hash, $password, $firstName, $lastName, 'coach', $teamId]);
     $id = (int) $db->lastInsertId();
     syncUserTeamAssignment($id, 'coach', $teamId);
     auditLog($_SESSION['user_id'], 'create_coach', 'user', $id, null, [
@@ -482,6 +482,7 @@ function canAccessIntramurals(): bool
         'coach',
         'tabulator',
         'secretariat',
+        'publication',
     ], true);
 }
 
@@ -510,7 +511,7 @@ function requireIntramuralsAccess(): void
     }
 }
 
-/** Block secretariat, tournament managers, and unit managers from the full Intramurals module UI. */
+/** Block secretariat, publication, tournament managers, and unit managers from the full Intramurals module UI. */
 function requireIntramuralsModule(): void
 {
     requireIntramuralsAccess();
@@ -534,6 +535,30 @@ function canManageTeamAthletes(?int $teamId = null): bool
         return false;
     }
     return $teamId === null || $teamId === $userTeam;
+}
+
+/**
+ * Full athletes directory / roster list pages.
+ * Tournament managers verify players via the match roster modal only.
+ */
+function canViewAthletesDirectory(): bool
+{
+    if (!canAccessIntramurals()) {
+        return false;
+    }
+    if (isTournamentManager() && !canManageIntramurals()) {
+        return false;
+    }
+    return true;
+}
+
+function requireAthletesDirectoryAccess(): void
+{
+    requireIntramuralsAccess();
+    if (!canViewAthletesDirectory()) {
+        flash('error', 'Athletes roster list is not available for tournament manager accounts.');
+        redirect(BASE_URL . '/dashboard.php');
+    }
 }
 
 /**
@@ -576,10 +601,57 @@ function canLockRoster(): bool
     return canManageSettings();
 }
 
+/** Only administrators can lock/unlock match results for a season. */
+function canLockResults(): bool
+{
+    return canManageSettings();
+}
+
+/** Tournament managers and unit managers can send incident reports / queries to admin. */
+function canSubmitIncidentReports(): bool
+{
+    return isLoggedIn() && (
+        (isTournamentManager() && !canManageIntramurals())
+        || hasRole('unit_manager')
+    );
+}
+
+/** Administrators receive and respond to incident reports. */
+function canManageIncidentReports(): bool
+{
+    return isAdmin();
+}
+
+function requireIncidentSubmitAccess(): void
+{
+    requireLogin();
+    if (!canSubmitIncidentReports()) {
+        flash('error', 'Only tournament managers and unit managers can submit incident reports.');
+        redirect(getHomeUrl());
+    }
+}
+
+function requireIncidentManageAccess(): void
+{
+    requireLogin();
+    if (!canManageIncidentReports()) {
+        flash('error', 'Only administrators can manage incident reports.');
+        redirect(getHomeUrl());
+    }
+}
+
 /** Show roster lock status to all staff roles (not students). */
 function shouldShowRosterLockStatus(): bool
 {
     return isLoggedIn() && ($_SESSION['user_role'] ?? '') !== 'student';
+}
+
+/** Show results lock status to competition staff (not students). */
+function shouldShowResultsLockStatus(): bool
+{
+    return isLoggedIn() && ($_SESSION['user_role'] ?? '') !== 'student' && (
+        canViewMatchResults() || canManageIntramurals() || isAdmin()
+    );
 }
 
 /** Roster changes allowed when season roster is not locked and user has roster permission. */
@@ -615,6 +687,23 @@ function canEditOwnTeam(?int $teamId = null): bool
 function isSecretariat(): bool
 {
     return hasRole('secretariat');
+}
+
+function isPublication(): bool
+{
+    return hasRole('publication');
+}
+
+/** Secretariat and publication — print / publish oriented intramurals staff. */
+function isPublishStaff(): bool
+{
+    return isSecretariat() || isPublication();
+}
+
+/** Manual event rankings / medal placement entry (admin and secretariat only). */
+function canManageEventRankings(): bool
+{
+    return isAdmin() || isSecretariat();
 }
 
 function canManageMatches(): bool
@@ -739,8 +828,11 @@ function assignEventManager(int $sportId, ?int $managerUserId, ?int $seasonId = 
         ->execute([$sportId, $seasonId, $managerUserId]);
 }
 
-function canRecordScores(): bool
+function canRecordScores(?int $sportId = null): bool
 {
+    if (function_exists('isResultsLocked') && isResultsLocked(null, $sportId)) {
+        return false;
+    }
     return canManageMatches();
 }
 
@@ -753,7 +845,7 @@ function canGenerateMatches(): bool
 /** View per-sport standings and overall rankings. */
 function canViewStandings(): bool
 {
-    if (canManageIntramurals() || isSecretariat() || hasRole('unit_manager')) {
+    if (canManageIntramurals() || isPublishStaff() || hasRole('unit_manager')) {
         return true;
     }
     if (isTournamentManager()) {
@@ -765,7 +857,7 @@ function canViewStandings(): bool
 /** View match schedules and completed results. */
 function canViewMatchResults(): bool
 {
-    if (canManageIntramurals() || isSecretariat() || hasRole('unit_manager')) {
+    if (canManageIntramurals() || isPublishStaff() || hasRole('unit_manager')) {
         return true;
     }
     if (isTournamentManager()) {
@@ -777,13 +869,13 @@ function canViewMatchResults(): bool
 /** View all intramurals reports (schedules, results, standings, rosters, etc.). */
 function canViewIntramuralsReports(): bool
 {
-    return canManageIntramurals() || isSecretariat();
+    return canManageIntramurals() || isPublishStaff();
 }
 
 /** View standings or results for a specific event (tabulators: assigned events only). */
 function canViewEvent(int $sportId): bool
 {
-    if (canManageIntramurals() || isSecretariat()) {
+    if (canManageIntramurals() || isPublishStaff()) {
         return true;
     }
     if (isTournamentManager()) {
@@ -819,7 +911,7 @@ function requireEventViewAccess(int $sportId): void
 /** Filter sport rows to those accessible by the current tabulator. */
 function filterSportsForUser(array $sports): array
 {
-    if (canManageIntramurals() || isSecretariat()) {
+    if (canManageIntramurals() || isPublishStaff()) {
         return $sports;
     }
     if (isTournamentManager()) {

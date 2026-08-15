@@ -27,6 +27,7 @@ if ($sportId <= 0) {
 }
 
 requireEventMatchAccess($sportId);
+requireUnlockedResults(null, $sportId);
 
 $result = advanceBracketFromResults($sportId, $seasonId);
 auditLog($_SESSION['user_id'], 'advance_bracket', 'intramural_sport', $sportId, null, $result);

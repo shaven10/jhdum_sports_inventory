@@ -75,12 +75,77 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $skipped = 0;
             $rowErrors = [];
 
+            // Abort import when the file would exceed players_per_event for any team + event.
+            $plannedNewByRoster = [];
+            foreach ($parsed['rows'] as $row) {
+                $studentId = trim($row['student_id'] ?? '');
+                $firstName = trim($row['first_name'] ?? '');
+                $lastName = trim($row['last_name'] ?? '');
+                $teamName = trim($row['team'] ?? '');
+                $sportName = trim($row['sport'] ?? '');
+                $sportCategory = trim($row['sport_category'] ?? '');
+                if ($studentId === '' || $firstName === '' || $lastName === '') {
+                    continue;
+                }
+                $team = $lookups['teams'][strtolower($teamName)] ?? null;
+                $sport = resolveImportSport($lookups, $sportName, $sportCategory);
+                if (!$team || !$sport) {
+                    continue;
+                }
+                $key = (int) $team['id'] . ':' . (int) $sport['id'];
+                if (!isset($plannedNewByRoster[$key])) {
+                    $plannedNewByRoster[$key] = [
+                        'team_id' => (int) $team['id'],
+                        'sport_id' => (int) $sport['id'],
+                        'sport' => $sport,
+                        'students' => [],
+                    ];
+                }
+                $plannedNewByRoster[$key]['students'][$studentId] = true;
+            }
+
+            $findExistingRegByStudent = $db->prepare(
+                'SELECT r.id
+                 FROM intramural_registrations r
+                 JOIN intramural_athletes a ON a.id = r.athlete_id
+                 WHERE a.student_id = ? AND r.sport_id = ? AND r.season_id = ?
+                 LIMIT 1'
+            );
+            $capacityErrors = [];
+            foreach ($plannedNewByRoster as $group) {
+                $limit = getSportPlayersPerEventLimit((int) $group['sport_id']);
+                if ($limit === null) {
+                    continue;
+                }
+                $current = countTeamEventRoster((int) $group['team_id'], (int) $group['sport_id'], (int) $seasonId);
+                $newStudents = 0;
+                foreach (array_keys($group['students']) as $studentId) {
+                    $findExistingRegByStudent->execute([$studentId, (int) $group['sport_id'], (int) $seasonId]);
+                    if (!$findExistingRegByStudent->fetch()) {
+                        $newStudents++;
+                    }
+                }
+                if ($current + $newStudents > $limit) {
+                    $capacityErrors[] = sportLabel($group['sport'])
+                        . ' allows only ' . $limit . ' athlete' . ($limit === 1 ? '' : 's')
+                        . ' per team. Import needs ' . $newStudents . ' new registration'
+                        . ($newStudents === 1 ? '' : 's')
+                        . ' but the roster already has ' . $current . '.';
+                }
+            }
+
+            if ($capacityErrors) {
+                $errors = array_merge($errors, $capacityErrors);
+                $errors[] = 'Import stopped. Reduce athletes per event in the file to match players per event, then try again.';
+            } else {
+
             $findAthlete = $db->prepare('SELECT * FROM intramural_athletes WHERE student_id = ? LIMIT 1');
             $insertAthlete = $db->prepare('INSERT INTO intramural_athletes (athlete_code, student_id, first_name, last_name, gender, birthdate, department, year_level, team_id, email, phone) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
             $updateAthlete = $db->prepare('UPDATE intramural_athletes SET first_name=?, last_name=?, gender=?, birthdate=COALESCE(?, birthdate), department=COALESCE(NULLIF(?, ""), department), year_level=COALESCE(NULLIF(?, ""), year_level), team_id=?, email=COALESCE(NULLIF(?, ""), email), phone=COALESCE(NULLIF(?, ""), phone), is_active=1 WHERE id=?');
-            $findReg = $db->prepare('SELECT id FROM intramural_registrations WHERE athlete_id = ? AND sport_id = ? AND season_id = ? LIMIT 1');
+            $findReg = $db->prepare('SELECT id, team_id FROM intramural_registrations WHERE athlete_id = ? AND sport_id = ? AND season_id = ? LIMIT 1');
             $insertReg = $db->prepare('INSERT INTO intramural_registrations (season_id, athlete_id, sport_id, team_id, event_category, jersey_number, position) VALUES (?, ?, ?, ?, ?, ?, ?)');
             $updateReg = $db->prepare('UPDATE intramural_registrations SET team_id=?, event_category=?, jersey_number=?, position=? WHERE id=?');
+            $rosterCounts = [];
 
             foreach ($parsed['rows'] as $index => $row) {
                 $line = $index + 2; // header is line 1
@@ -207,6 +272,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $findReg->execute([$athleteId, $sportId, $seasonId]);
                     $existingReg = $findReg->fetch();
                     if ($existingReg) {
+                        $oldTeamId = (int) ($existingReg['team_id'] ?? 0);
+                        if ($oldTeamId !== $teamId) {
+                            $capKey = $teamId . ':' . $sportId;
+                            if (!isset($rosterCounts[$capKey])) {
+                                $rosterCounts[$capKey] = countTeamEventRoster($teamId, $sportId, (int) $seasonId);
+                            }
+                            $limit = getSportPlayersPerEventLimit($sportId);
+                            if ($limit !== null && $rosterCounts[$capKey] >= $limit) {
+                                $rowErrors[] = "Row $line: " . sportLabel($sport)
+                                    . " already has the maximum of $limit athlete"
+                                    . ($limit === 1 ? '' : 's') . ' for this team.';
+                                $skipped++;
+                                continue;
+                            }
+                            $rosterCounts[$capKey]++;
+                        }
                         $updateReg->execute([
                             $teamId,
                             $eventCategory ?: null,
@@ -215,6 +296,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             (int) $existingReg['id'],
                         ]);
                     } else {
+                        $capKey = $teamId . ':' . $sportId;
+                        if (!isset($rosterCounts[$capKey])) {
+                            $rosterCounts[$capKey] = countTeamEventRoster($teamId, $sportId, (int) $seasonId);
+                        }
+                        $limit = getSportPlayersPerEventLimit($sportId);
+                        if ($limit !== null && $rosterCounts[$capKey] >= $limit) {
+                            $rowErrors[] = "Row $line: " . sportLabel($sport)
+                                . " allows only $limit athlete" . ($limit === 1 ? '' : 's')
+                                . ' per team. Roster is full.';
+                            $skipped++;
+                            continue;
+                        }
                         $insertReg->execute([
                             $seasonId,
                             $athleteId,
@@ -224,6 +317,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $jersey ?: null,
                             $position ?: null,
                         ]);
+                        $rosterCounts[$capKey]++;
                         $registered++;
                     }
                 } catch (Throwable $e) {
@@ -254,6 +348,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } elseif ($skipped) {
                 flash('error', 'Import finished with no successful rows. Check the error list below.');
             }
+
+            } // end capacity OK
         }
     }
 }
@@ -268,6 +364,7 @@ require __DIR__ . '/../_season_bar.php';
         <h1><i class="bi bi-file-earmark-arrow-up"></i> Import Athlete Roster</h1>
         <p class="text-muted mb-0">
             Bulk-register athletes for the active season. Athlete records are created from this roster import.
+            Imports that exceed <strong>players per event</strong> for any team are rejected.
             <?= $season ? sanitize(seasonLabel($season)) : '' ?>
         </p>
     </div>

@@ -13,10 +13,13 @@ $lowStockItems = [];
 $popularEquipment = [];
 $competitionStats = [];
 $recentResults = [];
+$unfinishedMatches = [];
 $overallStandings = [];
 $coachAssignments = [];
 $teamNames = [];
 $sportNames = [];
+$isTmDashboard = isTournamentManager() && !canManageIntramurals();
+$showUnfinishedMatches = false;
 
 if ($showInventory) {
     checkOverdueRequests();
@@ -50,6 +53,10 @@ if ($showInventory) {
 try {
     if ($showCompetition) {
         $competitionStats = getIntramuralsStats();
+        $showUnfinishedMatches = $isTmDashboard || isAdmin();
+        if ($showUnfinishedMatches) {
+            $unfinishedMatches = getDashboardUnfinishedMatches(12);
+        }
         $recentResults = getDashboardRecentMatchResults(8);
         $overallData = computeOverallStandings();
         $overallStandings = array_slice($overallData['standings'], 0, 8);
@@ -75,10 +82,14 @@ require_once __DIR__ . '/includes/header.php';
 $dashboardSubtitle = 'Welcome back, ' . ($_SESSION['user_name'] ?? '');
 if (isSecretariat()) {
     $dashboardSubtitle = 'Match results, overall standings, and competition management';
+} elseif (isPublication()) {
+    $dashboardSubtitle = 'View match results and overall standings';
 } elseif (isTournamentManager() && !canManageIntramurals()) {
-    $dashboardSubtitle = 'Results and standings for your assigned events';
+    $dashboardSubtitle = 'Unfinished matches, results, and standings for your assigned events';
 } elseif (hasRole('unit_manager')) {
     $dashboardSubtitle = 'Team management, match results, and overall standings';
+} elseif (isAdmin()) {
+    $dashboardSubtitle = 'Inventory overview, unfinished matches, results, and overall standings';
 } elseif (canManageIntramurals()) {
     $dashboardSubtitle = 'Inventory overview, match results, and overall standings';
 } elseif ($showCoachPanel) {
@@ -113,9 +124,59 @@ echo renderDashboardHero('Dashboard', $dashboardSubtitle, [
     'icon' => 'bi-speedometer2',
     'actions' => $dashboardActions,
 ]);
+
+$dashboardAnnouncements = [];
+if (canViewAnnouncements()) {
+    try {
+        $dashboardAnnouncements = getActiveAnnouncements(3);
+    } catch (Throwable $e) {
+        $dashboardAnnouncements = [];
+    }
+}
 ?>
 
+<?php if (!empty($dashboardAnnouncements)): ?>
+<div class="card mb-4 border-primary">
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span><i class="bi bi-megaphone"></i> Announcements</span>
+        <a href="<?= BASE_URL ?>/announcements/index.php" class="btn btn-sm btn-outline-primary">View all</a>
+    </div>
+    <div class="list-group list-group-flush">
+        <?php foreach ($dashboardAnnouncements as $a): ?>
+        <a href="<?= BASE_URL ?>/announcements/view.php?id=<?= (int) $a['id'] ?>" class="list-group-item list-group-item-action">
+            <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
+                <div>
+                    <div class="d-flex align-items-center gap-2 mb-1">
+                        <?= statusBadge($a['type']) ?>
+                        <strong><?= sanitize($a['title']) ?></strong>
+                    </div>
+                    <div class="text-muted small"><?= sanitize(mb_strimwidth($a['message'], 0, 140, '…')) ?></div>
+                </div>
+                <small class="text-muted text-nowrap"><?= formatDateTime($a['created_at']) ?></small>
+            </div>
+        </a>
+        <?php endforeach; ?>
+    </div>
+</div>
+<?php endif; ?>
+
 <?php if (isAdmin()): ?>
+<?php
+$adminQuickLinks = [
+    ['href' => BASE_URL . '/users/index.php', 'icon' => 'bi-people', 'label' => 'Users'],
+    ['href' => BASE_URL . '/admin/incidents/index.php', 'icon' => 'bi-flag', 'label' => 'Incidents'],
+    ['href' => BASE_URL . '/admin/announcements/index.php', 'icon' => 'bi-megaphone', 'label' => 'Announcements'],
+    ['href' => BASE_URL . '/settings/index.php', 'icon' => 'bi-gear', 'label' => 'Settings'],
+    ['href' => BASE_URL . '/settings/theme.php', 'icon' => 'bi-palette', 'label' => 'Theme'],
+    ['href' => BASE_URL . '/audit/index.php', 'icon' => 'bi-journal-check', 'label' => 'Audit'],
+    ['href' => BASE_URL . '/intramurals/seasons/index.php', 'icon' => 'bi-calendar3', 'label' => 'Seasons'],
+    ['href' => BASE_URL . '/intramurals/roster/lock.php', 'icon' => 'bi-lock', 'label' => 'Roster Lock'],
+    ['href' => BASE_URL . '/admin/results_lock.php', 'icon' => 'bi-lock-fill', 'label' => 'Lock Results'],
+    ['href' => BASE_URL . '/admin/divisions/index.php', 'icon' => 'bi-diagram-3', 'label' => 'Divisions'],
+    ['href' => BASE_URL . '/admin/team_positions/index.php', 'icon' => 'bi-list-ol', 'label' => 'Team Positions'],
+    ['href' => BASE_URL . '/intramurals/reports/certificates.php', 'icon' => 'bi-award', 'label' => 'Certificates'],
+];
+?>
 <div class="row g-3 mb-4">
     <div class="col-12">
         <div class="card">
@@ -125,12 +186,13 @@ echo renderDashboardHero('Dashboard', $dashboardSubtitle, [
             </div>
             <div class="card-body">
                 <div class="row g-2 admin-quick-links">
-                    <div class="col-6 col-md-3 col-xl-2"><a class="btn btn-outline-secondary w-100" href="<?= BASE_URL ?>/users/index.php"><i class="bi bi-people"></i> Users</a></div>
-                    <div class="col-6 col-md-3 col-xl-2"><a class="btn btn-outline-secondary w-100" href="<?= BASE_URL ?>/settings/index.php"><i class="bi bi-gear"></i> Settings</a></div>
-                    <div class="col-6 col-md-3 col-xl-2"><a class="btn btn-outline-secondary w-100" href="<?= BASE_URL ?>/settings/theme.php"><i class="bi bi-palette"></i> Theme</a></div>
-                    <div class="col-6 col-md-3 col-xl-2"><a class="btn btn-outline-secondary w-100" href="<?= BASE_URL ?>/audit/index.php"><i class="bi bi-journal-check"></i> Audit</a></div>
-                    <div class="col-6 col-md-3 col-xl-2"><a class="btn btn-outline-secondary w-100" href="<?= BASE_URL ?>/intramurals/seasons/index.php"><i class="bi bi-calendar3"></i> Seasons</a></div>
-                    <div class="col-6 col-md-3 col-xl-2"><a class="btn btn-outline-secondary w-100" href="<?= BASE_URL ?>/intramurals/roster/lock.php"><i class="bi bi-lock"></i> Roster Lock</a></div>
+                    <?php foreach ($adminQuickLinks as $link): ?>
+                    <div class="col-6 col-md-4 col-xl-2">
+                        <a class="btn btn-outline-secondary w-100" href="<?= sanitize($link['href']) ?>">
+                            <i class="bi <?= sanitize($link['icon']) ?>"></i> <?= sanitize($link['label']) ?>
+                        </a>
+                    </div>
+                    <?php endforeach; ?>
                 </div>
             </div>
         </div>
@@ -142,121 +204,312 @@ echo renderDashboardHero('Dashboard', $dashboardSubtitle, [
 <?= renderRosterLockAlerts() ?>
 <?php endif; ?>
 
+<?php if (shouldShowResultsLockStatus()): ?>
+<?= renderResultsLockAlerts() ?>
+<?php endif; ?>
+
 <?php if ($showCompetition): ?>
+<?php if ($isTmDashboard): ?>
+<?php
+$tmStatCards = [
+    [
+        'href' => BASE_URL . '/intramurals/matches/index.php',
+        'icon' => 'bi-trophy-fill',
+        'tone' => 'info',
+        'value' => $competitionStats['total_sports'] ?? 0,
+        'label' => 'My Events',
+    ],
+    [
+        'href' => BASE_URL . '/intramurals/teams/index.php',
+        'icon' => 'bi-shield-fill',
+        'tone' => 'danger',
+        'value' => $competitionStats['total_teams'] ?? 0,
+        'label' => 'Teams',
+    ],
+    [
+        'href' => BASE_URL . '/intramurals/matches/index.php?status=scheduled',
+        'icon' => 'bi-hourglass-split',
+        'tone' => 'secondary',
+        'value' => $competitionStats['unfinished_games'] ?? 0,
+        'label' => 'Unfinished',
+    ],
+    [
+        'href' => BASE_URL . '/intramurals/matches/index.php?status=scheduled',
+        'icon' => 'bi-calendar2-event-fill',
+        'tone' => 'primary',
+        'value' => $competitionStats['scheduled_games'] ?? 0,
+        'label' => 'Scheduled',
+    ],
+    [
+        'href' => BASE_URL . '/intramurals/matches/index.php?status=ongoing',
+        'icon' => 'bi-play-circle-fill',
+        'tone' => 'warning',
+        'value' => $competitionStats['ongoing_games'] ?? 0,
+        'label' => 'Ongoing',
+    ],
+    [
+        'href' => BASE_URL . '/intramurals/matches/index.php?status=completed',
+        'icon' => 'bi-check-circle-fill',
+        'tone' => 'success',
+        'value' => $competitionStats['completed_games'] ?? 0,
+        'label' => 'Completed',
+    ],
+];
+?>
 <div class="row g-3 mb-4">
-    <div class="col-6 col-md-3">
-        <div class="card stat-card h-100">
-            <div class="card-body d-flex align-items-center gap-3">
-                <div class="stat-icon bg-primary bg-opacity-10 text-primary bi bi-calendar2-event-fill" aria-hidden="true"></div>
-                <div>
-                    <div class="stat-value"><?= $competitionStats['scheduled_games'] ?? 0 ?></div>
-                    <div class="stat-label">Scheduled</div>
+    <?php foreach ($tmStatCards as $card): ?>
+    <div class="col-6 col-md-4 col-xl-2">
+        <a href="<?= sanitize($card['href']) ?>" class="stat-card-link">
+            <div class="card stat-card h-100">
+                <div class="card-body d-flex align-items-center gap-3">
+                    <div class="stat-icon bg-<?= sanitize($card['tone']) ?> bg-opacity-10 text-<?= sanitize($card['tone']) ?> bi <?= sanitize($card['icon']) ?>" aria-hidden="true"></div>
+                    <div>
+                        <div class="stat-value"><?= (int) $card['value'] ?></div>
+                        <div class="stat-label"><?= sanitize($card['label']) ?></div>
+                    </div>
                 </div>
             </div>
-        </div>
+        </a>
     </div>
-    <div class="col-6 col-md-3">
-        <div class="card stat-card h-100">
-            <div class="card-body d-flex align-items-center gap-3">
-                <div class="stat-icon bg-warning bg-opacity-10 text-warning bi bi-play-circle-fill" aria-hidden="true"></div>
-                <div>
-                    <div class="stat-value"><?= $competitionStats['ongoing_games'] ?? 0 ?></div>
-                    <div class="stat-label">Ongoing</div>
-                </div>
-            </div>
-        </div>
-    </div>
-    <div class="col-6 col-md-3">
-        <div class="card stat-card h-100">
-            <div class="card-body d-flex align-items-center gap-3">
-                <div class="stat-icon bg-success bg-opacity-10 text-success bi bi-check-circle-fill" aria-hidden="true"></div>
-                <div>
-                    <div class="stat-value"><?= $competitionStats['completed_games'] ?? 0 ?></div>
-                    <div class="stat-label">Completed</div>
-                </div>
-            </div>
-        </div>
-    </div>
-    <div class="col-6 col-md-3">
-        <div class="card stat-card h-100">
-            <div class="card-body d-flex align-items-center gap-3">
-                <div class="stat-icon bg-danger bg-opacity-10 text-danger bi bi-shield-fill" aria-hidden="true"></div>
-                <div>
-                    <div class="stat-value"><?= $competitionStats['total_teams'] ?? 0 ?></div>
-                    <div class="stat-label">Teams</div>
-                </div>
-            </div>
-        </div>
-    </div>
+    <?php endforeach; ?>
 </div>
+<?php else: ?>
+<?php $pubStatCardsStatic = isPublication(); ?>
+<div class="row g-3 mb-4">
+    <?php if (canViewAthletesDirectory()): ?>
+    <div class="col-6 col-md-4 col-xl-2">
+        <?php if ($pubStatCardsStatic): ?>
+        <div class="card stat-card h-100">
+            <div class="card-body d-flex align-items-center gap-3">
+                <div class="stat-icon bg-primary bg-opacity-10 text-primary bi bi-people-fill" aria-hidden="true"></div>
+                <div>
+                    <div class="stat-value"><?= $competitionStats['total_athletes'] ?? 0 ?></div>
+                    <div class="stat-label">Athletes</div>
+                </div>
+            </div>
+        </div>
+        <?php else: ?>
+        <a href="<?= BASE_URL ?>/intramurals/athletes/index.php" class="stat-card-link">
+            <div class="card stat-card h-100">
+                <div class="card-body d-flex align-items-center gap-3">
+                    <div class="stat-icon bg-primary bg-opacity-10 text-primary bi bi-people-fill" aria-hidden="true"></div>
+                    <div>
+                        <div class="stat-value"><?= $competitionStats['total_athletes'] ?? 0 ?></div>
+                        <div class="stat-label">Athletes</div>
+                    </div>
+                </div>
+            </div>
+        </a>
+        <?php endif; ?>
+    </div>
+    <?php endif; ?>
+    <?php
+    $pubCompetitionCards = [
+        [
+            'href' => BASE_URL . '/intramurals/sports/index.php',
+            'icon' => 'bi-trophy-fill',
+            'tone' => 'info',
+            'value' => $competitionStats['total_sports'] ?? 0,
+            'label' => 'Events',
+        ],
+        [
+            'href' => BASE_URL . '/intramurals/teams/index.php',
+            'icon' => 'bi-shield-fill',
+            'tone' => 'danger',
+            'value' => $competitionStats['total_teams'] ?? 0,
+            'label' => 'Teams',
+        ],
+        [
+            'href' => BASE_URL . '/intramurals/matches/index.php?status=scheduled',
+            'icon' => 'bi-calendar2-event-fill',
+            'tone' => 'primary',
+            'value' => $competitionStats['scheduled_games'] ?? 0,
+            'label' => 'Scheduled',
+        ],
+        [
+            'href' => BASE_URL . '/intramurals/matches/index.php?status=ongoing',
+            'icon' => 'bi-play-circle-fill',
+            'tone' => 'warning',
+            'value' => $competitionStats['ongoing_games'] ?? 0,
+            'label' => 'Ongoing',
+        ],
+        [
+            'href' => BASE_URL . '/intramurals/matches/index.php?status=completed',
+            'icon' => 'bi-check-circle-fill',
+            'tone' => 'success',
+            'value' => $competitionStats['completed_games'] ?? 0,
+            'label' => 'Completed',
+        ],
+    ];
+    foreach ($pubCompetitionCards as $card):
+    ?>
+    <div class="col-6 col-md-4 col-xl-2">
+        <?php if ($pubStatCardsStatic): ?>
+        <div class="card stat-card h-100">
+            <div class="card-body d-flex align-items-center gap-3">
+                <div class="stat-icon bg-<?= sanitize($card['tone']) ?> bg-opacity-10 text-<?= sanitize($card['tone']) ?> bi <?= sanitize($card['icon']) ?>" aria-hidden="true"></div>
+                <div>
+                    <div class="stat-value"><?= (int) $card['value'] ?></div>
+                    <div class="stat-label"><?= sanitize($card['label']) ?></div>
+                </div>
+            </div>
+        </div>
+        <?php else: ?>
+        <a href="<?= sanitize($card['href']) ?>" class="stat-card-link">
+            <div class="card stat-card h-100">
+                <div class="card-body d-flex align-items-center gap-3">
+                    <div class="stat-icon bg-<?= sanitize($card['tone']) ?> bg-opacity-10 text-<?= sanitize($card['tone']) ?> bi <?= sanitize($card['icon']) ?>" aria-hidden="true"></div>
+                    <div>
+                        <div class="stat-value"><?= (int) $card['value'] ?></div>
+                        <div class="stat-label"><?= sanitize($card['label']) ?></div>
+                    </div>
+                </div>
+            </div>
+        </a>
+        <?php endif; ?>
+    </div>
+    <?php endforeach; ?>
+</div>
+<?php endif; ?>
 <?php endif; ?>
 
 <?php if ($showInventory): ?>
 <div class="row g-3 mb-4">
     <div class="col-6 col-md-4 col-xl-2">
-        <div class="card stat-card h-100">
-            <div class="card-body d-flex align-items-center gap-3">
-                <div class="stat-icon bg-primary bg-opacity-10 text-primary bi bi-box-seam-fill" aria-hidden="true"></div>
-                <div>
-                    <div class="stat-value"><?= $inventoryStats['total_equipment'] ?></div>
-                    <div class="stat-label">Equipment Types</div>
+        <a href="<?= BASE_URL ?>/equipment/index.php" class="stat-card-link">
+            <div class="card stat-card h-100">
+                <div class="card-body d-flex align-items-center gap-3">
+                    <div class="stat-icon bg-primary bg-opacity-10 text-primary bi bi-box-seam-fill" aria-hidden="true"></div>
+                    <div>
+                        <div class="stat-value"><?= $inventoryStats['total_equipment'] ?></div>
+                        <div class="stat-label">Equipment Types</div>
+                    </div>
                 </div>
             </div>
-        </div>
+        </a>
     </div>
     <div class="col-6 col-md-4 col-xl-2">
-        <div class="card stat-card h-100">
-            <div class="card-body d-flex align-items-center gap-3">
-                <div class="stat-icon bg-success bg-opacity-10 text-success bi bi-check2-circle" aria-hidden="true"></div>
-                <div>
-                    <div class="stat-value"><?= $inventoryStats['available_items'] ?></div>
-                    <div class="stat-label">Available</div>
+        <a href="<?= BASE_URL ?>/equipment/index.php?availability=available" class="stat-card-link">
+            <div class="card stat-card h-100">
+                <div class="card-body d-flex align-items-center gap-3">
+                    <div class="stat-icon bg-success bg-opacity-10 text-success bi bi-check2-circle" aria-hidden="true"></div>
+                    <div>
+                        <div class="stat-value"><?= $inventoryStats['available_items'] ?></div>
+                        <div class="stat-label">Available</div>
+                    </div>
                 </div>
             </div>
-        </div>
+        </a>
     </div>
     <div class="col-6 col-md-4 col-xl-2">
-        <div class="card stat-card h-100">
-            <div class="card-body d-flex align-items-center gap-3">
-                <div class="stat-icon bg-info bg-opacity-10 text-info bi bi-box-arrow-right" aria-hidden="true"></div>
-                <div>
-                    <div class="stat-value"><?= $inventoryStats['borrowed_items'] ?></div>
-                    <div class="stat-label">Borrowed</div>
+        <a href="<?= BASE_URL ?>/requests/index.php?status=checked_out" class="stat-card-link">
+            <div class="card stat-card h-100">
+                <div class="card-body d-flex align-items-center gap-3">
+                    <div class="stat-icon bg-info bg-opacity-10 text-info bi bi-box-arrow-right" aria-hidden="true"></div>
+                    <div>
+                        <div class="stat-value"><?= $inventoryStats['borrowed_items'] ?></div>
+                        <div class="stat-label">Borrowed</div>
+                    </div>
                 </div>
             </div>
-        </div>
+        </a>
     </div>
     <div class="col-6 col-md-4 col-xl-2">
-        <div class="card stat-card h-100">
-            <div class="card-body d-flex align-items-center gap-3">
-                <div class="stat-icon bg-warning bg-opacity-10 text-warning bi bi-hourglass-split" aria-hidden="true"></div>
-                <div>
-                    <div class="stat-value"><?= $inventoryStats['pending_requests'] ?></div>
-                    <div class="stat-label">Pending</div>
+        <a href="<?= BASE_URL ?>/requests/index.php?status=pending" class="stat-card-link">
+            <div class="card stat-card h-100">
+                <div class="card-body d-flex align-items-center gap-3">
+                    <div class="stat-icon bg-warning bg-opacity-10 text-warning bi bi-hourglass-split" aria-hidden="true"></div>
+                    <div>
+                        <div class="stat-value"><?= $inventoryStats['pending_requests'] ?></div>
+                        <div class="stat-label">Pending</div>
+                    </div>
                 </div>
             </div>
-        </div>
+        </a>
     </div>
     <div class="col-6 col-md-4 col-xl-2">
-        <div class="card stat-card h-100">
-            <div class="card-body d-flex align-items-center gap-3">
-                <div class="stat-icon bg-danger bg-opacity-10 text-danger bi bi-exclamation-triangle-fill" aria-hidden="true"></div>
-                <div>
-                    <div class="stat-value"><?= $inventoryStats['overdue_borrowings'] ?></div>
-                    <div class="stat-label">Overdue</div>
+        <a href="<?= BASE_URL ?>/requests/index.php?status=overdue" class="stat-card-link">
+            <div class="card stat-card h-100">
+                <div class="card-body d-flex align-items-center gap-3">
+                    <div class="stat-icon bg-danger bg-opacity-10 text-danger bi bi-exclamation-triangle-fill" aria-hidden="true"></div>
+                    <div>
+                        <div class="stat-value"><?= $inventoryStats['overdue_borrowings'] ?></div>
+                        <div class="stat-label">Overdue</div>
+                    </div>
                 </div>
             </div>
-        </div>
+        </a>
     </div>
     <div class="col-6 col-md-4 col-xl-2">
-        <div class="card stat-card h-100">
-            <div class="card-body d-flex align-items-center gap-3">
-                <div class="stat-icon bg-secondary bg-opacity-10 text-secondary bi bi-wrench-adjustable" aria-hidden="true"></div>
-                <div>
-                    <div class="stat-value"><?= $inventoryStats['maintenance_items'] ?></div>
-                    <div class="stat-label">Maintenance</div>
+        <a href="<?= BASE_URL ?>/equipment/maintenance.php" class="stat-card-link">
+            <div class="card stat-card h-100">
+                <div class="card-body d-flex align-items-center gap-3">
+                    <div class="stat-icon bg-secondary bg-opacity-10 text-secondary bi bi-wrench-adjustable" aria-hidden="true"></div>
+                    <div>
+                        <div class="stat-value"><?= $inventoryStats['maintenance_items'] ?></div>
+                        <div class="stat-label">Maintenance</div>
+                    </div>
                 </div>
             </div>
+        </a>
+    </div>
+</div>
+<?php endif; ?>
+
+<?php if ($showUnfinishedMatches): ?>
+<div class="card mb-4 border-warning">
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2 bg-warning bg-opacity-10">
+        <span><i class="bi bi-hourglass-split"></i> Unfinished Matches <span class="badge bg-warning text-dark"><?= count($unfinishedMatches) ?></span></span>
+        <a href="<?= BASE_URL ?>/intramurals/matches/index.php?status=scheduled" class="btn btn-sm btn-outline-primary">All Matches</a>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0 align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>When</th>
+                        <th>Event</th>
+                        <th>Match</th>
+                        <th>Venue</th>
+                        <th>Status</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if (empty($unfinishedMatches)): ?>
+                    <tr><td colspan="6" class="text-center text-muted py-4"><?= $isTmDashboard ? 'No unfinished matches — all assigned games are done.' : 'No unfinished matches — all scheduled and ongoing games are done.' ?></td></tr>
+                    <?php else: ?>
+                    <?php foreach ($unfinishedMatches as $m): ?>
+                    <tr class="<?= ($m['status'] ?? '') === 'ongoing' ? 'table-warning' : (empty($m['scheduled_at']) ? 'table-light' : '') ?>">
+                        <td class="text-nowrap">
+                            <?php if (!empty($m['scheduled_at'])): ?>
+                            <?= formatDateTime($m['scheduled_at']) ?>
+                            <?php else: ?>
+                            <span class="badge bg-warning text-dark">Needs schedule</span>
+                            <?php endif; ?>
+                        </td>
+                        <td>
+                            <?= sanitize($m['sport_name']) ?>
+                            <br><small class="text-muted"><?= sanitize(ucfirst((string) ($m['sport_category'] ?? ''))) ?><?php if (!empty($m['round_label'])): ?> · <?= sanitize($m['round_label']) ?><?php endif; ?></small>
+                        </td>
+                        <td>
+                            <span style="color:<?= sanitize($m['team_a_color'] ?? '#333') ?>"><?= sanitize($m['team_a_name'] ?? 'TBD') ?></span>
+                            vs
+                            <span style="color:<?= sanitize($m['team_b_color'] ?? '#333') ?>"><?= sanitize($m['team_b_name'] ?? 'TBD') ?></span>
+                        </td>
+                        <td><?= sanitize($m['venue'] ?: '—') ?></td>
+                        <td><?= statusBadge($m['status']) ?></td>
+                        <td class="text-nowrap">
+                            <a href="<?= BASE_URL ?>/intramurals/matches/view.php?id=<?= (int) $m['id'] ?>&from=dashboard" class="btn btn-sm btn-primary">Open</a>
+                            <?php if (empty($m['scheduled_at'])): ?>
+                            <a href="<?= BASE_URL ?>/intramurals/matches/schedule.php?id=<?= (int) $m['id'] ?>&from=dashboard" class="btn btn-sm btn-warning">Set time</a>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+                    <?php endif; ?>
+                </tbody>
+            </table>
         </div>
     </div>
 </div>

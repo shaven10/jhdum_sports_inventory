@@ -10,6 +10,8 @@ $teamCount = 0;
 $sportCount = 0;
 $seasonLabel = '—';
 $rosterLocked = false;
+$resultsLocked = false;
+$openIncidents = 0;
 
 try {
     $equipmentCount = (int) $db->query('SELECT COUNT(*) FROM equipment WHERE is_active = 1')->fetchColumn();
@@ -22,8 +24,15 @@ try {
     if (function_exists('getCurrentSeason') && getCurrentSeason()) {
         $seasonLabel = seasonLabel(getCurrentSeason());
         $rosterLocked = function_exists('isRosterLocked') ? isRosterLocked() : false;
+        $resultsLocked = function_exists('isResultsLocked') ? isResultsLocked() : false;
     }
 } catch (Throwable $e) {
+}
+
+try {
+    $openIncidents = function_exists('countOpenIncidentReports') ? countOpenIncidentReports() : 0;
+} catch (Throwable $e) {
+    $openIncidents = 0;
 }
 
 $adminSections = [
@@ -32,6 +41,8 @@ $adminSections = [
         'description' => 'Manage accounts and roles across the system.',
         'cards' => [
             ['title' => 'Users', 'desc' => 'Create and manage user accounts', 'href' => BASE_URL . '/users/index.php', 'icon' => 'bi-people-fill', 'color' => 'primary', 'meta' => $userCount . ' active'],
+            ['title' => 'Incident Reports', 'desc' => 'Queries and reports from TM / unit managers', 'href' => BASE_URL . '/admin/incidents/index.php', 'icon' => 'bi-flag-fill', 'color' => $openIncidents > 0 ? 'danger' : 'secondary', 'meta' => $openIncidents . ' open'],
+            ['title' => 'Announcements', 'desc' => 'Broadcast to all staff modules (not students)', 'href' => BASE_URL . '/admin/announcements/index.php', 'icon' => 'bi-megaphone-fill', 'color' => 'warning'],
         ],
     ],
     [
@@ -47,10 +58,14 @@ $adminSections = [
     ],
     [
         'title' => 'Competition Admin',
-        'description' => 'Season controls and roster lock for intramurals.',
+        'description' => 'Season controls, roster lock, and results lock for intramurals.',
         'cards' => [
             ['title' => 'Seasons / Years', 'desc' => 'Active season: ' . $seasonLabel, 'href' => BASE_URL . '/intramurals/seasons/index.php', 'icon' => 'bi-calendar3', 'color' => 'primary', 'meta' => $sportCount . ' sports · ' . $teamCount . ' teams'],
             ['title' => 'Roster Lock', 'desc' => $rosterLocked ? 'Rosters are currently locked' : 'Rosters are currently open', 'href' => BASE_URL . '/intramurals/roster/lock.php', 'icon' => $rosterLocked ? 'bi-lock-fill' : 'bi-unlock-fill', 'color' => $rosterLocked ? 'danger' : 'success'],
+            ['title' => 'Lock Results', 'desc' => $resultsLocked ? 'Match results are currently locked' : 'Match results are currently open', 'href' => BASE_URL . '/admin/results_lock.php', 'icon' => $resultsLocked ? 'bi-lock-fill' : 'bi-trophy-fill', 'color' => $resultsLocked ? 'danger' : 'success'],
+            ['title' => 'Divisions', 'desc' => 'Group teams (e.g. HS / College) and assign events', 'href' => BASE_URL . '/admin/divisions/index.php', 'icon' => 'bi-diagram-3', 'color' => 'info'],
+            ['title' => 'Team Positions', 'desc' => 'Set Team 1…N per event (by division team count)', 'href' => BASE_URL . '/admin/team_positions/index.php', 'icon' => 'bi-list-ol', 'color' => 'primary'],
+            ['title' => 'Certificates', 'desc' => 'Certificate of Recognition for finished events', 'href' => BASE_URL . '/intramurals/reports/certificates.php', 'icon' => 'bi-award', 'color' => 'success'],
             ['title' => 'Intramurals Dashboard', 'desc' => 'Overview of competition modules', 'href' => BASE_URL . '/intramurals/index.php', 'icon' => 'bi-trophy-fill', 'color' => 'warning'],
             ['title' => 'Point System', 'desc' => 'Placement points configuration', 'href' => BASE_URL . '/intramurals/points/index.php', 'icon' => 'bi-calculator', 'color' => 'info'],
         ],

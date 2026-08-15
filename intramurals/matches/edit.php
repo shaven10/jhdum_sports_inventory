@@ -19,6 +19,7 @@ if (!$match) {
 }
 
 requireEventMatchAccess((int) $match['sport_id']);
+requireUnlockedResults(null, (int) $match['sport_id']);
 
 $sports = $db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll();
 $teams = $db->query('SELECT * FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll();
@@ -97,6 +98,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $venue, $referee, $status, $scoreA, $scoreB, $winner, $forfeitTeam, $notes, $id
         ]);
         auditLog($_SESSION['user_id'], 'update', 'intramural_match', $id, null, ['status' => $status, 'score_a' => $scoreA, 'score_b' => $scoreB]);
+
+        if (in_array($status, ['completed', 'forfeit'], true)) {
+            notifyMatchFinished($id, (string) ($match['status'] ?? ''));
+        }
 
         $advanceMsg = '';
         if (in_array($status, ['completed', 'forfeit'], true)) {

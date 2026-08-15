@@ -1,5 +1,6 @@
 <style>
 .match-roster-trigger { text-underline-offset: .15em; }
+.match-team-name .match-roster-trigger,
 .fs-4 .match-roster-trigger { font-size: inherit; line-height: inherit; }
 </style>
 <div class="modal fade" id="matchRosterModal" tabindex="-1" aria-labelledby="matchRosterModalLabel" aria-hidden="true">

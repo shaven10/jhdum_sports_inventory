@@ -88,6 +88,7 @@ if ($seasonId) {
 $pageTitle = 'Match Scheduling';
 require_once __DIR__ . '/../../includes/header.php';
 require __DIR__ . '/../_season_bar.php';
+echo renderResultsLockAlerts();
 
 $queryBase = BASE_URL . '/intramurals/matches/index.php?search=' . urlencode($search) . '&sport=' . urlencode($sportId) . '&status=' . urlencode($status) . '&unscheduled=' . urlencode($unscheduled);
 
@@ -102,36 +103,9 @@ if ($sportId !== '') {
 }
 ?>
 
-<div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-    <div>
-        <h1><i class="bi bi-calendar3"></i> Match Scheduling</h1>
-        <p class="text-muted mb-0">Generate fixtures by tournament style, auto-schedule, then edit any date/time as needed. Click a team name to view that match’s official players.</p>
-    </div>
-    <div class="d-flex gap-2 flex-wrap">
-        <?php if (canGenerateMatches()): ?>
-        <a href="<?= BASE_URL ?>/intramurals/matches/generate.php<?= $sportId !== '' ? '?sport=' . (int) $sportId : '' ?>" class="btn btn-primary"><i class="bi bi-magic"></i> Generate Matches</a>
-        <?php if ($sportId !== ''): ?>
-        <form method="POST" action="<?= BASE_URL ?>/intramurals/matches/advance.php" class="d-inline">
-            <?= csrfField() ?>
-            <input type="hidden" name="sport_id" value="<?= (int) $sportId ?>">
-            <input type="hidden" name="return_to" value="<?= sanitize($queryBase) ?>">
-            <button type="submit" class="btn btn-outline-success" data-confirm="Update TBD teams for this event from completed match results?">
-                <i class="bi bi-diagram-3"></i> Update Bracket
-            </button>
-        </form>
-        <?php endif; ?>
-        <?php if (canManageIntramurals()): ?>
-        <a href="<?= BASE_URL ?>/intramurals/matches/add.php" class="btn btn-outline-primary"><i class="bi bi-plus-lg"></i> Single Match</a>
-        <?php endif; ?>
-        <?php if (canDeleteAllMatches() && $totalMatchCount > 0): ?>
-        <button type="button" class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#deleteMatchesModal">
-            <i class="bi bi-trash"></i> Delete Matches
-        </button>
-        <?php endif; ?>
-        <?php endif; ?>
-        <a href="<?= BASE_URL ?>/intramurals/matches/calendar.php" class="btn btn-outline-primary"><i class="bi bi-calendar-week"></i> Calendar</a>
-        <a href="<?= BASE_URL ?>/intramurals/index.php" class="btn btn-outline-secondary">Back</a>
-    </div>
+<div class="page-header">
+    <h1><i class="bi bi-calendar3"></i> Match Scheduling</h1>
+    <p class="text-muted mb-0">Generate fixtures by tournament style, auto-schedule, then edit any date/time as needed. Click a team name to view that match’s official players.</p>
 </div>
 
 <?php if ($pendingCount > 0 && canManageMatches()): ?>
@@ -141,36 +115,95 @@ if ($sportId !== '') {
 </div>
 <?php endif; ?>
 
+<?php
+$filtersActive = $search !== '' || $sportId !== '' || $status !== '' || $unscheduled === '1';
+$filterSummary = [];
+if ($search !== '') {
+    $filterSummary[] = 'Search: “' . $search . '”';
+}
+if ($sportId !== '') {
+    foreach ($sports as $s) {
+        if ((string) $s['id'] === (string) $sportId) {
+            $filterSummary[] = 'Sport: ' . sportLabel($s);
+            break;
+        }
+    }
+}
+if ($status !== '') {
+    $filterSummary[] = 'Status: ' . ucfirst($status);
+}
+if ($unscheduled === '1') {
+    $filterSummary[] = 'Needs date/time';
+}
+?>
 <div class="filter-bar">
-    <form method="GET" class="row g-2 align-items-end">
-        <div class="col-md-3"><label class="form-label">Search</label><input type="text" name="search" class="form-control" value="<?= sanitize($search) ?>"></div>
-        <div class="col-md-3">
-            <label class="form-label">Sport</label>
-            <select name="sport" class="form-select">
-                <option value="">All</option>
-                <?php foreach ($sports as $s): ?>
-                <option value="<?= $s['id'] ?>" <?= $sportId === (string) $s['id'] ? 'selected' : '' ?>><?= sanitize(sportLabel($s)) ?></option>
-                <?php endforeach; ?>
-            </select>
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div class="d-flex gap-2 flex-wrap align-items-center">
+            <?php if (canGenerateMatches()): ?>
+            <a href="<?= BASE_URL ?>/intramurals/matches/generate.php<?= $sportId !== '' ? '?sport=' . (int) $sportId : '' ?>" class="btn btn-primary"><i class="bi bi-magic"></i> Generate Matches</a>
+            <?php if ($sportId !== '' && !isResultsLocked(null, (int) $sportId)): ?>
+            <form method="POST" action="<?= BASE_URL ?>/intramurals/matches/advance.php" class="d-inline">
+                <?= csrfField() ?>
+                <input type="hidden" name="sport_id" value="<?= (int) $sportId ?>">
+                <input type="hidden" name="return_to" value="<?= sanitize($queryBase) ?>">
+                <button type="submit" class="btn btn-outline-success" data-confirm="Update TBD teams for this event from completed match results?">
+                    <i class="bi bi-diagram-3"></i> Update Bracket
+                </button>
+            </form>
+            <?php endif; ?>
+            <?php if (canManageIntramurals()): ?>
+            <a href="<?= BASE_URL ?>/intramurals/matches/add.php" class="btn btn-outline-primary"><i class="bi bi-plus-lg"></i> Single Match</a>
+            <?php endif; ?>
+            <?php if (canDeleteAllMatches() && $totalMatchCount > 0): ?>
+            <button type="button" class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#deleteMatchesModal">
+                <i class="bi bi-trash"></i> Delete Matches
+            </button>
+            <?php endif; ?>
+            <?php endif; ?>
+            <a href="<?= BASE_URL ?>/intramurals/matches/calendar.php" class="btn btn-outline-primary"><i class="bi bi-calendar-week"></i> Calendar</a>
+            <a href="<?= BASE_URL ?>/intramurals/index.php" class="btn btn-outline-secondary">Back</a>
         </div>
-        <div class="col-md-2">
-            <label class="form-label">Status</label>
-            <select name="status" class="form-select">
-                <option value="">All</option>
-                <?php foreach (['scheduled', 'ongoing', 'completed', 'forfeit', 'cancelled'] as $st): ?>
-                <option value="<?= $st ?>" <?= $status === $st ? 'selected' : '' ?>><?= ucfirst($st) ?></option>
-                <?php endforeach; ?>
-            </select>
+        <div class="d-flex gap-2 align-items-center flex-wrap">
+            <?php if ($filtersActive): ?>
+            <span class="text-muted small"><?= sanitize(implode(' · ', $filterSummary)) ?></span>
+            <?php endif; ?>
+            <button type="button" class="btn btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#matchFilters" aria-expanded="<?= $filtersActive ? 'true' : 'false' ?>" aria-controls="matchFilters">
+                <i class="bi bi-funnel"></i> Filters
+                <i class="bi bi-chevron-down ms-1 filter-toggle-icon"></i>
+            </button>
         </div>
-        <div class="col-md-2">
-            <label class="form-label">Schedule</label>
-            <select name="unscheduled" class="form-select">
-                <option value="">All</option>
-                <option value="1" <?= $unscheduled === '1' ? 'selected' : '' ?> >Needs date/time</option>
-            </select>
-        </div>
-        <div class="col-md-2"><button class="btn btn-primary w-100">Filter</button></div>
-    </form>
+    </div>
+    <div id="matchFilters" class="collapse<?= $filtersActive ? ' show' : '' ?>">
+        <form method="GET" class="row g-2 align-items-end mt-2">
+            <div class="col-md-3"><label class="form-label">Search</label><input type="text" name="search" class="form-control" value="<?= sanitize($search) ?>"></div>
+            <div class="col-md-3">
+                <label class="form-label">Sport</label>
+                <select name="sport" class="form-select">
+                    <option value="">All</option>
+                    <?php foreach ($sports as $s): ?>
+                    <option value="<?= $s['id'] ?>" <?= $sportId === (string) $s['id'] ? 'selected' : '' ?>><?= sanitize(sportLabel($s)) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Status</label>
+                <select name="status" class="form-select">
+                    <option value="">All</option>
+                    <?php foreach (['scheduled', 'ongoing', 'completed', 'forfeit', 'cancelled'] as $st): ?>
+                    <option value="<?= $st ?>" <?= $status === $st ? 'selected' : '' ?>><?= ucfirst($st) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Schedule</label>
+                <select name="unscheduled" class="form-select">
+                    <option value="">All</option>
+                    <option value="1" <?= $unscheduled === '1' ? 'selected' : '' ?> >Needs date/time</option>
+                </select>
+            </div>
+            <div class="col-md-2"><button class="btn btn-primary w-100">Filter</button></div>
+        </form>
+    </div>
 </div>
 
 <div class="card">
@@ -220,9 +253,6 @@ if ($sportId !== '') {
                         <td><?= statusBadge($m['status']) ?></td>
                         <td class="text-nowrap">
                             <a href="<?= BASE_URL ?>/intramurals/matches/view.php?id=<?= $m['id'] ?>" class="btn btn-sm btn-outline-primary">View</a>
-                            <?php if (!empty($m['team_a_id']) || !empty($m['team_b_id'])): ?>
-                            <a href="<?= BASE_URL ?>/intramurals/matches/view.php?id=<?= $m['id'] ?>#match-rosters" class="btn btn-sm btn-outline-info" title="Verify official roster">Roster</a>
-                            <?php endif; ?>
                             <?php if (canManageMatches()): ?>
                             <a href="<?= BASE_URL ?>/intramurals/matches/schedule.php?id=<?= $m['id'] ?>" class="btn btn-sm btn-<?= empty($m['scheduled_at']) ? 'warning' : 'outline-secondary' ?>">
                                 <?= empty($m['scheduled_at']) ? 'Set Date/Time' : 'Reschedule' ?>

@@ -28,6 +28,11 @@ if (!$match) {
 
 requireEventMatchAccess((int) $match['sport_id']);
 
+$fromDashboard = get('from') === 'dashboard';
+$fromQuery = $fromDashboard ? '&from=dashboard' : '';
+$viewUrl = BASE_URL . '/intramurals/matches/view.php?id=' . $id . $fromQuery;
+$backUrl = $fromDashboard ? (BASE_URL . '/dashboard.php') : $viewUrl;
+
 $teams = $db->query('SELECT * FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll();
 $errors = [];
 $isTabulator = isTournamentManager() && !canManageIntramurals() && !isSecretariat();
@@ -35,7 +40,7 @@ $isTabulator = isTournamentManager() && !canManageIntramurals() && !isSecretaria
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!verifyCsrf(post('csrf_token'))) {
         flash('error', 'Invalid request.');
-        redirect(BASE_URL . '/intramurals/matches/schedule.php?id=' . $id);
+        redirect(BASE_URL . '/intramurals/matches/schedule.php?id=' . $id . $fromQuery);
     }
 
     $scheduledAt = post('scheduled_at');
@@ -82,17 +87,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'venue' => $venue,
         ]);
         flash('success', $clearSchedule ? 'Match schedule cleared.' : 'Match date & time saved.');
-        redirect(BASE_URL . '/intramurals/matches/view.php?id=' . $id);
+        redirect($viewUrl);
     }
 }
 
 $dtLocal = $match['scheduled_at'] ? date('Y-m-d\TH:i', strtotime($match['scheduled_at'])) : '';
 $season = getCurrentSeason();
-$seasonId = getCurrentSeasonId();
-$sportId = (int) $match['sport_id'];
-$rosterA = !empty($match['team_a_id']) ? getOfficialEventRoster($sportId, (int) $match['team_a_id'], $seasonId ? (int) $seasonId : null) : [];
-$rosterB = !empty($match['team_b_id']) ? getOfficialEventRoster($sportId, (int) $match['team_b_id'], $seasonId ? (int) $seasonId : null) : [];
-$canOpenAthlete = true;
 
 $pageTitle = 'Assign Match Schedule';
 require_once __DIR__ . '/../../includes/header.php';
@@ -195,36 +195,10 @@ require __DIR__ . '/../_season_bar.php';
         </div>
         <div class="mt-4 d-flex gap-2">
             <button class="btn btn-primary">Save Schedule</button>
-            <a href="<?= BASE_URL ?>/intramurals/matches/view.php?id=<?= $id ?>#match-rosters" class="btn btn-outline-info">View official rosters</a>
-            <a href="<?= BASE_URL ?>/intramurals/matches/view.php?id=<?= $id ?>" class="btn btn-outline-secondary">Cancel</a>
+            <a href="<?= sanitize($fromDashboard ? $backUrl : $viewUrl) ?>" class="btn btn-outline-secondary"><?= $fromDashboard ? 'Back' : 'Cancel' ?></a>
         </div>
     </form>
 </div></div></div></div>
-
-<?php if (!empty($match['team_a_id']) || !empty($match['team_b_id'])): ?>
-<div class="row mt-4" id="match-rosters">
-    <div class="col-12 mb-2">
-        <h2 class="h5 mb-1"><i class="bi bi-clipboard-check"></i> Official rosters for this match</h2>
-        <p class="text-muted small mb-0">Check that only listed players will suit up for <?= sanitize($match['sport_name']) ?>.</p>
-    </div>
-    <div class="col-lg-6 mb-3">
-        <?php
-        $team = ['name' => $match['team_a_name'] ?: 'TBD', 'color' => '#666'];
-        $sideLabel = 'Team A';
-        $players = $rosterA;
-        require __DIR__ . '/_official_roster.php';
-        ?>
-    </div>
-    <div class="col-lg-6 mb-3">
-        <?php
-        $team = ['name' => $match['team_b_name'] ?: 'TBD', 'color' => '#666'];
-        $sideLabel = 'Team B';
-        $players = $rosterB;
-        require __DIR__ . '/_official_roster.php';
-        ?>
-    </div>
-</div>
-<?php endif; ?>
 
 <?php require __DIR__ . '/_roster_dialog.php'; ?>
 <?php require_once __DIR__ . '/../../includes/footer.php'; ?>

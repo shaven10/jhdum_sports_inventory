@@ -30,14 +30,15 @@ $seasonId = getCurrentSeasonId();
 $sportId = (int) $match['sport_id'];
 $teamAId = (int) ($match['team_a_id'] ?? 0);
 $teamBId = (int) ($match['team_b_id'] ?? 0);
-$rosterA = $teamAId ? getOfficialEventRoster($sportId, $teamAId, $seasonId ? (int) $seasonId : null) : [];
-$rosterB = $teamBId ? getOfficialEventRoster($sportId, $teamBId, $seasonId ? (int) $seasonId : null) : [];
-$canOpenAthlete = canAccessIntramurals();
+$fromDashboard = get('from') === 'dashboard';
+$backUrl = $fromDashboard ? (BASE_URL . '/dashboard.php') : (BASE_URL . '/intramurals/matches/index.php');
+$fromQuery = $fromDashboard ? '&from=dashboard' : '';
 
 // Quick live score / status update
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
-    if (canRecordScores() && canManageEventMatches((int) $match['sport_id'])) {
+    if (canRecordScores($sportId) && canManageEventMatches($sportId)) {
         requireWritableSeason();
+        requireUnlockedResults(null, $sportId);
         $action = post('action');
         if ($action === 'live_score') {
             $scoreA = (int) post('score_a');
@@ -51,6 +52,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
                 ->execute([$scoreA, $scoreB, $status, $winner, $id]);
             auditLog($_SESSION['user_id'], 'score_update', 'intramural_match', $id, null, ['score_a' => $scoreA, 'score_b' => $scoreB, 'status' => $status]);
 
+            if (in_array($status, ['completed', 'forfeit'], true)) {
+                notifyMatchFinished($id, (string) ($match['status'] ?? ''));
+            }
+
             $advanceMsg = '';
             if (in_array($status, ['completed', 'forfeit'], true) && $seasonId = getCurrentSeasonId()) {
                 $adv = advanceBracketFromResults((int) $match['sport_id'], (int) $seasonId);
@@ -60,7 +65,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
             }
 
             flash('success', 'Score updated.' . $advanceMsg);
-            redirect(BASE_URL . '/intramurals/matches/view.php?id=' . $id);
+            redirect(BASE_URL . '/intramurals/matches/view.php?id=' . $id . ($fromDashboard ? '&from=dashboard' : ''));
         }
     }
 }
@@ -68,34 +73,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
 $pageTitle = 'Match Details';
 require_once __DIR__ . '/../../includes/header.php';
 require __DIR__ . '/../_season_bar.php';
+echo renderResultsLockAlerts();
 ?>
 
+<div class="match-details-page">
 <div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2">
     <div>
         <h1><i class="bi bi-trophy"></i> <?= sanitize($match['sport_name']) ?> <small class="text-muted">(<?= ucfirst($match['sport_category']) ?>)</small></h1>
-        <p class="text-muted mb-0"><?= formatDateTime($match['scheduled_at']) ?> · <?= sanitize($match['venue'] ?: 'TBA') ?></p>
+        <p class="match-details-meta text-muted mb-0"><?= formatDateTime($match['scheduled_at']) ?> · <?= sanitize($match['venue'] ?: 'TBA') ?></p>
     </div>
     <div class="d-flex gap-2">
         <?php if (canManageEventMatches((int) $match['sport_id'])): ?>
-        <a href="<?= BASE_URL ?>/intramurals/matches/schedule.php?id=<?= $id ?>" class="btn btn-<?= empty($match['scheduled_at']) ? 'warning' : 'outline-primary' ?>">
+        <a href="<?= BASE_URL ?>/intramurals/matches/schedule.php?id=<?= $id ?><?= $fromQuery ?>" class="btn btn-<?= empty($match['scheduled_at']) ? 'warning' : 'outline-primary' ?>">
             <?= empty($match['scheduled_at']) ? 'Set Date/Time' : 'Reschedule' ?>
         </a>
         <?php
-        if (isBracketTournamentFormat($match['tournament_format'] ?? '')):
+        if (isBracketTournamentFormat($match['tournament_format'] ?? '') && !isResultsLocked(null, $sportId)):
         ?>
         <form method="POST" action="<?= BASE_URL ?>/intramurals/matches/advance.php" class="d-inline">
             <?= csrfField() ?>
             <input type="hidden" name="sport_id" value="<?= (int) $match['sport_id'] ?>">
-            <input type="hidden" name="return_to" value="<?= BASE_URL ?>/intramurals/matches/view.php?id=<?= $id ?>">
+            <input type="hidden" name="return_to" value="<?= BASE_URL ?>/intramurals/matches/view.php?id=<?= $id ?><?= $fromQuery ?>">
             <button type="submit" class="btn btn-outline-success" title="Fill TBD teams from previous results">
                 <i class="bi bi-diagram-3"></i> Update Bracket
             </button>
         </form>
         <?php endif; ?>
-        <?php if (canManageIntramurals()): ?>
-        <a href="<?= BASE_URL ?>/intramurals/matches/edit.php?id=<?= $id ?>" class="btn btn-primary">Edit / Record Score</a>
-        <?php elseif (canRecordScores()): ?>
-        <a href="<?= BASE_URL ?>/intramurals/matches/edit.php?id=<?= $id ?>" class="btn btn-primary">Record Score</a>
+        <?php if (canRecordScores($sportId)): ?>
+        <a href="<?= BASE_URL ?>/intramurals/matches/edit.php?id=<?= $id ?>" class="btn btn-primary"><?= canManageIntramurals() ? 'Edit / Record Score' : 'Record Score' ?></a>
         <?php endif; ?>
         <?php endif; ?>
         <?php if (canDeleteAllMatches()): ?>
@@ -103,50 +108,49 @@ require __DIR__ . '/../_season_bar.php';
             <?= csrfField() ?>
             <input type="hidden" name="action" value="single">
             <input type="hidden" name="match_id" value="<?= (int) $id ?>">
-            <input type="hidden" name="return" value="<?= BASE_URL ?>/intramurals/matches/index.php">
+            <input type="hidden" name="return" value="<?= sanitize($backUrl) ?>">
             <button type="submit" class="btn btn-outline-danger" data-confirm="Delete this match permanently?">
                 <i class="bi bi-trash"></i> Delete Match
             </button>
         </form>
         <?php endif; ?>
         <?php if ($teamAId || $teamBId): ?>
-        <a href="#match-rosters" class="btn btn-outline-info"><i class="bi bi-person-lines-fill"></i> Official Rosters</a>
-        <button type="button" class="btn btn-outline-secondary d-print-none" onclick="printReport()"><i class="bi bi-printer"></i> Print</button>
+        <span class="text-muted small align-self-center d-none d-md-inline">Click a team name for official roster</span>
         <?php endif; ?>
-        <a href="<?= BASE_URL ?>/intramurals/matches/index.php" class="btn btn-outline-secondary">Back</a>
+        <a href="<?= sanitize($backUrl) ?>" class="btn btn-outline-secondary">Back</a>
     </div>
 </div>
 
 <div class="row g-4">
     <div class="col-lg-7">
-        <div class="card">
+        <div class="card match-scoreboard-card">
             <div class="card-body text-center py-4">
-                <div class="row align-items-center">
+                <div class="row align-items-center g-2">
                     <div class="col-5">
-                        <div class="fs-4 fw-bold"><?= matchTeamRosterTrigger($match, 'a') ?></div>
+                        <div class="match-team-name fw-bold"><?= matchTeamRosterTrigger($match, 'a') ?></div>
                     </div>
                     <div class="col-2">
                         <?php if ($match['score_a'] !== null && $match['score_b'] !== null): ?>
-                        <div class="display-6 fw-bold"><?= (int) $match['score_a'] ?>–<?= (int) $match['score_b'] ?></div>
+                        <div class="match-score fw-bold"><?= (int) $match['score_a'] ?>–<?= (int) $match['score_b'] ?></div>
                         <?php else: ?>
-                        <div class="fs-3 text-muted">VS</div>
+                        <div class="match-score-vs text-muted">VS</div>
                         <?php endif; ?>
                     </div>
                     <div class="col-5">
-                        <div class="fs-4 fw-bold"><?= matchTeamRosterTrigger($match, 'b') ?></div>
+                        <div class="match-team-name fw-bold"><?= matchTeamRosterTrigger($match, 'b') ?></div>
                     </div>
                 </div>
-                <div class="mt-3"><?= statusBadge($match['status']) ?></div>
+                <div class="mt-3 match-status-line"><?= statusBadge($match['status']) ?></div>
                 <?php if ($match['winner_name']): ?>
-                <div class="mt-2 text-success"><i class="bi bi-award"></i> Winner: <strong><?= sanitize($match['winner_name']) ?></strong></div>
+                <div class="mt-2 match-result-line text-success"><i class="bi bi-award"></i> Winner: <strong><?= sanitize($match['winner_name']) ?></strong></div>
                 <?php elseif ($match['status'] === 'completed' && $match['score_a'] === $match['score_b']): ?>
-                <div class="mt-2 text-muted">Draw</div>
+                <div class="mt-2 match-result-line text-muted">Draw</div>
                 <?php endif; ?>
             </div>
         </div>
 
-        <?php if (canRecordScores() && in_array($match['status'], ['scheduled', 'ongoing'], true)): ?>
-        <div class="card mt-3">
+        <?php if (canRecordScores($sportId) && in_array($match['status'], ['scheduled', 'ongoing'], true)): ?>
+        <div class="card mt-3 match-live-score-card">
             <div class="card-header">Live Score Update</div>
             <div class="card-body">
                 <form method="POST" class="row g-2 align-items-end">
@@ -154,35 +158,35 @@ require __DIR__ . '/../_season_bar.php';
                     <input type="hidden" name="action" value="live_score">
                     <div class="col-md-3">
                         <label class="form-label"><?= sanitize($match['team_a_name']) ?></label>
-                        <input type="number" name="score_a" class="form-control" min="0" value="<?= (int) ($match['score_a'] ?? 0) ?>">
+                        <input type="number" name="score_a" class="form-control form-control-lg" min="0" value="<?= (int) ($match['score_a'] ?? 0) ?>">
                     </div>
                     <div class="col-md-3">
                         <label class="form-label"><?= sanitize($match['team_b_name']) ?></label>
-                        <input type="number" name="score_b" class="form-control" min="0" value="<?= (int) ($match['score_b'] ?? 0) ?>">
+                        <input type="number" name="score_b" class="form-control form-control-lg" min="0" value="<?= (int) ($match['score_b'] ?? 0) ?>">
                     </div>
                     <div class="col-md-3">
                         <label class="form-label">Status</label>
-                        <select name="status" class="form-select">
+                        <select name="status" class="form-select form-select-lg">
                             <option value="ongoing" <?= $match['status'] === 'ongoing' ? 'selected' : '' ?>>Ongoing</option>
                             <option value="completed">Completed</option>
                         </select>
                     </div>
-                    <div class="col-md-3"><button class="btn btn-primary w-100">Update Score</button></div>
+                    <div class="col-md-3"><button class="btn btn-primary btn-lg w-100">Update Score</button></div>
                 </form>
             </div>
         </div>
         <?php endif; ?>
     </div>
     <div class="col-lg-5">
-        <div class="card">
+        <div class="card match-info-card">
             <div class="card-header">Details</div>
             <div class="card-body">
-                <dl class="row mb-0">
+                <dl class="row mb-0 match-info-list">
                     <dt class="col-5">Tournament style</dt>
                     <dd class="col-7">
                         <span class="badge bg-info text-dark"><?= sanitize(tournamentFormatLabel($match['tournament_format'] ?? 'round_robin')) ?></span>
                         <?php if (!empty($match['format_notes'])): ?>
-                        <div class="small text-muted mt-1"><?= sanitize($match['format_notes']) ?></div>
+                        <div class="match-info-note text-muted mt-1"><?= sanitize($match['format_notes']) ?></div>
                         <?php endif; ?>
                     </dd>
                     <dt class="col-5">Scoring</dt><dd class="col-7"><?= ucfirst($match['scoring_method']) ?></dd>
@@ -194,35 +198,6 @@ require __DIR__ . '/../_season_bar.php';
         </div>
     </div>
 </div>
-
-<div class="mt-4" id="match-rosters">
-    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
-        <h2 class="h5 mb-0"><i class="bi bi-clipboard-check"></i> Official event rosters</h2>
-        <a class="small" href="<?= BASE_URL ?>/intramurals/roster/index.php?sport=<?= $sportId ?>">Open full roster</a>
-    </div>
-    <p class="text-muted small">
-        Verify each player against this list before the game. Only athletes registered for
-        <strong><?= sanitize($match['sport_name']) ?> (<?= sanitize(ucfirst((string) $match['sport_category'])) ?>)</strong>
-        on the official roster are eligible.
-    </p>
-    <div class="row g-3">
-        <div class="col-lg-6">
-            <?php
-            $team = ['name' => $match['team_a_name'] ?: 'TBD', 'color' => $match['team_a_color'] ?: '#666'];
-            $sideLabel = 'Team A';
-            $players = $rosterA;
-            require __DIR__ . '/_official_roster.php';
-            ?>
-        </div>
-        <div class="col-lg-6">
-            <?php
-            $team = ['name' => $match['team_b_name'] ?: 'TBD', 'color' => $match['team_b_color'] ?: '#666'];
-            $sideLabel = 'Team B';
-            $players = $rosterB;
-            require __DIR__ . '/_official_roster.php';
-            ?>
-        </div>
-    </div>
 </div>
 
 <?php require __DIR__ . '/_roster_dialog.php'; ?>

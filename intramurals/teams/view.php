@@ -2,6 +2,11 @@
 require_once __DIR__ . '/../../includes/auth.php';
 requireIntramuralsAccess();
 
+if (isTournamentManager() && !canManageIntramurals()) {
+    flash('error', 'Team roster view is not available for tournament manager accounts.');
+    redirect(BASE_URL . '/intramurals/teams/index.php');
+}
+
 $db = getDB();
 $id = (int) get('id');
 $sportFilter = (int) get('sport');

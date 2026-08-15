@@ -3,6 +3,11 @@ require_once __DIR__ . '/../../includes/auth.php';
 requireIntramuralsAccess();
 ensureSportCategoryEnum();
 
+if (isTournamentManager() && !canManageIntramurals()) {
+    flash('error', 'Team athlete list is not available for tournament manager accounts.');
+    redirect(BASE_URL . '/dashboard.php');
+}
+
 if (isCoach() && !canManageIntramurals() && !hasCoachAssignments()) {
     flash('error', 'You have no event coach assignments. Ask your unit manager to assign you under Teams → Event Coaches.');
     redirect(BASE_URL . '/intramurals/index.php');

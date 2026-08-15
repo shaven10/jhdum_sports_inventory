@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
-requireIntramuralsAccess();
+requireAthletesDirectoryAccess();
 
 if (!canManageTeamAthletes()) {
     flash('error', 'You do not have permission to register athletes.');
@@ -23,7 +23,11 @@ if ($scoped) {
     $teams = $db->query('SELECT * FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll();
 }
 $sports = $db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll();
+if ($scoped && $userTeamId) {
+    $sports = filterSportsForTeamDivision($sports, (int) $userTeamId);
+}
 $errors = [];
+ensureIntramuralDivisionsSchema();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!verifyCsrf(post('csrf_token'))) {
@@ -80,6 +84,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($sportId && !$regTeamId) {
         $errors[] = 'Assign a team when registering for a sport.';
+    }
+    if ($sportId && $regTeamId && !teamCanPlaySport($regTeamId, $sportId)) {
+        $errors[] = 'That event is not available for this team\'s division.';
+    }
+    if ($sportId && $regTeamId && $seasonId) {
+        $cap = checkTeamEventRosterCapacity($regTeamId, $sportId, (int) $seasonId, 1);
+        if (!$cap['ok']) {
+            $errors[] = $cap['message'];
+        }
     }
 
     if (empty($errors)) {

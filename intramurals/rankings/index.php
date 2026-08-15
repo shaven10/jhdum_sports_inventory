@@ -1,7 +1,10 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
 requireIntramuralsAccess();
-requireStandingsAccess();
+if (!canManageEventRankings()) {
+    flash('error', 'Only administrators and secretariat can manage event rankings.');
+    redirect(getHomeUrl());
+}
 ensureEventRanksTable();
 
 $db = getDB();
@@ -30,7 +33,7 @@ foreach ($sports as $s) {
     }
 }
 
-$canEdit = $sportId && canManageEventMatches($sportId) && $seasonId;
+$canEdit = $sportId && canManageEventRankings() && $seasonId && !isResultsLocked(null, $sportId);
 $hasScheduledMatches = $sportId && $seasonId && eventHasScheduledMatches($sportId, (int) $seasonId);
 if ($hasScheduledMatches) {
     $canEdit = false;
@@ -48,9 +51,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect(BASE_URL . '/intramurals/rankings/index.php' . ($sportId ? '?sport=' . $sportId : ''));
     }
     requireWritableSeason();
+    requireUnlockedResults(null, (int) post('sport_id'));
     $sportId = (int) post('sport_id');
-    if (!canManageEventMatches($sportId)) {
-        flash('error', 'You do not have permission to save ranks for this event.');
+    if (!canManageEventRankings()) {
+        flash('error', 'You do not have permission to save event ranks.');
         redirect(BASE_URL . '/intramurals/rankings/index.php');
     }
     if (eventHasScheduledMatches($sportId, (int) $seasonId)) {
@@ -105,6 +109,7 @@ $maxPlace = max(6, count($listedIds));
 $pageTitle = 'Event Rankings';
 require_once __DIR__ . '/../../includes/header.php';
 require __DIR__ . '/../_season_bar.php';
+echo renderResultsLockAlerts();
 ?>
 
 <div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2">
@@ -252,10 +257,12 @@ require __DIR__ . '/../_season_bar.php';
         <div class="card-footer text-muted small">
             <?php if (!isViewingActiveSeason()): ?>
             Historical seasons are view-only.
+            <?php elseif (isResultsLocked(null, $sportId ?: null)): ?>
+            Results are locked<?= $sportId ? ' for this event' : '' ?>. Unlock in Admin → Lock Results to edit ranks.
             <?php elseif (!empty($hasScheduledMatches)): ?>
             Manual ranking is disabled while this event has scheduled matches.
             <?php else: ?>
-            You can view ranks. Tournament managers and intramurals staff can edit this event.
+            You can view ranks. Only administrators and secretariat can edit event rankings.
             <?php endif; ?>
         </div>
         <?php endif; ?>

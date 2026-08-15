@@ -6,7 +6,7 @@ if (isTournamentManager() && !canManageIntramurals()) {
     requireMatchResultsAccess();
 }
 
-if (isSecretariat() && !canViewIntramuralsReports()) {
+if (isPublishStaff() && !canViewIntramuralsReports()) {
     flash('error', 'You do not have permission to view intramurals reports.');
     redirect(getHomeUrl());
 }
@@ -35,8 +35,8 @@ if (isTournamentManager() && !canManageIntramurals()) {
     if (!array_key_exists($type, $titleMap)) {
         $type = 'results';
     }
-} elseif (isSecretariat()) {
-    // Secretariat may access all report types
+} elseif (isPublishStaff()) {
+    // Secretariat and publication may access all report types
 }
 $reportTitle = $titleMap[$type] ?? 'Intramurals Report';
 
@@ -186,9 +186,12 @@ require __DIR__ . '/../_season_bar.php';
         <p class="text-muted mb-0">Printable reports with Excel/PDF export</p>
     </div>
     <div class="d-flex gap-2">
+        <?php if (isAdmin() || isPublishStaff()): ?>
+        <a class="btn btn-outline-warning" href="<?= BASE_URL ?>/intramurals/reports/certificates.php"><i class="bi bi-award"></i> Certificate of Recognition</a>
+        <?php endif; ?>
         <a class="btn btn-outline-success" href="?type=<?= urlencode($type) ?>&sport=<?= urlencode($sportId) ?>&team=<?= urlencode($teamId) ?>&export=excel"><i class="bi bi-file-earmark-excel"></i> Export Excel</a>
         <button class="btn btn-outline-secondary" onclick="printReport()"><i class="bi bi-printer"></i> Print / PDF</button>
-        <a href="<?= BASE_URL ?>/intramurals/index.php" class="btn btn-outline-secondary">Back</a>
+        <a href="<?= getHomeUrl() ?>" class="btn btn-outline-secondary">Back</a>
     </div>
 </div>
 

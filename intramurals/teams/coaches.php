@@ -29,8 +29,6 @@ $coachFormDefaults = [
     'email' => '',
     'first_name' => '',
     'last_name' => '',
-    'department' => $team['department'] ?? '',
-    'phone' => '',
 ];
 $coachFormData = $coachFormDefaults;
 $coachFormErrors = [];
@@ -70,8 +68,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
             'password' => post('password'),
             'first_name' => post('first_name'),
             'last_name' => post('last_name'),
-            'department' => post('department'),
-            'phone' => post('phone'),
         ], $id);
 
         if ($result['success']) {
@@ -86,8 +82,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
                 'email' => post('email'),
                 'first_name' => post('first_name'),
                 'last_name' => post('last_name'),
-                'department' => post('department'),
-                'phone' => post('phone'),
             ],
         ];
         redirect(BASE_URL . '/intramurals/teams/coaches.php?id=' . $id . '&add_coach=1');
@@ -236,14 +230,6 @@ require __DIR__ . '/../_season_bar.php';
                         <div class="col-md-6">
                             <label class="form-label" for="coachPassword">Password *</label>
                             <input type="text" name="password" id="coachPassword" class="form-control" required minlength="6" autocomplete="new-password" placeholder="Min. 6 characters">
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label" for="coachDepartment">Department</label>
-                            <input type="text" name="department" id="coachDepartment" class="form-control" value="<?= sanitize($coachFormData['department']) ?>">
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label" for="coachPhone">Phone</label>
-                            <input type="text" name="phone" id="coachPhone" class="form-control" value="<?= sanitize($coachFormData['phone']) ?>">
                         </div>
                     </div>
                 </div>

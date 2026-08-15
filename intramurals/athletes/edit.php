@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
-requireIntramuralsAccess();
+requireAthletesDirectoryAccess();
 
 $db = getDB();
 $id = (int) get('id');
@@ -54,7 +54,11 @@ if ($isCoach && $athleteTeamId) {
     $allowedSportIds = getCoachSportIdsForTeam($athleteTeamId);
     $sports = array_values(array_filter($allSports, fn($s) => in_array((int) $s['id'], $allowedSportIds, true)));
 }
+if ($athleteTeamId) {
+    $sports = filterSportsForTeamDivision($sports, $athleteTeamId);
+}
 $errors = [];
+ensureIntramuralDivisionsSchema();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!verifyCsrf(post('csrf_token'))) {
@@ -93,7 +97,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('error', 'Sport, team, and an active season are required.');
         } elseif (!canManageTeamRoster($regTeamId, $sportId)) {
             flash('error', 'You can only manage events you are assigned to coach.');
+        } elseif (!teamCanPlaySport($regTeamId, $sportId)) {
+            flash('error', 'That event is not available for this team\'s division.');
         } else {
+            $cap = checkTeamEventRosterCapacity($regTeamId, $sportId, (int) $seasonId, 1, $id);
+            if (!$cap['ok']) {
+                flash('error', $cap['message']);
+            } else {
             try {
                 $db->prepare('INSERT INTO intramural_registrations (season_id, athlete_id, sport_id, team_id, event_category, jersey_number, position) VALUES (?, ?, ?, ?, ?, ?, ?)')
                     ->execute([$seasonId, $id, $sportId, $regTeamId, $eventCategory ?: null, $jersey ?: null, $position ?: null]);
@@ -101,6 +111,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 flash('success', 'Sport assignment added.');
             } catch (PDOException $e) {
                 flash('error', 'Athlete is already registered for this sport in the current season.');
+            }
             }
         }
         redirect(BASE_URL . '/intramurals/athletes/edit.php?id=' . $id);
