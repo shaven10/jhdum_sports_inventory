@@ -411,7 +411,7 @@ CREATE TABLE IF NOT EXISTS intramural_athletes (
     last_name VARCHAR(50) NOT NULL,
     gender ENUM('male', 'female', 'other') NOT NULL DEFAULT 'male',
     birthdate DATE DEFAULT NULL,
-    department VARCHAR(100) DEFAULT NULL,
+    department VARCHAR(150) DEFAULT NULL,
     year_level VARCHAR(20) DEFAULT NULL,
     team_id INT DEFAULT NULL,
     photo VARCHAR(255) DEFAULT NULL,
@@ -422,6 +422,17 @@ CREATE TABLE IF NOT EXISTS intramural_athletes (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uq_athlete_student_id (student_id),
     FOREIGN KEY (team_id) REFERENCES intramural_teams(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS athlete_courses (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(150) NOT NULL,
+    code VARCHAR(40) DEFAULT NULL,
+    sort_order INT NOT NULL DEFAULT 0,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_athlete_course_name (name)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS intramural_registrations (

@@ -4780,8 +4780,8 @@ function athleteFullNameReport(array $athlete): string
     return athleteFullName($athlete, true);
 }
 
-/** Official JHCSC course / program options for athlete records. */
-function athleteCourseOptions(): array
+/** Default JHCSC course / program names (seeded into athlete_courses when empty). */
+function athleteCourseDefaultNames(): array
 {
     return [
         'Bachelor of Elementary Education (BEEd)',
@@ -4802,6 +4802,90 @@ function athleteCourseOptions(): array
         'Bachelor of Science in Tourism Management (BSTM)',
         'Diploma / Certificate Program',
     ];
+}
+
+function ensureAthleteCoursesSchema(): void
+{
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    $db = getDB();
+    $tableStmt = $db->prepare('SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?');
+    $tableStmt->execute(['athlete_courses']);
+    if ((int) $tableStmt->fetchColumn() === 0) {
+        $db->exec("CREATE TABLE athlete_courses (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(150) NOT NULL,
+            code VARCHAR(40) DEFAULT NULL,
+            sort_order INT NOT NULL DEFAULT 0,
+            is_active TINYINT(1) NOT NULL DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_athlete_course_name (name)
+        ) ENGINE=InnoDB");
+    }
+
+    $colStmt = $db->prepare('SELECT CHARACTER_MAXIMUM_LENGTH FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
+    $colStmt->execute(['intramural_athletes', 'department']);
+    $deptLen = (int) ($colStmt->fetchColumn() ?: 0);
+    if ($deptLen > 0 && $deptLen < 150) {
+        try {
+            $db->exec('ALTER TABLE intramural_athletes MODIFY COLUMN department VARCHAR(150) DEFAULT NULL');
+        } catch (Throwable $e) {
+            // Column may already match or lack privileges
+        }
+    }
+
+    $count = (int) $db->query('SELECT COUNT(*) FROM athlete_courses')->fetchColumn();
+    if ($count === 0) {
+        $insert = $db->prepare('INSERT INTO athlete_courses (name, sort_order, is_active) VALUES (?, ?, 1)');
+        foreach (athleteCourseDefaultNames() as $i => $name) {
+            $insert->execute([$name, $i]);
+        }
+    }
+}
+
+/**
+ * @return list<array<string, mixed>>
+ */
+function getAthleteCourses(bool $activeOnly = true): array
+{
+    ensureAthleteCoursesSchema();
+    $db = getDB();
+    $sql = 'SELECT c.*,
+        (SELECT COUNT(*) FROM intramural_athletes a WHERE a.department = c.name) AS athlete_count
+        FROM athlete_courses c';
+    if ($activeOnly) {
+        $sql .= ' WHERE c.is_active = 1';
+    }
+    $sql .= ' ORDER BY c.sort_order ASC, c.name ASC';
+    return $db->query($sql)->fetchAll() ?: [];
+}
+
+function getAthleteCourseById(int $id): ?array
+{
+    ensureAthleteCoursesSchema();
+    if ($id <= 0) {
+        return null;
+    }
+    $stmt = getDB()->prepare('SELECT * FROM athlete_courses WHERE id = ?');
+    $stmt->execute([$id]);
+    $row = $stmt->fetch();
+    return $row ?: null;
+}
+
+/** Active course names for athlete Course dropdowns. */
+function athleteCourseOptions(): array
+{
+    ensureAthleteCoursesSchema();
+    $rows = getAthleteCourses(true);
+    if ($rows === []) {
+        return athleteCourseDefaultNames();
+    }
+    return array_values(array_map(static fn(array $r): string => (string) $r['name'], $rows));
 }
 
 function athleteYearLevelOptions(): array
