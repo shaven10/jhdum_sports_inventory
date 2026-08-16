@@ -294,21 +294,6 @@ CREATE TABLE IF NOT EXISTS intramural_seasons (
     UNIQUE KEY uq_season_year_label (year_label)
 ) ENGINE=InnoDB;
 
-CREATE TABLE IF NOT EXISTS intramural_event_results_locks (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    season_id INT NOT NULL,
-    sport_id INT NOT NULL,
-    locked_at DATETIME DEFAULT NULL,
-    locked_by INT DEFAULT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY uq_event_results_lock (season_id, sport_id),
-    INDEX idx_event_results_lock_sport (sport_id),
-    FOREIGN KEY (season_id) REFERENCES intramural_seasons(id) ON DELETE CASCADE,
-    FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE,
-    FOREIGN KEY (locked_by) REFERENCES users(id) ON DELETE SET NULL
-) ENGINE=InnoDB;
-
 CREATE TABLE IF NOT EXISTS intramural_divisions (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
@@ -376,6 +361,21 @@ CREATE TABLE IF NOT EXISTS intramural_sports (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uq_sport_name_category (name, category),
     FOREIGN KEY (point_scheme_id) REFERENCES intramural_point_schemes(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS intramural_event_results_locks (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    season_id INT NOT NULL,
+    sport_id INT NOT NULL,
+    locked_at DATETIME DEFAULT NULL,
+    locked_by INT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_event_results_lock (season_id, sport_id),
+    INDEX idx_event_results_lock_sport (sport_id),
+    FOREIGN KEY (season_id) REFERENCES intramural_seasons(id) ON DELETE CASCADE,
+    FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE,
+    FOREIGN KEY (locked_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS intramural_division_sports (
