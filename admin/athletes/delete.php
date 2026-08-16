@@ -236,7 +236,7 @@ require_once __DIR__ . '/../../includes/header.php';
                     <tr>
                         <td><?= sanitize($a['athlete_code']) ?></td>
                         <td><?= sanitize($a['student_id']) ?></td>
-                        <td><?= sanitize(trim($a['last_name'] . ', ' . $a['first_name'])) ?></td>
+                        <td><?= sanitize(formatAthleteName(trim($a['last_name'] . ', ' . $a['first_name']))) ?></td>
                         <td><?= sanitize($a['team_name'] ?: '—') ?></td>
                         <td><?= (int) ($a['reg_count'] ?? 0) ?></td>
                         <td>

@@ -18,13 +18,40 @@ if (!$sportId && $sports) {
 
 $blocks = $sportId ? computeSportStandings($sportId) : [];
 $block = $blocks[$sportId] ?? null;
+$divisionBlocks = $block['divisions'] ?? [];
+if ($block && $divisionBlocks === [] && !empty($block['standings'])) {
+    $divisionBlocks = [[
+        'division_id' => null,
+        'division_key' => 0,
+        'division_name' => 'All teams',
+        'standings' => $block['standings'],
+        'manual_ranks' => !empty($block['manual_ranks']),
+    ]];
+}
 
 if ($export === 'excel' && $block) {
-    $headers = ['Rank', 'Placement', 'Team', 'Played', 'Wins', 'Losses', 'Draws', 'Match Pts', 'Event Pts', 'Diff', 'Medal'];
+    $headers = ['Division', 'Rank', 'Placement', 'Team', 'Played', 'Wins', 'Losses', 'Draws', 'Match Pts', 'Event Pts', 'Diff', 'Medal'];
     $rows = [];
-    foreach ($block['standings'] as $r) {
-        if ($r['played'] === 0 && empty($r['manual_rank'])) continue;
-        $rows[] = [$r['rank'], $r['placement_label'] ?: '', $r['team_name'], $r['played'], $r['wins'], $r['losses'], $r['draws'], $r['points'], $r['placement_points'], $r['diff'], $r['medal'] ?: ''];
+    foreach ($divisionBlocks as $divBlock) {
+        foreach ($divBlock['standings'] as $r) {
+            if ($r['played'] === 0 && empty($r['manual_rank'])) {
+                continue;
+            }
+            $rows[] = [
+                $divBlock['division_name'],
+                $r['rank'] >= 1000 ? '' : $r['rank'],
+                $r['placement_label'] ?: '',
+                $r['team_name'],
+                $r['played'],
+                $r['wins'],
+                $r['losses'],
+                $r['draws'],
+                $r['points'],
+                $r['placement_points'],
+                $r['diff'],
+                $r['medal'] ?: '',
+            ];
+        }
     }
     exportCsv('standings-' . date('Ymd') . '.csv', $headers, $rows);
 }
@@ -37,11 +64,11 @@ require __DIR__ . '/../_season_bar.php';
 <div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2 no-print">
     <div>
         <h1><i class="bi bi-bar-chart-steps"></i> Result Tabulation</h1>
-        <p class="text-muted mb-0">Automatic rankings, points, and medals per sport</p>
+        <p class="text-muted mb-0">Rankings, points, and medals per sport — grouped by division</p>
     </div>
     <div class="d-flex gap-2">
-        <?php if (canManageEventRankings() && $sportId && $seasonId && !eventHasScheduledMatches($sportId, (int) $seasonId)): ?>
-        <a href="<?= BASE_URL ?>/intramurals/rankings/index.php<?= $sportId ? '?sport=' . (int) $sportId : '' ?>" class="btn btn-outline-warning"><i class="bi bi-list-ol"></i> Enter Event Ranks</a>
+        <?php if (canManageEventRankings() && $sportId && $seasonId): ?>
+        <a href="<?= BASE_URL ?>/intramurals/rankings/index.php?sport=<?= (int) $sportId ?>" class="btn btn-outline-warning"><i class="bi bi-list-ol"></i> Enter Event Ranks</a>
         <?php endif; ?>
         <a href="<?= BASE_URL ?>/intramurals/standings/overall.php" class="btn btn-outline-primary">Overall Standing</a>
         <?php if ($block): ?>
@@ -71,17 +98,23 @@ require __DIR__ . '/../_season_bar.php';
 <?php if (!$block): ?>
 <div class="alert alert-info">No sports available.</div>
 <?php else: ?>
+<?php $scheme = $block['scheme'] ?? getPointSchemeForSport($block['sport']); ?>
+<div class="alert alert-secondary py-2 no-print">
+    <strong><?= sanitize(sportLabel($block['sport'])) ?></strong>
+    · Scheme: <?= sanitize($scheme['name'] ?? 'Default') ?> (<?= sanitize(formatSchemePoints($scheme)) ?>)
+    · Match W/D/L <?= (int) $block['sport']['win_points'] ?>/<?= (int) $block['sport']['draw_points'] ?>/<?= (int) $block['sport']['loss_points'] ?>
+</div>
+
+<?php foreach ($divisionBlocks as $divBlock): ?>
 <div class="card mb-3">
-    <?php $scheme = $block['scheme'] ?? getPointSchemeForSport($block['sport']); ?>
-    <div class="card-header">
-        <?= sanitize(sportLabel($block['sport'])) ?>
-        <?php if (!empty($block['manual_ranks'])): ?>
-        <span class="badge bg-info text-dark ms-1">Manual ranks</span>
-        <?php endif; ?>
-        <small class="text-muted ms-2">
-            Scheme: <?= sanitize($scheme['name'] ?? 'Default') ?> (<?= sanitize(formatSchemePoints($scheme)) ?>)
-            · Match W/D/L <?= (int) $block['sport']['win_points'] ?>/<?= (int) $block['sport']['draw_points'] ?>/<?= (int) $block['sport']['loss_points'] ?>
-        </small>
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span>
+            <i class="bi bi-diagram-3"></i> <?= sanitize($divBlock['division_name']) ?>
+            <?php if (!empty($divBlock['manual_ranks'])): ?>
+            <span class="badge bg-info text-dark ms-1">Manual ranks</span>
+            <?php endif; ?>
+        </span>
+        <small class="text-muted"><?= count($divBlock['standings']) ?> team<?= count($divBlock['standings']) === 1 ? '' : 's' ?></small>
     </div>
     <div class="card-body p-0">
         <div class="table-responsive">
@@ -102,8 +135,14 @@ require __DIR__ . '/../_season_bar.php';
                     </tr>
                 </thead>
                 <tbody>
-                    <?php foreach ($block['standings'] as $r): ?>
-                    <?php if ($r['played'] === 0 && empty($r['manual_rank'])) continue; ?>
+                    <?php
+                    $shown = 0;
+                    foreach ($divBlock['standings'] as $r):
+                        if ($r['played'] === 0 && empty($r['manual_rank'])) {
+                            continue;
+                        }
+                        $shown++;
+                    ?>
                     <tr>
                         <td><?= $r['rank'] >= 1000 ? '—' : $r['rank'] ?></td>
                         <td>
@@ -131,14 +170,19 @@ require __DIR__ . '/../_season_bar.php';
                         </td>
                     </tr>
                     <?php endforeach; ?>
+                    <?php if ($shown === 0): ?>
+                    <tr><td colspan="11" class="text-muted p-3">No results yet for this division.</td></tr>
+                    <?php endif; ?>
                 </tbody>
             </table>
         </div>
     </div>
 </div>
-<p class="text-muted small no-print">Event Pts (Champion → 5th Runner Up) feed the <a href="<?= BASE_URL ?>/intramurals/standings/overall.php">Overall Standing</a>.
+<?php endforeach; ?>
+
+<p class="text-muted small no-print">Event Pts (Champion → 5th Runner Up) feed the <a href="<?= BASE_URL ?>/intramurals/standings/overall.php">Overall Standing</a> by division.
 <?php if (canManageEventRankings()): ?>
-Use <a href="<?= BASE_URL ?>/intramurals/rankings/index.php<?= $sportId ? '?sport=' . (int) $sportId : '' ?>">Event Rankings</a> to enter places directly for events without scheduled matches.
+Use <a href="<?= BASE_URL ?>/intramurals/rankings/index.php<?= $sportId ? '?sport=' . (int) $sportId : '' ?>">Event Rankings</a> to enter places per division for events without scheduled matches.
 <?php endif; ?>
 <?php if (canManageIntramurals()): ?> Manage point values in <a href="<?= BASE_URL ?>/intramurals/points/index.php">Point System</a>.<?php endif; ?></p>
 <?= renderReportFooter($block ? sportLabel($block['sport']) : 'Result Tabulation') ?>

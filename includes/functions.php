@@ -886,7 +886,7 @@ function renderReportHeader(string $title, array $options = []): string
     $showOnScreen = !empty($options['show_on_screen']);
     $visibility = $showOnScreen ? '' : ' d-none d-print-block';
     $logo = sanitize(appLogoUrl());
-    $appName = sanitize(defined('APP_NAME') ? APP_NAME : 'JHCSC Sports Development MIS');
+    $appName = sanitize(defined('APP_NAME') ? APP_NAME : 'JHCSC Sports Development IMIS');
     $campus = sanitize(defined('APP_CAMPUS') ? APP_CAMPUS : 'J.H. Cerilles State College');
     $titleSafe = sanitize($title);
     $subtitleSafe = sanitize((string) $subtitle);
@@ -918,7 +918,7 @@ HTML;
 /** Official branded footer for printable reports / PDF. */
 function renderReportFooter(?string $extra = null): string
 {
-    $appName = sanitize(defined('APP_NAME') ? APP_NAME : 'JHCSC Sports Development MIS');
+    $appName = sanitize(defined('APP_NAME') ? APP_NAME : 'JHCSC Sports Development IMIS');
     $campus = sanitize(defined('APP_CAMPUS') ? APP_CAMPUS : 'J.H. Cerilles State College');
     $extraSafe = $extra !== null && $extra !== '' ? ' · ' . sanitize($extra) : '';
     $when = sanitize(date('F j, Y g:i A'));
@@ -1082,7 +1082,7 @@ function renderDashboardHero(string $title, string $subtitle = '', array $option
     $actions = $options['actions'] ?? '';
     $logo = sanitize(appLogoUrl());
     $campus = sanitize(defined('APP_CAMPUS') ? APP_CAMPUS : 'J.H. Cerilles State College');
-    $appName = sanitize(defined('APP_SHORT_NAME') ? APP_SHORT_NAME : 'JHCSC SDMIS');
+    $appName = sanitize(defined('APP_SHORT_NAME') ? APP_SHORT_NAME : 'JHCSC SDIMIS');
     $titleSafe = sanitize($title);
     $subtitleSafe = sanitize($subtitle);
     $actionsHtml = $actions !== ''

@@ -1,11 +1,11 @@
 <?php
 /**
- * J.H. Cerilles State College - Sports Development MIS
+ * J.H. Cerilles State College - Sports Development IMIS
  * Main Configuration
  */
 
-define('APP_NAME', 'JHCSC Sports Development MIS');
-define('APP_SHORT_NAME', 'JHCSC SDMIS');
+define('APP_NAME', 'JHCSC Sports Development IMIS');
+define('APP_SHORT_NAME', 'JHCSC SDIMIS');
 define('APP_CAMPUS', 'J.H. Cerilles State College');
 define('APP_TAGLINE', 'Sports Development Management Information System');
 define('APP_VERSION', '1.0.0');

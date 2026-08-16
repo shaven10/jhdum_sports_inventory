@@ -150,8 +150,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             foreach ($parsed['rows'] as $index => $row) {
                 $line = $index + 2; // header is line 1
                 $studentId = trim($row['student_id'] ?? '');
-                $firstName = trim($row['first_name'] ?? '');
-                $lastName = trim($row['last_name'] ?? '');
+                $firstName = formatAthleteName(trim($row['first_name'] ?? ''));
+                $lastName = formatAthleteName(trim($row['last_name'] ?? ''));
                 $gender = strtolower(trim($row['gender'] ?? 'male'));
                 $birthdate = trim($row['birthdate'] ?? '');
                 $department = trim($row['course'] ?? $row['department'] ?? '');

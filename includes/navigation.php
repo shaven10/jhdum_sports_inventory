@@ -217,6 +217,7 @@ function buildAppNavigation(): array
                 ['label' => 'Seasons / Years', 'href' => BASE_URL . '/intramurals/seasons/index.php', 'icon' => 'bi-calendar3'],
                 ['label' => 'Roster Lock', 'href' => BASE_URL . '/intramurals/roster/lock.php', 'icon' => 'bi-lock'],
                 ['label' => 'Lock Results', 'href' => BASE_URL . '/admin/results_lock.php', 'icon' => 'bi-lock-fill'],
+                ['label' => 'TM Ranking Access', 'href' => BASE_URL . '/admin/tm_ranking.php', 'icon' => 'bi-list-check'],
                 ['label' => 'Divisions', 'href' => BASE_URL . '/admin/divisions/index.php', 'icon' => 'bi-diagram-3'],
                 ['label' => 'Delete Athletes', 'href' => BASE_URL . '/admin/athletes/delete.php', 'icon' => 'bi-person-x'],
                 ['label' => 'Team Positions', 'href' => BASE_URL . '/admin/team_positions/index.php', 'icon' => 'bi-list-ol'],

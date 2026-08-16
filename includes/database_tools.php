@@ -39,7 +39,7 @@ function exportDatabaseSql(PDO $db): string
 {
     $info = getDatabaseToolInfo();
     $lines = [];
-    $lines[] = '-- JHCSC Sports Development MIS — Database Export';
+    $lines[] = '-- JHCSC Sports Development IMIS — Database Export';
     $lines[] = '-- Database: ' . DB_NAME;
     $lines[] = '-- Generated: ' . $info['generated_at'];
     $lines[] = '-- Tables: ' . $info['tables'];

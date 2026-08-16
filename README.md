@@ -1,4 +1,4 @@
-# JHCSC Sports Development MIS
+# JHCSC Sports Development IMIS
 
 Sports Development Management Information System for **J.H. Cerilles State College**. Manages sports equipment inventory, borrowing, and intramural competitions in a single PHP application.
 

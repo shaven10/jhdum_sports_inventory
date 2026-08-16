@@ -119,40 +119,68 @@ if ($type === 'athletes') {
     }
 } elseif ($type === 'medals') {
     $overall = computeOverallStandings();
-    $medalRows = $overall['standings'];
-    usort($medalRows, function ($a, $b) {
-        if ($a['gold'] !== $b['gold']) {
-            return $b['gold'] <=> $a['gold'];
+    $headers = ['Division', 'Rank', 'Team', 'Gold', 'Silver', 'Bronze', 'Total Medals', 'Total Points'];
+    foreach ($overall['by_division'] ?? [] as $group) {
+        foreach ($group['medal_tally'] as $r) {
+            $medalTotal = (int) ($r['medal_total'] ?? ($r['gold'] + $r['silver'] + $r['bronze']));
+            if ($medalTotal === 0 && (int) $r['total'] === 0) {
+                continue;
+            }
+            $row = [
+                $group['division_name'],
+                $r['medal_rank'],
+                $r['team_name'],
+                $r['gold'],
+                $r['silver'],
+                $r['bronze'],
+                $medalTotal,
+                $r['total'],
+            ];
+            $rows[] = $row;
+            $htmlRows[] = $row;
         }
-        if ($a['silver'] !== $b['silver']) {
-            return $b['silver'] <=> $a['silver'];
-        }
-        if ($a['bronze'] !== $b['bronze']) {
-            return $b['bronze'] <=> $a['bronze'];
-        }
-        return $b['total'] <=> $a['total'];
-    });
-    $headers = ['Rank', 'Team', 'Gold', 'Silver', 'Bronze', 'Total Medals', 'Total Points'];
-    $rank = 1;
-    foreach ($medalRows as $r) {
-        $medalTotal = $r['gold'] + $r['silver'] + $r['bronze'];
-        $rows[] = [$rank++, $r['team_name'], $r['gold'], $r['silver'], $r['bronze'], $medalTotal, $r['total']];
-        $htmlRows[] = $rows[count($rows) - 1];
     }
 } elseif ($type === 'overall') {
     $overall = computeOverallStandings();
-    $headers = array_merge(['Rank', 'Team'], $overall['sport_labels'], ['Total Points', 'Gold', 'Silver', 'Bronze']);
-    foreach ($overall['standings'] as $r) {
-        $row = [$r['rank'], $r['team_name']];
-        foreach ($overall['sport_labels'] as $label) {
-            $row[] = $r['sports'][$label] ?? 0;
+    $headers = ['Division', 'Events', 'Rank', 'Team', 'Event', 'Points', 'Total Points', 'Gold', 'Silver', 'Bronze'];
+    foreach ($overall['by_division'] ?? [] as $group) {
+        $labels = $group['sport_labels'] ?? [];
+        $eventCount = count($labels);
+        foreach ($group['standings'] as $r) {
+            if ($labels === []) {
+                $row = [
+                    $group['division_name'],
+                    0,
+                    $r['division_rank'] ?? $r['rank'],
+                    $r['team_name'],
+                    '',
+                    0,
+                    $r['total'],
+                    $r['gold'],
+                    $r['silver'],
+                    $r['bronze'],
+                ];
+                $rows[] = $row;
+                $htmlRows[] = $row;
+                continue;
+            }
+            foreach ($labels as $label) {
+                $row = [
+                    $group['division_name'],
+                    $eventCount,
+                    $r['division_rank'] ?? $r['rank'],
+                    $r['team_name'],
+                    $label,
+                    $r['sports'][$label] ?? 0,
+                    $r['total'],
+                    $r['gold'],
+                    $r['silver'],
+                    $r['bronze'],
+                ];
+                $rows[] = $row;
+                $htmlRows[] = $row;
+            }
         }
-        $row[] = $r['total'];
-        $row[] = $r['gold'];
-        $row[] = $r['silver'];
-        $row[] = $r['bronze'];
-        $rows[] = $row;
-        $htmlRows[] = $row;
     }
 } elseif ($type === 'standings') {
     $sid = $sportId !== '' ? (int) $sportId : ((int) ($sports[0]['id'] ?? 0));
@@ -161,12 +189,32 @@ if ($type === 'athletes') {
     }
     $blocks = $sid ? computeSportStandings($sid) : [];
     $block = $blocks[$sid] ?? null;
-    $headers = ['Rank', 'Placement', 'Team', 'Wins', 'Losses', 'Draws', 'Match Pts', 'Event Pts', 'Diff'];
+    $headers = ['Division', 'Rank', 'Placement', 'Team', 'Wins', 'Losses', 'Draws', 'Match Pts', 'Event Pts', 'Diff'];
     if ($block) {
-        foreach ($block['standings'] as $r) {
-            if ($r['played'] === 0 && empty($r['manual_rank'])) continue;
-            $rows[] = [$r['rank'], $r['placement_label'] ?: '', $r['team_name'], $r['wins'], $r['losses'], $r['draws'], $r['points'], $r['placement_points'], $r['diff']];
-            $htmlRows[] = $rows[count($rows) - 1];
+        $divBlocks = $block['divisions'] ?? [[
+            'division_name' => 'All teams',
+            'standings' => $block['standings'] ?? [],
+        ]];
+        foreach ($divBlocks as $divBlock) {
+            foreach ($divBlock['standings'] as $r) {
+                if ($r['played'] === 0 && empty($r['manual_rank'])) {
+                    continue;
+                }
+                $row = [
+                    $divBlock['division_name'],
+                    $r['rank'] >= 1000 ? '' : $r['rank'],
+                    $r['placement_label'] ?: '',
+                    $r['team_name'],
+                    $r['wins'],
+                    $r['losses'],
+                    $r['draws'],
+                    $r['points'],
+                    $r['placement_points'],
+                    $r['diff'],
+                ];
+                $rows[] = $row;
+                $htmlRows[] = $row;
+            }
         }
     }
 }

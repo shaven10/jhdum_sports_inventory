@@ -367,6 +367,15 @@ a.stat-card-link:focus-visible .stat-card {
     opacity: 0.8;
 }
 
+.login-submit-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    text-align: center;
+    width: 100%;
+}
+
 .table-responsive {
     border-radius: 12px;
     overflow-x: auto;
@@ -1172,6 +1181,17 @@ a.stat-card-link:focus-visible .stat-card {
         font-size: 2.25rem !important;
     }
 
+    .login-submit-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        width: 100%;
+        font-size: 1.05rem;
+        padding-top: 0.7rem;
+        padding-bottom: 0.7rem;
+    }
+
     .footer-text {
         font-size: 0.75rem;
         line-height: 1.4;
@@ -1422,5 +1442,586 @@ a.stat-card-link:focus-visible .stat-card {
     }
     .report-brand-rule {
         border-top: 2px solid #000 !important;
+    }
+}
+
+/* Register athlete — clearer stepped form */
+.athlete-register-page .athlete-register-card {
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    overflow: hidden;
+}
+
+.athlete-register-page .athlete-register-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.85rem;
+    background: var(--theme-card-bg, #fff);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+    padding: 1rem 1.15rem;
+}
+
+.athlete-register-page .step-badge {
+    flex-shrink: 0;
+    min-width: 2rem;
+    height: 2rem;
+    padding: 0 0.45rem;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #fff;
+    background: var(--theme-primary, var(--jhcsc-primary));
+}
+
+.athlete-register-page .athlete-gender-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.athlete-register-page .athlete-gender-group .btn {
+    min-width: 5.5rem;
+}
+
+.athlete-register-page .athlete-register-side {
+    top: 5.5rem;
+    z-index: 2;
+}
+
+.athlete-register-page .athlete-photo-col {
+    flex: 0 0 auto;
+    width: 9.5rem;
+    max-width: 100%;
+}
+
+.athlete-register-page .athlete-photo-drop {
+    display: block;
+    cursor: pointer;
+    margin: 0;
+}
+
+.athlete-register-page .athlete-photo-preview {
+    aspect-ratio: 3 / 4;
+    width: 100%;
+    border-radius: 0.75rem;
+    border: 2px dashed rgba(0, 0, 0, 0.18);
+    background: var(--theme-body-bg, #f3f7f4);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    overflow: hidden;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.athlete-register-page .athlete-photo-drop:hover .athlete-photo-preview,
+.athlete-register-page .athlete-photo-drop.is-dragover .athlete-photo-preview {
+    border-color: var(--theme-primary, var(--jhcsc-primary));
+    background: color-mix(in srgb, var(--theme-primary, #1b5e20) 8%, #fff);
+}
+
+.athlete-register-page .athlete-photo-preview.has-image {
+    border-style: solid;
+    border-color: transparent;
+}
+
+.athlete-register-page .athlete-photo-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.athlete-register-page .athlete-photo-placeholder-icon {
+    font-size: 2rem;
+    color: var(--theme-primary, var(--jhcsc-primary));
+    opacity: 0.75;
+}
+
+.athlete-register-page .athlete-photo-hint {
+    font-size: 0.85rem;
+    color: var(--theme-text, #2c3e50);
+    opacity: 0.7;
+    text-align: center;
+    padding: 0 0.75rem;
+}
+
+.athlete-register-page .athlete-register-actions .btn-lg {
+    font-weight: 600;
+}
+
+@media (max-width: 991.98px) {
+    .athlete-register-page .athlete-register-side {
+        position: static;
+    }
+}
+
+@media (max-width: 575.98px) {
+    .athlete-register-page .athlete-photo-col {
+        width: 100%;
+    }
+
+    .athlete-register-page .athlete-photo-preview {
+        aspect-ratio: 1;
+        max-width: 11rem;
+        margin-inline: auto;
+    }
+}
+
+/* —— Public live rankings board —— */
+.live-board-page {
+    margin: 0;
+    min-height: 100vh;
+    background: #0f1f14;
+    color: #e8f0ea;
+    font-family: "Source Sans 3", "Segoe UI", sans-serif;
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--theme-primary, #1b5e20) 70%, #7a9a82)
+        color-mix(in srgb, #0f1f14 85%, var(--theme-primary, #1b5e20));
+}
+
+.live-board-page::-webkit-scrollbar,
+.live-board-page *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+.live-board-page::-webkit-scrollbar-track,
+.live-board-page *::-webkit-scrollbar-track {
+    background: color-mix(in srgb, #0f1f14 80%, var(--theme-primary, #1b5e20));
+    border-radius: 999px;
+}
+
+.live-board-page::-webkit-scrollbar-thumb,
+.live-board-page *::-webkit-scrollbar-thumb {
+    background: linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--theme-primary, #1b5e20) 75%, #9bbfa5),
+        color-mix(in srgb, var(--theme-secondary, #2e7d32) 70%, #0d2818)
+    );
+    border: 2px solid color-mix(in srgb, #0f1f14 75%, var(--theme-primary, #1b5e20));
+    border-radius: 999px;
+}
+
+.live-board-page::-webkit-scrollbar-thumb:hover,
+.live-board-page *::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--theme-primary, #1b5e20) 55%, #c5e0cd),
+        color-mix(in srgb, var(--theme-accent, #c62828) 35%, var(--theme-secondary, #2e7d32))
+    );
+}
+
+.live-board-page::-webkit-scrollbar-corner,
+.live-board-page *::-webkit-scrollbar-corner {
+    background: #0f1f14;
+}
+
+.live-table-wrap,
+.live-tabs {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--theme-primary, #1b5e20) 65%, #8fb094)
+        rgba(255, 255, 255, 0.06);
+}
+
+.live-board {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.live-board-hero {
+    position: relative;
+    isolation: isolate;
+    min-height: min(72vh, 640px);
+    display: flex;
+    align-items: flex-end;
+    padding: clamp(1.5rem, 4vw, 3rem);
+    overflow: hidden;
+}
+
+.live-board-hero__bg {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background:
+        linear-gradient(180deg, rgba(8, 18, 12, 0.25) 0%, rgba(8, 18, 12, 0.88) 70%, #0f1f14 100%),
+        radial-gradient(ellipse 80% 60% at 70% 20%, rgba(198, 40, 40, 0.35), transparent 55%),
+        linear-gradient(125deg, var(--theme-primary, #1b5e20) 0%, #0d2818 48%, #1a2e22 100%);
+}
+
+.live-board-hero__bg::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    opacity: 0.18;
+    background-image:
+        repeating-linear-gradient(
+            -18deg,
+            transparent 0,
+            transparent 14px,
+            rgba(255, 255, 255, 0.04) 14px,
+            rgba(255, 255, 255, 0.04) 15px
+        );
+}
+
+.live-board-hero__inner {
+    width: 100%;
+    margin: 0;
+    animation: liveFadeUp 0.7s ease-out both;
+}
+
+.live-board-brand {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.live-board-brand > div {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.live-board-logo {
+    width: clamp(4.5rem, 10vw, 6.5rem);
+    height: clamp(4.5rem, 10vw, 6.5rem);
+    object-fit: contain;
+    filter: drop-shadow(0 8px 20px rgba(0, 0, 0, 0.35));
+}
+
+.live-board-campus {
+    margin: 0;
+    font-size: 0.95rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    opacity: 0.85;
+}
+
+.live-board-title {
+    margin: 0.15rem 0 0;
+    font-family: Oswald, Impact, sans-serif;
+    font-weight: 700;
+    font-size: clamp(1.15rem, 3.67vw, 3.6rem);
+    line-height: 1;
+    letter-spacing: 0.01em;
+    text-transform: uppercase;
+    width: 100%;
+    overflow-wrap: break-word;
+}
+
+.live-board-lead {
+    max-width: 34rem;
+    margin: 0 0 1.25rem;
+    font-size: clamp(1rem, 2.2vw, 1.2rem);
+    opacity: 0.9;
+}
+
+.live-board-cta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-bottom: 1.25rem;
+}
+
+.live-board-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.75rem;
+    font-size: 0.95rem;
+    opacity: 0.92;
+}
+
+.live-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.2rem 0.65rem;
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 999px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+}
+
+.live-dot {
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 50%;
+    background: #7cfc9a;
+    box-shadow: 0 0 0 0 rgba(124, 252, 154, 0.7);
+    animation: livePulse 1.6s ease-out infinite;
+}
+
+.live-pill.is-stale .live-dot {
+    background: #ffc107;
+    animation: none;
+}
+
+.live-meta-sep {
+    opacity: 0.5;
+}
+
+.live-board-main {
+    width: 100%;
+    margin: 0;
+    padding: 1.5rem clamp(1rem, 3vw, 2rem) 2.5rem;
+    flex: 1;
+}
+
+.live-tabs {
+    display: flex;
+    gap: 0.35rem;
+    overflow-x: auto;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    padding-bottom: 0.35rem;
+}
+
+.live-tab {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: rgba(232, 240, 234, 0.7);
+    font-family: Oswald, Impact, sans-serif;
+    font-size: 1.05rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 0.65rem 1rem;
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    white-space: nowrap;
+    transition: color 0.2s ease, border-color 0.2s ease;
+}
+
+.live-tab:hover {
+    color: #fff;
+}
+
+.live-tab.active {
+    color: #fff;
+    border-bottom-color: var(--theme-accent, #c62828);
+}
+
+.live-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    gap: 0.75rem 1rem;
+    margin-bottom: 1.25rem;
+}
+
+.live-toolbar-label {
+    display: block;
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    opacity: 0.7;
+    margin-bottom: 0.25rem;
+}
+
+.live-select {
+    min-width: 12rem;
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.18);
+    color: #e8f0ea;
+}
+
+.live-select option {
+    color: #1b2e1d;
+}
+
+.live-event-filter {
+    display: flex;
+    flex-direction: column;
+}
+
+.live-loading,
+.live-empty,
+.live-alert {
+    padding: 1rem 0;
+    opacity: 0.85;
+}
+
+.live-alert {
+    color: #ffd27a;
+}
+
+.live-block {
+    margin-bottom: 1.75rem;
+    animation: liveFadeUp 0.45s ease-out both;
+}
+
+.live-block-head h2 {
+    font-family: Oswald, Impact, sans-serif;
+    font-size: clamp(1.4rem, 3vw, 1.9rem);
+    margin: 0 0 0.25rem;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+}
+
+.live-block-head p {
+    margin: 0 0 0.85rem;
+    opacity: 0.75;
+    font-size: 0.95rem;
+}
+
+.live-leader {
+    margin-left: 0.35rem;
+}
+
+.live-subblock {
+    margin-bottom: 1.25rem;
+}
+
+.live-subblock h3 {
+    font-size: 1.05rem;
+    margin: 0 0 0.5rem;
+    opacity: 0.9;
+}
+
+.live-chip {
+    display: inline-block;
+    font-size: 0.7rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    padding: 0.15rem 0.45rem;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 4px;
+    vertical-align: middle;
+}
+
+.live-table-wrap {
+    overflow-x: auto;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.live-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.95rem;
+    min-width: 520px;
+}
+
+.live-table th,
+.live-table td {
+    padding: 0.65rem 0.75rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    text-align: left;
+    white-space: nowrap;
+}
+
+.live-table th {
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    opacity: 0.75;
+    font-weight: 700;
+    background: rgba(0, 0, 0, 0.2);
+}
+
+.live-table tbody tr:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.live-rank {
+    font-family: Oswald, Impact, sans-serif;
+    font-weight: 600;
+    width: 2.5rem;
+}
+
+.live-strong {
+    font-weight: 700;
+}
+
+.live-team {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.live-team i {
+    width: 0.65rem;
+    height: 0.65rem;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+}
+
+.live-medal-col--gold { color: #f6d860; font-weight: 700; }
+.live-medal-col--silver { color: #d0d5db; font-weight: 700; }
+.live-medal-col--bronze { color: #d88a4a; font-weight: 700; }
+
+.live-medal {
+    display: inline-block;
+    padding: 0.1rem 0.45rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.live-medal--gold { background: rgba(246, 216, 96, 0.2); color: #f6d860; }
+.live-medal--silver { background: rgba(208, 213, 219, 0.18); color: #d0d5db; }
+.live-medal--bronze { background: rgba(216, 138, 74, 0.2); color: #e0a066; }
+
+.live-totals td {
+    background: rgba(0, 0, 0, 0.18);
+    font-weight: 700;
+}
+
+.live-empty-cell {
+    opacity: 0.65;
+    text-align: center !important;
+}
+
+.live-board-footer {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding: 1rem clamp(1rem, 3vw, 2rem);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 0.85rem;
+    opacity: 0.65;
+}
+
+@keyframes livePulse {
+    0% { box-shadow: 0 0 0 0 rgba(124, 252, 154, 0.55); }
+    70% { box-shadow: 0 0 0 10px rgba(124, 252, 154, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(124, 252, 154, 0); }
+}
+
+@keyframes liveFadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 575.98px) {
+    .live-board-hero {
+        min-height: auto;
+        padding-top: 2.5rem;
+        align-items: flex-start;
+    }
+
+    .live-board-cta .btn {
+        width: 100%;
+    }
+
+    .live-select {
+        min-width: 100%;
+        width: 100%;
+    }
+
+    .live-toolbar {
+        flex-direction: column;
+        align-items: stretch;
     }
 }

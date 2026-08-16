@@ -143,17 +143,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     $studentId = post('student_id');
-    $firstName = post('first_name');
-    $lastName = post('last_name');
+    $firstName = formatAthleteName(trim(post('first_name')));
+    $lastName = formatAthleteName(trim(post('last_name')));
     $gender = post('gender', 'male');
     $birthdate = post('birthdate') ?: null;
     $department = post('department');
     $yearLevel = post('year_level');
     $allowedCourses = athleteCourseOptions();
-    if ($department !== '' && !in_array($department, $allowedCourses, true) && $department !== (string) ($athlete['department'] ?? '')) {
+    if ($department === '') {
+        $errors[] = 'Course / program is required.';
+    } elseif (!in_array($department, $allowedCourses, true) && $department !== (string) ($athlete['department'] ?? '')) {
         $errors[] = 'Please select a valid course.';
     }
-    if ($yearLevel !== '' && !in_array($yearLevel, athleteYearLevelOptions(), true) && $yearLevel !== (string) ($athlete['year_level'] ?? '')) {
+    if ($yearLevel === '') {
+        $errors[] = 'Year level is required.';
+    } elseif (!in_array($yearLevel, athleteYearLevelOptions(), true) && $yearLevel !== (string) ($athlete['year_level'] ?? '')) {
         $errors[] = 'Please select a valid year level.';
     }
     $teamId = (int) post('team_id') ?: null;
@@ -246,11 +250,11 @@ require __DIR__ . '/../_season_bar.php';
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">First Name *</label>
-                            <input type="text" name="first_name" class="form-control" required value="<?= sanitize($athlete['first_name']) ?>">
+                            <input type="text" name="first_name" class="form-control text-uppercase" required style="text-transform: uppercase;" value="<?= sanitize($athlete['first_name']) ?>">
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">Last Name *</label>
-                            <input type="text" name="last_name" class="form-control" required value="<?= sanitize($athlete['last_name']) ?>">
+                            <input type="text" name="last_name" class="form-control text-uppercase" required style="text-transform: uppercase;" value="<?= sanitize($athlete['last_name']) ?>">
                         </div>
                         <div class="col-md-3">
                             <label class="form-label">Gender</label>
@@ -265,8 +269,8 @@ require __DIR__ . '/../_season_bar.php';
                             <input type="date" name="birthdate" class="form-control" value="<?= sanitize($athlete['birthdate'] ?? '') ?>">
                         </div>
                         <div class="col-md-3">
-                            <label class="form-label">Year Level</label>
-                            <select name="year_level" class="form-select">
+                            <label class="form-label">Year Level <span class="text-danger">*</span></label>
+                            <select name="year_level" class="form-select" required>
                                 <option value="">Select year</option>
                                 <?php
                                 $currentYear = (string) ($athlete['year_level'] ?? '');
@@ -294,8 +298,8 @@ require __DIR__ . '/../_season_bar.php';
                             </select>
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label">Course</label>
-                            <?= renderAthleteCourseSelect((string) ($athlete['department'] ?? '')) ?>
+                            <label class="form-label">Course <span class="text-danger">*</span></label>
+                            <?= renderAthleteCourseSelect((string) ($athlete['department'] ?? ''), 'department', 'department', true) ?>
                         </div>
                         <div class="col-md-3">
                             <label class="form-label">Email</label>

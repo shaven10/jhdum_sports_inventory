@@ -69,12 +69,16 @@ $pageTitle = 'Login';
                         <input type="password" class="form-control" id="password" name="password" required>
                     </div>
                 </div>
-                <button type="submit" class="btn btn-primary w-100 py-2">
+                <button type="submit" class="btn btn-primary w-100 py-2 login-submit-btn">
                     <i class="bi bi-box-arrow-in-right"></i> Login
                 </button>
             </form>
 
-       
+            <p class="text-center mt-3 mb-0">
+                <a href="<?= BASE_URL ?>/live.php" class="text-decoration-none">
+                    <i class="bi bi-broadcast"></i> View live rankings
+                </a>
+            </p>
         </div>
     </div>
 </div>

@@ -1,4 +1,4 @@
--- J.H. Cerilles State College — Sports Development MIS
+-- J.H. Cerilles State College — Sports Development IMIS
 -- Database schema (inventory + intramurals)
 -- Database Schema
 
@@ -520,18 +520,35 @@ CREATE TABLE IF NOT EXISTS intramural_event_ranks (
     id INT AUTO_INCREMENT PRIMARY KEY,
     season_id INT NOT NULL,
     sport_id INT NOT NULL,
+    division_id INT NOT NULL DEFAULT 0,
     team_id INT NOT NULL,
     place_rank INT NOT NULL,
     notes VARCHAR(255) DEFAULT NULL,
     created_by INT DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY uq_event_rank_team (season_id, sport_id, team_id),
-    UNIQUE KEY uq_event_rank_place (season_id, sport_id, place_rank),
+    UNIQUE KEY uq_event_rank_team (season_id, sport_id, division_id, team_id),
+    UNIQUE KEY uq_event_rank_place (season_id, sport_id, division_id, place_rank),
     FOREIGN KEY (season_id) REFERENCES intramural_seasons(id) ON DELETE CASCADE,
     FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE,
     FOREIGN KEY (team_id) REFERENCES intramural_teams(id) ON DELETE CASCADE,
     FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+-- Admin can activate Event Rankings for tournament managers per event/season
+CREATE TABLE IF NOT EXISTS intramural_event_tm_ranking (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    season_id INT NOT NULL,
+    sport_id INT NOT NULL,
+    enabled_at DATETIME DEFAULT NULL,
+    enabled_by INT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_event_tm_ranking (season_id, sport_id),
+    INDEX idx_event_tm_ranking_sport (sport_id),
+    FOREIGN KEY (season_id) REFERENCES intramural_seasons(id) ON DELETE CASCADE,
+    FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE,
+    FOREIGN KEY (enabled_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
 INSERT INTO intramural_seasons (name, year_label, start_date, end_date, description, is_active) VALUES

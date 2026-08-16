@@ -286,7 +286,7 @@ $index = 0;
 foreach ($athletes as $athlete):
     $index++;
     $sportName = (string) ($athlete['sport_name'] ?? '');
-    $athleteName = athleteFullName($athlete, false);
+    $athleteName = athleteFullName($athlete);
     $place = (int) $athlete['certificate_place'];
     $namedPlaces = placementLabels();
     if (isset($namedPlaces[$place])) {

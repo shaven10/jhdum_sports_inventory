@@ -331,6 +331,38 @@ function ensureEventResultsLockTable(): void
     ) ENGINE=InnoDB");
 }
 
+/** Per-event: admin can let tournament managers use Event Rankings for that sport. */
+function ensureTmRankingAccessTable(): void
+{
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    $db = getDB();
+    $stmt = $db->prepare('SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?');
+    $stmt->execute(['intramural_event_tm_ranking']);
+    if ((int) $stmt->fetchColumn() > 0) {
+        return;
+    }
+
+    $db->exec("CREATE TABLE intramural_event_tm_ranking (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        season_id INT NOT NULL,
+        sport_id INT NOT NULL,
+        enabled_at DATETIME DEFAULT NULL,
+        enabled_by INT DEFAULT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_event_tm_ranking (season_id, sport_id),
+        INDEX idx_event_tm_ranking_sport (sport_id),
+        FOREIGN KEY (season_id) REFERENCES intramural_seasons(id) ON DELETE CASCADE,
+        FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE,
+        FOREIGN KEY (enabled_by) REFERENCES users(id) ON DELETE SET NULL
+    ) ENGINE=InnoDB");
+}
+
 /** Ensure division tables and team.division_id for HS/College (or custom) groupings. */
 function ensureIntramuralDivisionsSchema(): void
 {
@@ -468,22 +500,32 @@ function saveDivisionTeams(int $divisionId, array $teamIds): void
 /**
  * Teams with no division may play any event. Teams in a division may only play that division's events.
  */
+function getTeamDivisionId(int $teamId): ?int
+{
+    ensureIntramuralDivisionsSchema();
+    if ($teamId <= 0) {
+        return null;
+    }
+    $stmt = getDB()->prepare('SELECT division_id FROM intramural_teams WHERE id = ?');
+    $stmt->execute([$teamId]);
+    $divisionId = $stmt->fetchColumn();
+    if ($divisionId === false || $divisionId === null || $divisionId === '') {
+        return null;
+    }
+    return (int) $divisionId;
+}
+
 function teamCanPlaySport(int $teamId, int $sportId): bool
 {
     ensureIntramuralDivisionsSchema();
     if ($teamId <= 0 || $sportId <= 0) {
         return false;
     }
-    $stmt = getDB()->prepare('SELECT division_id FROM intramural_teams WHERE id = ?');
-    $stmt->execute([$teamId]);
-    $divisionId = $stmt->fetchColumn();
-    if ($divisionId === false) {
-        return false;
-    }
-    if ($divisionId === null || $divisionId === '') {
+    $divisionId = getTeamDivisionId($teamId);
+    if ($divisionId === null) {
         return true;
     }
-    return in_array($sportId, getDivisionSportIds((int) $divisionId), true);
+    return in_array($sportId, getDivisionSportIds($divisionId), true);
 }
 
 /**
@@ -3220,6 +3262,100 @@ function unlockEventResults(int $sportId, int $seasonId): bool
     return true;
 }
 
+function isTmRankingEnabled(int $sportId, ?int $seasonId = null): bool
+{
+    ensureTmRankingAccessTable();
+    $seasonId = $seasonId ?? getCurrentSeasonId();
+    if ($sportId <= 0 || !$seasonId) {
+        return false;
+    }
+
+    $db = getDB();
+    $stmt = $db->prepare('SELECT 1 FROM intramural_event_tm_ranking WHERE season_id = ? AND sport_id = ?');
+    $stmt->execute([(int) $seasonId, $sportId]);
+    return (bool) $stmt->fetchColumn();
+}
+
+/**
+ * @return list<int>
+ */
+function getTmRankingEnabledSportIds(?int $seasonId = null): array
+{
+    ensureTmRankingAccessTable();
+    $seasonId = $seasonId ?? getCurrentSeasonId();
+    if (!$seasonId) {
+        return [];
+    }
+
+    $db = getDB();
+    $stmt = $db->prepare('SELECT sport_id FROM intramural_event_tm_ranking WHERE season_id = ?');
+    $stmt->execute([(int) $seasonId]);
+    return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
+}
+
+/**
+ * @return array<int, array{enabled_at:?string,enabled_by:?int,enabled_by_name:?string}>
+ */
+function getTmRankingAccessMap(?int $seasonId = null): array
+{
+    ensureTmRankingAccessTable();
+    $seasonId = $seasonId ?? getCurrentSeasonId();
+    if (!$seasonId) {
+        return [];
+    }
+
+    $db = getDB();
+    $stmt = $db->prepare('SELECT r.sport_id, r.enabled_at, r.enabled_by, u.first_name, u.last_name, u.username
+        FROM intramural_event_tm_ranking r
+        LEFT JOIN users u ON u.id = r.enabled_by
+        WHERE r.season_id = ?');
+    $stmt->execute([(int) $seasonId]);
+    $map = [];
+    foreach ($stmt->fetchAll() ?: [] as $row) {
+        $name = null;
+        if (!empty($row['enabled_by'])) {
+            $name = trim(($row['first_name'] ?? '') . ' ' . ($row['last_name'] ?? ''));
+            if ($name === '') {
+                $name = $row['username'] ?? null;
+            }
+        }
+        $map[(int) $row['sport_id']] = [
+            'enabled_at' => $row['enabled_at'] ?? null,
+            'enabled_by' => !empty($row['enabled_by']) ? (int) $row['enabled_by'] : null,
+            'enabled_by_name' => $name,
+        ];
+    }
+    return $map;
+}
+
+function enableTmRanking(int $sportId, int $seasonId, int $userId): bool
+{
+    ensureTmRankingAccessTable();
+    if ($sportId <= 0 || !getSeasonById($seasonId)) {
+        return false;
+    }
+
+    $db = getDB();
+    $stmt = $db->prepare('INSERT INTO intramural_event_tm_ranking (season_id, sport_id, enabled_at, enabled_by)
+        VALUES (?, ?, NOW(), ?)
+        ON DUPLICATE KEY UPDATE enabled_at = NOW(), enabled_by = VALUES(enabled_by)');
+    $stmt->execute([$seasonId, $sportId, $userId]);
+    return true;
+}
+
+function disableTmRanking(int $sportId, int $seasonId): bool
+{
+    ensureTmRankingAccessTable();
+    if ($sportId <= 0 || !$seasonId) {
+        return false;
+    }
+
+    $db = getDB();
+    $stmt = $db->prepare('DELETE FROM intramural_event_tm_ranking WHERE season_id = ? AND sport_id = ?');
+    $stmt->execute([$seasonId, $sportId]);
+    return true;
+}
+
 /**
  * @return array{
  *   is_locked: bool,
@@ -4294,7 +4430,7 @@ function formatSchemePoints(array $scheme): string
     ]);
 }
 
-/** Manual per-event team ranks that feed medals and overall standing. */
+/** Manual per-event team ranks that feed medals and overall standing (scoped by division). */
 function ensureEventRanksTable(): void
 {
     static $checked = false;
@@ -4304,35 +4440,70 @@ function ensureEventRanksTable(): void
     $checked = true;
 
     $db = getDB();
-    $stmt = $db->prepare('SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?');
-    $stmt->execute(['intramural_event_ranks']);
-    if ((int) $stmt->fetchColumn() > 0) {
+    $tableStmt = $db->prepare('SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?');
+    $colStmt = $db->prepare('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
+    $tableStmt->execute(['intramural_event_ranks']);
+    if ((int) $tableStmt->fetchColumn() === 0) {
+        $db->exec("CREATE TABLE intramural_event_ranks (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            season_id INT NOT NULL,
+            sport_id INT NOT NULL,
+            division_id INT NOT NULL DEFAULT 0,
+            team_id INT NOT NULL,
+            place_rank INT NOT NULL,
+            notes VARCHAR(255) DEFAULT NULL,
+            created_by INT DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_event_rank_team (season_id, sport_id, division_id, team_id),
+            UNIQUE KEY uq_event_rank_place (season_id, sport_id, division_id, place_rank),
+            FOREIGN KEY (season_id) REFERENCES intramural_seasons(id) ON DELETE CASCADE,
+            FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE,
+            FOREIGN KEY (team_id) REFERENCES intramural_teams(id) ON DELETE CASCADE,
+            FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB");
         return;
     }
 
-    $db->exec("CREATE TABLE intramural_event_ranks (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        season_id INT NOT NULL,
-        sport_id INT NOT NULL,
-        team_id INT NOT NULL,
-        place_rank INT NOT NULL,
-        notes VARCHAR(255) DEFAULT NULL,
-        created_by INT DEFAULT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        UNIQUE KEY uq_event_rank_team (season_id, sport_id, team_id),
-        UNIQUE KEY uq_event_rank_place (season_id, sport_id, place_rank),
-        FOREIGN KEY (season_id) REFERENCES intramural_seasons(id) ON DELETE CASCADE,
-        FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE,
-        FOREIGN KEY (team_id) REFERENCES intramural_teams(id) ON DELETE CASCADE,
-        FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
-    ) ENGINE=InnoDB");
+    $colStmt->execute(['intramural_event_ranks', 'division_id']);
+    if ((int) $colStmt->fetchColumn() === 0) {
+        $db->exec('ALTER TABLE intramural_event_ranks ADD COLUMN division_id INT NOT NULL DEFAULT 0 AFTER sport_id');
+        try {
+            $db->exec('ALTER TABLE intramural_event_ranks DROP INDEX uq_event_rank_team');
+        } catch (Throwable $e) {
+        }
+        try {
+            $db->exec('ALTER TABLE intramural_event_ranks DROP INDEX uq_event_rank_place');
+        } catch (Throwable $e) {
+        }
+        try {
+            $db->exec('ALTER TABLE intramural_event_ranks ADD UNIQUE KEY uq_event_rank_team (season_id, sport_id, division_id, team_id)');
+            $db->exec('ALTER TABLE intramural_event_ranks ADD UNIQUE KEY uq_event_rank_place (season_id, sport_id, division_id, place_rank)');
+        } catch (Throwable $e) {
+        }
+        // Backfill division from each team's current division assignment.
+        try {
+            $db->exec('UPDATE intramural_event_ranks r
+                JOIN intramural_teams t ON t.id = r.team_id
+                SET r.division_id = COALESCE(t.division_id, 0)
+                WHERE r.division_id = 0');
+        } catch (Throwable $e) {
+        }
+    }
 }
 
 /**
- * @return array<int, array{team_id:int,place_rank:int,notes:?string}>
+ * Normalize division key for ranks/matches (0 = unassigned / no division).
  */
-function getEventRanks(int $sportId, int $seasonId): array
+function eventRankDivisionKey(?int $divisionId): int
+{
+    return ($divisionId !== null && $divisionId > 0) ? $divisionId : 0;
+}
+
+/**
+ * @return array<int, array{team_id:int,place_rank:int,notes:?string,division_id:int}>
+ */
+function getEventRanks(int $sportId, int $seasonId, ?int $divisionId = null): array
 {
     ensureEventRanksTable();
     if ($sportId <= 0 || $seasonId <= 0) {
@@ -4340,50 +4511,74 @@ function getEventRanks(int $sportId, int $seasonId): array
     }
 
     $db = getDB();
-    $stmt = $db->prepare('SELECT team_id, place_rank, notes FROM intramural_event_ranks
-        WHERE sport_id = ? AND season_id = ? ORDER BY place_rank ASC');
-    $stmt->execute([$sportId, $seasonId]);
+    if ($divisionId === null) {
+        $stmt = $db->prepare('SELECT team_id, place_rank, notes, division_id FROM intramural_event_ranks
+            WHERE sport_id = ? AND season_id = ? ORDER BY division_id ASC, place_rank ASC');
+        $stmt->execute([$sportId, $seasonId]);
+    } else {
+        $divKey = eventRankDivisionKey($divisionId);
+        $stmt = $db->prepare('SELECT team_id, place_rank, notes, division_id FROM intramural_event_ranks
+            WHERE sport_id = ? AND season_id = ? AND division_id = ? ORDER BY place_rank ASC');
+        $stmt->execute([$sportId, $seasonId, $divKey]);
+    }
+
     $out = [];
     foreach ($stmt->fetchAll() as $row) {
         $out[(int) $row['team_id']] = [
             'team_id' => (int) $row['team_id'],
             'place_rank' => (int) $row['place_rank'],
             'notes' => $row['notes'] ?? null,
+            'division_id' => (int) ($row['division_id'] ?? 0),
         ];
     }
 
     return $out;
 }
 
-function eventHasManualRanks(int $sportId, int $seasonId): bool
+function eventHasManualRanks(int $sportId, int $seasonId, ?int $divisionId = null): bool
 {
-    return getEventRanks($sportId, $seasonId) !== [];
+    return getEventRanks($sportId, $seasonId, $divisionId) !== [];
 }
 
 /**
- * Whether the event already has a match schedule (any non-cancelled fixture).
- * Those events use match results for placement instead of manual ranks.
+ * Whether the event (or one division of it) already has a match schedule.
+ * Those brackets use match results for placement instead of manual ranks.
  */
-function eventHasScheduledMatches(int $sportId, int $seasonId): bool
+function eventHasScheduledMatches(int $sportId, int $seasonId, ?int $divisionId = null): bool
 {
     if ($sportId <= 0 || $seasonId <= 0) {
         return false;
     }
 
+    ensureMatchDivisionColumn();
     $db = getDB();
-    $stmt = $db->prepare("SELECT COUNT(*) FROM intramural_matches
-        WHERE sport_id = ? AND season_id = ? AND status <> 'cancelled'");
-    $stmt->execute([$sportId, $seasonId]);
+    if ($divisionId === null) {
+        $stmt = $db->prepare("SELECT COUNT(*) FROM intramural_matches
+            WHERE sport_id = ? AND season_id = ? AND status <> 'cancelled'");
+        $stmt->execute([$sportId, $seasonId]);
+    } else {
+        $divKey = eventRankDivisionKey($divisionId);
+        if ($divKey === 0) {
+            $stmt = $db->prepare("SELECT COUNT(*) FROM intramural_matches
+                WHERE sport_id = ? AND season_id = ? AND status <> 'cancelled'
+                  AND (division_id IS NULL OR division_id = 0)");
+            $stmt->execute([$sportId, $seasonId]);
+        } else {
+            $stmt = $db->prepare("SELECT COUNT(*) FROM intramural_matches
+                WHERE sport_id = ? AND season_id = ? AND status <> 'cancelled' AND division_id = ?");
+            $stmt->execute([$sportId, $seasonId, $divKey]);
+        }
+    }
 
     return (int) $stmt->fetchColumn() > 0;
 }
 
 /**
- * Team IDs that belong in the event ranking UI (roster first, else all active teams).
+ * Team IDs that belong in the event ranking UI (roster first, else eligible houses).
  *
  * @return list<int>
  */
-function getEventParticipatingTeamIds(int $sportId, int $seasonId): array
+function getEventParticipatingTeamIds(int $sportId, int $seasonId, ?int $divisionId = null): array
 {
     $db = getDB();
     $ids = [];
@@ -4392,7 +4587,7 @@ function getEventParticipatingTeamIds(int $sportId, int $seasonId): array
         $stmt->execute([$sportId, $seasonId]);
         $ids = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
     }
-    foreach (getEventRanks($sportId, $seasonId) as $tid => $_row) {
+    foreach (getEventRanks($sportId, $seasonId, $divisionId) as $tid => $_row) {
         if (!in_array((int) $tid, $ids, true)) {
             $ids[] = (int) $tid;
         }
@@ -4403,24 +4598,39 @@ function getEventParticipatingTeamIds(int $sportId, int $seasonId): array
         $ids = array_values(array_filter($ids, static fn($id) => teamCanPlaySport((int) $id, $sportId)));
     }
 
+    if ($divisionId !== null) {
+        $divKey = eventRankDivisionKey($divisionId);
+        $filtered = [];
+        foreach ($ids as $tid) {
+            $teamDiv = getTeamDivisionId((int) $tid);
+            $teamKey = eventRankDivisionKey($teamDiv);
+            if ($teamKey === $divKey) {
+                $filtered[] = (int) $tid;
+            }
+        }
+        $ids = $filtered;
+    }
+
     return $ids;
 }
 
 /**
- * Save official event ranks. Empty/zero rank removes that team. Duplicate places are rejected.
+ * Save official event ranks for one division bracket.
+ * Empty/zero rank removes that team. Duplicate places within the division are rejected.
  *
  * @param array<int, int> $ranksByTeam team_id => place_rank (0 = clear)
  * @return list<string> validation errors
  */
-function saveEventRanks(int $sportId, int $seasonId, array $ranksByTeam, ?int $userId = null): array
+function saveEventRanks(int $sportId, int $seasonId, array $ranksByTeam, ?int $userId = null, ?int $divisionId = 0): array
 {
     ensureEventRanksTable();
+    $divKey = eventRankDivisionKey($divisionId);
     $errors = [];
     if ($sportId <= 0 || $seasonId <= 0) {
         return ['Select a season and event before saving ranks.'];
     }
-    if (eventHasScheduledMatches($sportId, $seasonId)) {
-        return ['Manual ranking is not allowed for events that already have scheduled matches. Placement follows match results.'];
+    if (eventHasScheduledMatches($sportId, $seasonId, $divKey)) {
+        return ['Manual ranking is not allowed for this division while it has scheduled matches. Placement follows match results.'];
     }
 
     $clean = [];
@@ -4435,8 +4645,13 @@ function saveEventRanks(int $sportId, int $seasonId, array $ranksByTeam, ?int $u
             $errors[] = 'Rank must be between 1 and 99.';
             continue;
         }
+        $teamDiv = eventRankDivisionKey(getTeamDivisionId($teamId));
+        if ($teamDiv !== $divKey) {
+            $errors[] = 'Team does not belong to the selected division.';
+            continue;
+        }
         if (isset($usedPlaces[$place])) {
-            $errors[] = 'Each place can only be assigned to one team (duplicate rank ' . $place . ').';
+            $errors[] = 'Each place can only be assigned to one team in this division (duplicate rank ' . $place . ').';
             continue;
         }
         $usedPlaces[$place] = $teamId;
@@ -4450,11 +4665,11 @@ function saveEventRanks(int $sportId, int $seasonId, array $ranksByTeam, ?int $u
     $db = getDB();
     $db->beginTransaction();
     try {
-        $db->prepare('DELETE FROM intramural_event_ranks WHERE sport_id = ? AND season_id = ?')
-            ->execute([$sportId, $seasonId]);
-        $insert = $db->prepare('INSERT INTO intramural_event_ranks (season_id, sport_id, team_id, place_rank, created_by) VALUES (?, ?, ?, ?, ?)');
+        $db->prepare('DELETE FROM intramural_event_ranks WHERE sport_id = ? AND season_id = ? AND division_id = ?')
+            ->execute([$sportId, $seasonId, $divKey]);
+        $insert = $db->prepare('INSERT INTO intramural_event_ranks (season_id, sport_id, division_id, team_id, place_rank, created_by) VALUES (?, ?, ?, ?, ?, ?)');
         foreach ($clean as $teamId => $place) {
-            $insert->execute([$seasonId, $sportId, $teamId, $place, $userId]);
+            $insert->execute([$seasonId, $sportId, $divKey, $teamId, $place, $userId]);
         }
         $db->commit();
     } catch (Throwable $e) {
@@ -4609,67 +4824,115 @@ function computeSportStandings(?int $sportId = null, ?int $seasonId = null): arr
 
         foreach ($standings as &$row) {
             $row['diff'] = $row['score_for'] - $row['score_against'];
+            $row['division_id'] = eventRankDivisionKey(getTeamDivisionId((int) $row['team_id']));
+            $div = $row['division_id'] > 0 ? getDivisionById($row['division_id']) : null;
+            $row['division_name'] = $div['name'] ?? ($row['division_id'] > 0 ? ('Division #' . $row['division_id']) : 'Unassigned');
         }
         unset($row);
-
-        $rows = array_values($standings);
-        usort($rows, function ($x, $y) {
-            if ($x['points'] !== $y['points']) {
-                return $y['points'] <=> $x['points'];
-            }
-            if ($x['wins'] !== $y['wins']) {
-                return $y['wins'] <=> $x['wins'];
-            }
-            if ($x['diff'] !== $y['diff']) {
-                return $y['diff'] <=> $x['diff'];
-            }
-            return $y['score_for'] <=> $x['score_for'];
-        });
 
         $manualRanks = $seasonId ? getEventRanks($sid, (int) $seasonId) : [];
-        if ($manualRanks && $seasonId && eventHasScheduledMatches($sid, (int) $seasonId)) {
-            $manualRanks = [];
-        }
-        $rank = 1;
-        foreach ($rows as &$row) {
-            $row['rank'] = $rank++;
-            $row['medal'] = null;
-            $row['placement_points'] = 0;
-            $row['placement_label'] = null;
-            $row['manual_rank'] = false;
-            if ($row['played'] > 0) {
-                applyEventPlacement($row, $row['rank'], $scheme, false);
+        if ($manualRanks && $seasonId) {
+            $usableManual = [];
+            foreach ($manualRanks as $tid => $rankRow) {
+                $divKey = (int) ($rankRow['division_id'] ?? eventRankDivisionKey(getTeamDivisionId((int) $tid)));
+                if (!eventHasScheduledMatches($sid, (int) $seasonId, $divKey)) {
+                    $usableManual[(int) $tid] = $rankRow;
+                }
             }
+            $manualRanks = $usableManual;
         }
-        unset($row);
 
-        if ($manualRanks) {
-            foreach ($rows as &$row) {
+        // Rank / place medals within each division separately.
+        $byDivision = [];
+        foreach ($standings as $row) {
+            $divKey = (int) ($row['division_id'] ?? 0);
+            $byDivision[$divKey][] = $row;
+        }
+        ksort($byDivision);
+
+        $flatRows = [];
+        $divisionBlocks = [];
+        $anyManual = false;
+
+        foreach ($byDivision as $divKey => $divRows) {
+            usort($divRows, static function ($x, $y) {
+                if ($x['points'] !== $y['points']) {
+                    return $y['points'] <=> $x['points'];
+                }
+                if ($x['wins'] !== $y['wins']) {
+                    return $y['wins'] <=> $x['wins'];
+                }
+                if ($x['diff'] !== $y['diff']) {
+                    return $y['diff'] <=> $x['diff'];
+                }
+                return $y['score_for'] <=> $x['score_for'];
+            });
+
+            $divManual = [];
+            foreach ($divRows as $row) {
                 $tid = (int) $row['team_id'];
                 if (isset($manualRanks[$tid])) {
-                    applyEventPlacement($row, (int) $manualRanks[$tid]['place_rank'], $scheme, true);
-                } else {
-                    $row['rank'] = 1000;
-                    $row['medal'] = null;
-                    $row['placement_points'] = 0;
-                    $row['placement_label'] = null;
-                    $row['manual_rank'] = false;
+                    $divManual[$tid] = $manualRanks[$tid];
+                }
+            }
+            if ($divManual) {
+                $anyManual = true;
+            }
+
+            $rank = 1;
+            foreach ($divRows as &$row) {
+                $row['rank'] = $rank++;
+                $row['medal'] = null;
+                $row['placement_points'] = 0;
+                $row['placement_label'] = null;
+                $row['manual_rank'] = false;
+                if ($row['played'] > 0) {
+                    applyEventPlacement($row, $row['rank'], $scheme, false);
                 }
             }
             unset($row);
-            usort($rows, static function ($x, $y) {
-                if ($x['rank'] !== $y['rank']) {
-                    return $x['rank'] <=> $y['rank'];
+
+            if ($divManual) {
+                foreach ($divRows as &$row) {
+                    $tid = (int) $row['team_id'];
+                    if (isset($divManual[$tid])) {
+                        applyEventPlacement($row, (int) $divManual[$tid]['place_rank'], $scheme, true);
+                    } elseif ((int) $row['played'] === 0) {
+                        $row['rank'] = 1000;
+                        $row['medal'] = null;
+                        $row['placement_points'] = 0;
+                        $row['placement_label'] = null;
+                        $row['manual_rank'] = false;
+                    }
                 }
-                return strcasecmp((string) $x['team_name'], (string) $y['team_name']);
-            });
+                unset($row);
+                usort($divRows, static function ($x, $y) {
+                    if ($x['rank'] !== $y['rank']) {
+                        return $x['rank'] <=> $y['rank'];
+                    }
+                    return strcasecmp((string) $x['team_name'], (string) $y['team_name']);
+                });
+            }
+
+            $divisionName = $divRows[0]['division_name'] ?? ($divKey > 0 ? ('Division #' . $divKey) : 'Unassigned');
+            $divisionBlocks[] = [
+                'division_id' => $divKey > 0 ? $divKey : null,
+                'division_key' => (int) $divKey,
+                'division_name' => $divisionName,
+                'standings' => $divRows,
+                'manual_ranks' => $divManual !== [],
+            ];
+            foreach ($divRows as $row) {
+                $flatRows[] = $row;
+            }
         }
 
         $result[$sid] = [
             'sport' => $sport,
             'scheme' => $scheme,
-            'standings' => $rows,
-            'manual_ranks' => $manualRanks !== [],
+            'standings' => $flatRows,
+            'divisions' => $divisionBlocks,
+            'manual_ranks' => $anyManual,
         ];
     }
 
@@ -4678,21 +4941,33 @@ function computeSportStandings(?int $sportId = null, ?int $seasonId = null): arr
 
 /**
  * Overall intramurals standing uses placement points from each event's point scheme.
+ * Also returns medal tally / breakdown grouped by division.
  */
 function computeOverallStandings(): array
 {
     $all = computeSportStandings(null);
     $db = getDB();
+    ensureIntramuralDivisionsSchema();
     $teams = $db->query('SELECT * FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll();
     $overall = [];
 
     foreach ($teams as $team) {
+        $divKey = eventRankDivisionKey(
+            isset($team['division_id']) && $team['division_id'] !== '' && $team['division_id'] !== null
+                ? (int) $team['division_id']
+                : null
+        );
+        $div = $divKey > 0 ? getDivisionById($divKey) : null;
         $overall[(int) $team['id']] = [
             'team_id' => (int) $team['id'],
             'team_name' => $team['name'],
             'short_name' => $team['short_name'] ?: $team['name'],
             'color' => $team['color'],
+            'division_id' => $divKey > 0 ? $divKey : null,
+            'division_key' => $divKey,
+            'division_name' => $div['name'] ?? ($divKey > 0 ? ('Division #' . $divKey) : 'Unassigned'),
             'sports' => [],
+            'sport_medals' => [],
             'total' => 0,
             'gold' => 0,
             'silver' => 0,
@@ -4700,8 +4975,13 @@ function computeOverallStandings(): array
         ];
     }
 
+    $sportLabels = [];
+    $sportIdByLabel = [];
     foreach ($all as $sid => $block) {
+        $sid = (int) $sid;
         $sportKey = sportLabel($block['sport']);
+        $sportLabels[] = $sportKey;
+        $sportIdByLabel[$sportKey] = $sid;
         foreach ($block['standings'] as $row) {
             $tid = $row['team_id'];
             if (!isset($overall[$tid])) {
@@ -4713,6 +4993,7 @@ function computeOverallStandings(): array
             }
             $pts = (int) $row['placement_points'];
             $overall[$tid]['sports'][$sportKey] = $pts;
+            $overall[$tid]['sport_medals'][$sportKey] = $row['medal'] ?? null;
             $overall[$tid]['total'] += $pts;
             if ($row['medal'] === 'gold') {
                 $overall[$tid]['gold']++;
@@ -4744,9 +5025,171 @@ function computeOverallStandings(): array
     }
     unset($row);
 
+    $byDivisionMap = [];
+    foreach ($rows as $row) {
+        $key = (int) ($row['division_key'] ?? 0);
+        if (!isset($byDivisionMap[$key])) {
+            $byDivisionMap[$key] = [
+                'division_id' => $row['division_id'] ?? null,
+                'division_key' => $key,
+                'division_name' => $row['division_name'] ?? 'Unassigned',
+                'standings' => [],
+            ];
+        }
+        $byDivisionMap[$key]['standings'][] = $row;
+    }
+    ksort($byDivisionMap);
+
+    /**
+     * Labels for events activated on a division (Admin → Divisions event list).
+     * Unassigned teams see every event.
+     *
+     * @return list<string>
+     */
+    $labelsForDivision = static function (int $divKey) use ($sportLabels, $sportIdByLabel): array {
+        if ($divKey <= 0) {
+            return $sportLabels;
+        }
+        $activatedIds = getDivisionSportIds($divKey);
+        if ($activatedIds === []) {
+            return [];
+        }
+        $activatedSet = array_fill_keys($activatedIds, true);
+        $labels = [];
+        foreach ($sportLabels as $label) {
+            $sid = (int) ($sportIdByLabel[$label] ?? 0);
+            if ($sid > 0 && isset($activatedSet[$sid])) {
+                $labels[] = $label;
+            }
+        }
+        return $labels;
+    };
+
+    $byDivision = [];
+    foreach ($byDivisionMap as $group) {
+        $divKey = (int) $group['division_key'];
+        $divSportLabels = $labelsForDivision($divKey);
+
+        $divStandings = [];
+        foreach ($group['standings'] as $r) {
+            $sportsFiltered = [];
+            $total = 0;
+            $gold = 0;
+            $silver = 0;
+            $bronze = 0;
+            foreach ($divSportLabels as $label) {
+                $pts = (int) ($r['sports'][$label] ?? 0);
+                $sportsFiltered[$label] = $pts;
+                $total += $pts;
+                $medal = $r['sport_medals'][$label] ?? null;
+                if ($medal === 'gold') {
+                    $gold++;
+                } elseif ($medal === 'silver') {
+                    $silver++;
+                } elseif ($medal === 'bronze') {
+                    $bronze++;
+                }
+            }
+            // Drop points/medals from events not activated for this division.
+            $r['sports'] = $sportsFiltered;
+            $r['total'] = $total;
+            $r['gold'] = $gold;
+            $r['silver'] = $silver;
+            $r['bronze'] = $bronze;
+            $r['medal_total'] = $gold + $silver + $bronze;
+            $divStandings[] = $r;
+        }
+
+        usort($divStandings, static function ($a, $b) {
+            if ($a['total'] !== $b['total']) {
+                return $b['total'] <=> $a['total'];
+            }
+            if ($a['gold'] !== $b['gold']) {
+                return $b['gold'] <=> $a['gold'];
+            }
+            if ($a['silver'] !== $b['silver']) {
+                return $b['silver'] <=> $a['silver'];
+            }
+            return $b['bronze'] <=> $a['bronze'];
+        });
+        $divRank = 1;
+        foreach ($divStandings as &$r) {
+            $r['division_rank'] = $divRank++;
+            $r['medal_total'] = (int) $r['gold'] + (int) $r['silver'] + (int) $r['bronze'];
+        }
+        unset($r);
+
+        $medalTally = $divStandings;
+        usort($medalTally, static function ($a, $b) {
+            if ($a['gold'] !== $b['gold']) {
+                return $b['gold'] <=> $a['gold'];
+            }
+            if ($a['silver'] !== $b['silver']) {
+                return $b['silver'] <=> $a['silver'];
+            }
+            if ($a['bronze'] !== $b['bronze']) {
+                return $b['bronze'] <=> $a['bronze'];
+            }
+            return $b['total'] <=> $a['total'];
+        });
+        $medalRank = 1;
+        foreach ($medalTally as &$mr) {
+            $mr['medal_rank'] = $medalRank++;
+            $mr['medal_total'] = (int) $mr['gold'] + (int) $mr['silver'] + (int) $mr['bronze'];
+        }
+        unset($mr);
+
+        $medalTotals = ['gold' => 0, 'silver' => 0, 'bronze' => 0, 'all' => 0];
+        foreach ($divStandings as $r) {
+            $medalTotals['gold'] += (int) $r['gold'];
+            $medalTotals['silver'] += (int) $r['silver'];
+            $medalTotals['bronze'] += (int) $r['bronze'];
+        }
+        $medalTotals['all'] = $medalTotals['gold'] + $medalTotals['silver'] + $medalTotals['bronze'];
+
+        $champion = null;
+        foreach ($divStandings as $r) {
+            if ($r['total'] > 0) {
+                $champion = $r;
+                break;
+            }
+        }
+        $medalLeader = null;
+        foreach ($medalTally as $r) {
+            if ($r['medal_total'] > 0) {
+                $medalLeader = $r;
+                break;
+            }
+        }
+
+        $eventHeaders = [];
+        foreach ($divSportLabels as $label) {
+            if (preg_match('/^(.+?)\s*\(([^)]+)\)$/', $label, $m)) {
+                $eventHeaders[] = ['name' => $m[1], 'category' => $m[2], 'label' => $label];
+            } else {
+                $eventHeaders[] = ['name' => $label, 'category' => '', 'label' => $label];
+            }
+        }
+
+        $byDivision[] = [
+            'division_id' => $group['division_id'],
+            'division_key' => $group['division_key'],
+            'division_name' => $group['division_name'],
+            'sport_labels' => $divSportLabels,
+            'event_headers' => $eventHeaders,
+            'activated_event_count' => count($divSportLabels),
+            'standings' => $divStandings,
+            'medal_tally' => $medalTally,
+            'medal_totals' => $medalTotals,
+            'champion' => $champion,
+            'medal_leader' => $medalLeader,
+        ];
+    }
+
     return [
-        'sport_labels' => array_map(fn($b) => sportLabel($b['sport']), $all),
+        'sport_labels' => $sportLabels,
         'standings' => $rows,
+        'by_division' => $byDivision,
     ];
 }
 
@@ -4764,14 +5207,25 @@ function exportCsv(string $filename, array $headers, array $rows): void
     exit;
 }
 
-function athleteFullName(array $athlete, bool $uppercase = false): string
+/** Normalize athlete name parts to uppercase for storage and display. */
+function formatAthleteName(string $name): string
 {
-    $name = trim(($athlete['first_name'] ?? '') . ' ' . ($athlete['last_name'] ?? ''));
-    if ($uppercase && $name !== '') {
-        return function_exists('mb_strtoupper') ? mb_strtoupper($name, 'UTF-8') : strtoupper($name);
+    $name = trim($name);
+    if ($name === '') {
+        return '';
     }
 
-    return $name;
+    return function_exists('mb_strtoupper') ? mb_strtoupper($name, 'UTF-8') : strtoupper($name);
+}
+
+function athleteFullName(array $athlete, bool $uppercase = true): string
+{
+    $name = trim(($athlete['first_name'] ?? '') . ' ' . ($athlete['last_name'] ?? ''));
+    if ($name === '') {
+        return '';
+    }
+
+    return $uppercase ? formatAthleteName($name) : $name;
 }
 
 /** Athlete display name for printable reports and official forms. */
@@ -4893,10 +5347,11 @@ function athleteYearLevelOptions(): array
     return ['1st Year', '2nd Year', '3rd Year', '4th Year', '5th Year', 'Graduate'];
 }
 
-function renderAthleteCourseSelect(string $selected = '', string $name = 'department'): string
+function renderAthleteCourseSelect(string $selected = '', string $name = 'department', string $id = 'department', bool $required = false): string
 {
     $options = athleteCourseOptions();
-    $html = '<select name="' . sanitize($name) . '" class="form-select">';
+    $html = '<select name="' . sanitize($name) . '" id="' . sanitize($id) . '" class="form-select"'
+        . ($required ? ' required' : '') . '>';
     $html .= '<option value="">Select course</option>';
     $matched = false;
     foreach ($options as $opt) {

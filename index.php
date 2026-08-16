@@ -5,4 +5,4 @@ if (isLoggedIn()) {
     redirect(getHomeUrl());
 }
 
-redirect(BASE_URL . '/login.php');
+redirect(BASE_URL . '/live.php');

@@ -700,10 +700,23 @@ function isPublishStaff(): bool
     return isSecretariat() || isPublication();
 }
 
-/** Manual event rankings / medal placement entry (admin and secretariat only). */
-function canManageEventRankings(): bool
+/** Manual event rankings / medal placement entry. */
+function canManageEventRankings(?int $sportId = null): bool
 {
-    return isAdmin() || isSecretariat();
+    if (isAdmin() || isSecretariat()) {
+        return true;
+    }
+    if (!isTournamentManager()) {
+        return false;
+    }
+    if ($sportId !== null && $sportId > 0) {
+        return canManageEventMatches($sportId) && isTmRankingEnabled($sportId);
+    }
+    $enabled = getTmRankingEnabledSportIds();
+    if ($enabled === []) {
+        return false;
+    }
+    return (bool) array_intersect(getTmSportIds(), $enabled);
 }
 
 function canManageMatches(): bool
