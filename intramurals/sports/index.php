@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
-requireIntramuralsModule();
+requireSportsCatalogAccess();
 ensurePlayersPerEventColumn();
 ensureSportCategoryEnum();
 ensureSportVenueColumn();
@@ -203,6 +203,10 @@ if ($formState) {
 }
 
 $pageTitle = 'Sports Management';
+$canManageSports = canManageIntramurals();
+$viewOnlySports = isSportsCatalogViewOnly();
+$showMatchPoints = !$viewOnlySports;
+$sportColumnCount = 10 + ($showMatchPoints ? 1 : 0) + ($canManageSports ? 1 : 0);
 require_once __DIR__ . '/../../includes/header.php';
 require __DIR__ . '/../_season_bar.php';
 ?>
@@ -210,18 +214,25 @@ require __DIR__ . '/../_season_bar.php';
 <div class="page-header d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
     <div>
         <h1 class="mb-1"><i class="bi bi-trophy"></i> Sports Management</h1>
-        <p class="text-muted mb-0"><?= count($sports) ?> sport<?= count($sports) === 1 ? '' : 's' ?> · tournament styles and placement point schemes</p>
+        <p class="text-muted mb-0">
+            <?= count($sports) ?> sport<?= count($sports) === 1 ? '' : 's' ?> · tournament styles and placement point schemes
+            <?php if ($viewOnlySports): ?>
+            <span class="badge bg-secondary ms-1">View only</span>
+            <?php endif; ?>
+        </p>
     </div>
     <div class="d-flex flex-wrap gap-2 ms-auto">
+        <?php if ($canManageSports): ?>
         <a href="<?= BASE_URL ?>/intramurals/points/index.php" class="btn btn-sm btn-outline-primary"><i class="bi bi-calculator"></i> Point System</a>
+        <?php endif; ?>
         <a href="<?= BASE_URL ?>/intramurals/sports/guidelines.php" class="btn btn-sm btn-outline-primary"><i class="bi bi-journal-text"></i> Sport Guidelines</a>
-        <?php if (canManageIntramurals()): ?>
+        <?php if ($canManageSports): ?>
         <a href="<?= BASE_URL ?>/intramurals/sports/managers.php" class="btn btn-sm btn-outline-primary"><i class="bi bi-person-workspace"></i> Tournament Managers</a>
         <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#sportModal" data-sport-mode="add">
             <i class="bi bi-plus-lg"></i> Add Sport
         </button>
         <?php endif; ?>
-        <a href="<?= BASE_URL ?>/intramurals/index.php" class="btn btn-sm btn-outline-secondary">Back</a>
+        <a href="<?= $viewOnlySports ? sanitize(getHomeUrl()) : BASE_URL . '/intramurals/index.php' ?>" class="btn btn-sm btn-outline-secondary">Back</a>
     </div>
 </div>
 
@@ -239,15 +250,15 @@ require __DIR__ . '/../_season_bar.php';
                         <th>Tournament Style</th>
                         <th>Tournament Manager</th>
                         <th>Placement Scheme</th>
-                        <th>Match W/D/L</th>
+                        <?php if ($showMatchPoints): ?><th>Match W/D/L</th><?php endif; ?>
                         <th>Athletes</th>
                         <th>Matches</th>
-                        <?php if (canManageIntramurals()): ?><th class="text-end" style="width: 11rem;">Actions</th><?php endif; ?>
+                        <?php if ($canManageSports): ?><th class="text-end" style="width: 11rem;">Actions</th><?php endif; ?>
                     </tr>
                 </thead>
                 <tbody>
                     <?php if (empty($sports)): ?>
-                    <tr><td colspan="<?= canManageIntramurals() ? 12 : 11 ?>" class="text-center text-muted py-4">No sports yet.</td></tr>
+                    <tr><td colspan="<?= (int) $sportColumnCount ?>" class="text-center text-muted py-4">No sports yet.</td></tr>
                     <?php else: ?>
                     <?php foreach ($sports as $s): ?>
                     <?php
@@ -304,10 +315,12 @@ require __DIR__ . '/../_season_bar.php';
                             <?= sanitize($s['scheme_name'] ?: 'Default') ?>
                             <br><small class="text-muted"><?= $s['scheme_name'] ? sanitize(formatSchemePoints($s)) : '10/7/5/3/2/1' ?></small>
                         </td>
+                        <?php if ($showMatchPoints): ?>
                         <td><?= (int) $s['win_points'] ?>/<?= (int) $s['draw_points'] ?>/<?= (int) $s['loss_points'] ?></td>
+                        <?php endif; ?>
                         <td><?= (int) $s['athlete_count'] ?></td>
                         <td><?= (int) $s['match_count'] ?></td>
-                        <?php if (canManageIntramurals()): ?>
+                        <?php if ($canManageSports): ?>
                         <td class="text-end text-nowrap">
                             <a href="<?= BASE_URL ?>/intramurals/sports/guidelines.php?sport=<?= (int) $s['id'] ?>"
                                class="btn btn-sm btn-outline-secondary"

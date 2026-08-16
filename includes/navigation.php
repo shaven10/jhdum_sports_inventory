@@ -148,6 +148,7 @@ function buildAppNavigation(): array
                 ['type' => 'header', 'label' => 'More'],
                 ['label' => 'Reports', 'href' => BASE_URL . '/intramurals/reports/index.php', 'icon' => 'bi-printer'],
                 ['label' => 'Certificate of Recognition', 'href' => BASE_URL . '/intramurals/reports/certificates.php', 'icon' => 'bi-award'],
+                ['label' => 'Sports / Events', 'href' => BASE_URL . '/intramurals/sports/index.php', 'icon' => 'bi-trophy'],
                 ['label' => 'Sport Guidelines', 'href' => BASE_URL . '/intramurals/sports/guidelines.php', 'icon' => 'bi-journal-text'],
             ],
         ];
@@ -160,6 +161,7 @@ function buildAppNavigation(): array
                 ['label' => 'Dashboard', 'href' => BASE_URL . '/dashboard.php', 'icon' => 'bi-speedometer2'],
                 ['label' => 'Match Results', 'href' => BASE_URL . '/intramurals/matches/index.php', 'icon' => 'bi-list-check'],
                 ['label' => 'Overall Standing', 'href' => BASE_URL . '/intramurals/standings/overall.php', 'icon' => 'bi-award'],
+                ['label' => 'Sports / Events', 'href' => BASE_URL . '/intramurals/sports/index.php', 'icon' => 'bi-trophy'],
             ],
         ];
     } elseif (isTournamentManager() && !canManageIntramurals()) {
@@ -172,6 +174,7 @@ function buildAppNavigation(): array
         $items = array_merge($items, [
             ['label' => 'Calendar', 'href' => BASE_URL . '/intramurals/matches/calendar.php', 'icon' => 'bi-calendar3'],
             ['label' => 'Incident Reports', 'href' => BASE_URL . '/incidents/index.php', 'icon' => 'bi-flag'],
+            ['label' => 'Sports / Events', 'href' => BASE_URL . '/intramurals/sports/index.php', 'icon' => 'bi-trophy'],
             ['label' => 'Sport Guidelines', 'href' => BASE_URL . '/intramurals/sports/guidelines.php', 'icon' => 'bi-journal-text'],
         ]);
         $nav[] = ['type' => 'group', 'label' => 'My Events', 'icon' => 'bi-calendar-event', 'items' => $items];
@@ -190,6 +193,7 @@ function buildAppNavigation(): array
             ['label' => 'Entry Form Gallery', 'href' => BASE_URL . '/intramurals/roster/gallery.php', 'icon' => 'bi-images'],
             ['label' => 'Team Athlete List', 'href' => BASE_URL . '/intramurals/roster/team_list.php', 'icon' => 'bi-people'],
             ['label' => 'Incident Reports', 'href' => BASE_URL . '/incidents/index.php', 'icon' => 'bi-flag'],
+            ['label' => 'Sports / Events', 'href' => BASE_URL . '/intramurals/sports/index.php', 'icon' => 'bi-trophy'],
             ['label' => 'Sport Guidelines', 'href' => BASE_URL . '/intramurals/sports/guidelines.php', 'icon' => 'bi-journal-text'],
         ]);
         $nav[] = ['type' => 'group', 'label' => 'My Team', 'icon' => 'bi-shield', 'items' => $items];

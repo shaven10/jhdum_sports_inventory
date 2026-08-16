@@ -521,6 +521,27 @@ function requireIntramuralsModule(): void
     }
 }
 
+/** Sports Management list is readable by every intramurals role; only staff can edit it. */
+function canViewSportsCatalog(): bool
+{
+    return canAccessIntramurals();
+}
+
+/** True for roles that get the Sports Management list without editing or match point details. */
+function isSportsCatalogViewOnly(): bool
+{
+    return !canManageIntramurals() && isIntramuralsScopedStaffRole();
+}
+
+function requireSportsCatalogAccess(): void
+{
+    requireIntramuralsAccess();
+    if (!canViewSportsCatalog()) {
+        flash('error', 'You do not have permission to view Sports Management.');
+        redirect(getHomeUrl());
+    }
+}
+
 /** Unit managers can register/edit athletes for their own team. */
 function canManageTeamAthletes(?int $teamId = null): bool
 {
