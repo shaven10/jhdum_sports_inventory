@@ -9,6 +9,8 @@ $currentUser = getCurrentUser();
 $unreadCount = $currentUser ? getUnreadNotificationCount($currentUser['id']) : 0;
 $flash = getFlash();
 $appNav = isLoggedIn() ? buildAppNavigation() : [];
+$styleFile = __DIR__ . '/../assets/css/style.css';
+$styleVersion = is_file($styleFile) ? (string) filemtime($styleFile) : APP_VERSION;
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -19,7 +21,7 @@ $appNav = isLoggedIn() ? buildAppNavigation() : [];
     <title><?= sanitize($pageTitle) ?> - <?= APP_NAME ?></title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
-    <link href="<?= BASE_URL ?>/assets/css/style.css" rel="stylesheet">
+    <link href="<?= BASE_URL ?>/assets/css/style.css?v=<?= $styleVersion ?>" rel="stylesheet">
     <?= renderThemeStyles() ?>
 </head>
 <body class="<?= (getActiveTheme()['preset'] ?? '') === 'dark_mode' ? 'theme-dark' : '' ?>">

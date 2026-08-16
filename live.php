@@ -18,6 +18,8 @@ try {
 $pageTitle = 'Live Rankings';
 $apiUrl = BASE_URL . '/api/live_standings.php';
 $refreshSeconds = 20;
+$stylePath = __DIR__ . '/assets/css/style.css';
+$styleVersion = is_file($stylePath) ? (string) filemtime($stylePath) : APP_VERSION;
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -31,7 +33,7 @@ $refreshSeconds = 20;
     <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
-    <link href="<?= BASE_URL ?>/assets/css/style.css" rel="stylesheet">
+    <link href="<?= BASE_URL ?>/assets/css/style.css?v=<?= $styleVersion ?>" rel="stylesheet">
     <?= renderThemeStyles() ?>
 </head>
 <body class="live-board-page">
