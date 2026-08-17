@@ -1404,6 +1404,14 @@ a.stat-card-link:focus-visible .stat-card {
     .navbar, .footer, .no-print, .btn, .filter-bar, .season-bar {
         display: none !important;
     }
+    .team-positions-print-division,
+    .team-positions-print-event {
+        break-inside: avoid;
+        page-break-inside: avoid;
+    }
+    .team-positions-print-report table {
+        font-size: 11pt;
+    }
     main, .app-main, .container-fluid {
         padding: 0 !important;
         margin: 0 !important;

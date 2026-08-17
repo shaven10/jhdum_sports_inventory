@@ -37,6 +37,15 @@ foreach ($sports as $s) {
     $positionsBySport[(int) $s['id']] = getEventTeamPositions($divisionId, (int) $s['id']);
 }
 
+$teamNameById = [];
+foreach ($divisionTeams as $t) {
+    $label = (string) $t['name'];
+    if (!empty($t['short_name'])) {
+        $label .= ' (' . $t['short_name'] . ')';
+    }
+    $teamNameById[(int) $t['id']] = $label;
+}
+
 $errors = [];
 $savedCount = 0;
 
@@ -75,11 +84,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
     }
 }
 
+$season = getCurrentSeason();
+$seasonMeta = $season
+    ? ('Season: ' . ($season['year_label'] ?? ('#' . (int) ($season['id'] ?? 0))) . ' · Division: ' . $division['name'])
+    : ('Division: ' . $division['name']);
+
 $pageTitle = 'Team Positions — ' . $division['name'];
 require_once __DIR__ . '/../../includes/header.php';
 ?>
 
-<div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+<div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2 no-print">
     <div>
         <h1><i class="bi bi-list-ol"></i> <?= sanitize($division['name']) ?> — Team Positions</h1>
         <p class="text-muted mb-0">
@@ -87,22 +101,34 @@ require_once __DIR__ . '/../../includes/header.php';
             Match generation uses this exact order: Team 1 vs Team 2, Team 3 vs Team 4, and so on for first-round fixtures.
         </p>
     </div>
-    <a href="<?= BASE_URL ?>/admin/team_positions/index.php" class="btn btn-outline-secondary">Back</a>
+    <div class="d-flex gap-2 flex-wrap">
+        <?php if (!empty($sports)): ?>
+        <button type="button" class="btn btn-outline-secondary" onclick="printReport()">
+            <i class="bi bi-printer"></i> Print / PDF
+        </button>
+        <?php endif; ?>
+        <a href="<?= BASE_URL ?>/admin/team_positions/index.php" class="btn btn-outline-secondary">Back</a>
+    </div>
 </div>
 
+<?= renderReportHeader('Team Positions — ' . $division['name'], [
+    'subtitle' => 'Event seeding order (Team 1 vs Team 2, Team 3 vs Team 4, …)',
+    'meta' => $seasonMeta,
+]) ?>
+
 <?php if ($errors): ?>
-<div class="alert alert-danger">
+<div class="alert alert-danger no-print">
     <ul class="mb-0"><?php foreach ($errors as $e): ?><li><?= sanitize($e) ?></li><?php endforeach; ?></ul>
 </div>
 <?php endif; ?>
 
 <?php if (empty($sports)): ?>
-<div class="alert alert-warning">
+<div class="alert alert-warning no-print">
     This division has no events yet.
     <a href="<?= BASE_URL ?>/admin/divisions/edit.php?id=<?= $divisionId ?>">Assign events</a> first.
 </div>
 <?php else: ?>
-<form method="POST">
+<form method="POST" class="no-print">
     <?= csrfField() ?>
     <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
         <div class="text-muted small">
@@ -162,6 +188,42 @@ require_once __DIR__ . '/../../includes/header.php';
         <a href="<?= BASE_URL ?>/admin/team_positions/index.php" class="btn btn-outline-secondary">Cancel</a>
     </div>
 </form>
+
+<div class="team-positions-print-report d-none d-print-block">
+    <?php foreach ($sports as $s): ?>
+    <?php
+        $sid = (int) $s['id'];
+        $pos = $positionsBySport[$sid] ?? [];
+    ?>
+    <section class="team-positions-print-event mb-4">
+        <h2 class="h5 mb-2"><?= sanitize(sportLabel($s)) ?>
+            <span class="text-muted fw-normal">· <?= sanitize(tournamentFormatLabel($s['tournament_format'] ?? 'round_robin')) ?></span>
+        </h2>
+        <table class="table table-sm table-bordered mb-0">
+            <thead>
+                <tr>
+                    <th style="width: 7rem;">Position</th>
+                    <th>Team</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($positionSlots as $slot): ?>
+                <?php
+                    $tid = (int) ($pos[$slot] ?? 0);
+                    $teamLabel = $tid > 0 ? ($teamNameById[$tid] ?? ('Team #' . $tid)) : '— Not set —';
+                ?>
+                <tr>
+                    <td>Team <?= (int) $slot ?></td>
+                    <td><?= sanitize($teamLabel) ?></td>
+                </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+    </section>
+    <?php endforeach; ?>
+</div>
+
+<p class="text-muted small mt-3 no-print">For PDF: click Print / PDF and choose “Save as PDF”.</p>
 
 <script>
 (function () {
@@ -255,5 +317,7 @@ require_once __DIR__ . '/../../includes/header.php';
 })();
 </script>
 <?php endif; ?>
+
+<?= renderReportFooter('Team Positions — ' . $division['name']) ?>
 
 <?php require_once __DIR__ . '/../../includes/footer.php'; ?>
