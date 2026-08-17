@@ -205,8 +205,7 @@ if ($formState) {
 $pageTitle = 'Sports Management';
 $canManageSports = canManageIntramurals();
 $viewOnlySports = isSportsCatalogViewOnly();
-$showMatchPoints = !$viewOnlySports;
-$sportColumnCount = 10 + ($showMatchPoints ? 1 : 0) + ($canManageSports ? 1 : 0);
+$sportColumnCount = 10 + ($canManageSports ? 1 : 0);
 require_once __DIR__ . '/../../includes/header.php';
 require __DIR__ . '/../_season_bar.php';
 ?>
@@ -250,7 +249,6 @@ require __DIR__ . '/../_season_bar.php';
                         <th>Tournament Style</th>
                         <th>Tournament Manager</th>
                         <th>Placement Scheme</th>
-                        <?php if ($showMatchPoints): ?><th>Match W/D/L</th><?php endif; ?>
                         <th>Athletes</th>
                         <th>Matches</th>
                         <?php if ($canManageSports): ?><th class="text-end" style="width: 11rem;">Actions</th><?php endif; ?>
@@ -285,7 +283,7 @@ require __DIR__ . '/../_season_bar.php';
                     <tr>
                         <td>
                             <strong><?= sanitize($s['name']) ?></strong>
-                            <?php if ($s['rules']): ?><br><small class="text-muted"><?= sanitize(strlen($s['rules']) > 60 ? substr($s['rules'], 0, 57) . '...' : $s['rules']) ?></small><?php endif; ?>
+                            <?php if ($s['rules']): ?><br><small class="text-muted"><?= sanitize($s['rules']) ?></small><?php endif; ?>
                         </td>
                         <td><?= ucfirst($s['category']) ?></td>
                         <td>
@@ -300,7 +298,7 @@ require __DIR__ . '/../_season_bar.php';
                         <td>
                             <span class="badge bg-info text-dark"><?= sanitize(tournamentFormatLabel($s['tournament_format'] ?? 'round_robin')) ?></span>
                             <?php if (!empty($s['format_notes'])): ?>
-                            <br><small class="text-muted"><?= sanitize(strlen($s['format_notes']) > 50 ? substr($s['format_notes'], 0, 47) . '...' : $s['format_notes']) ?></small>
+                            <br><small class="text-muted"><?= sanitize($s['format_notes']) ?></small>
                             <?php endif; ?>
                         </td>
                         <td>
@@ -315,9 +313,6 @@ require __DIR__ . '/../_season_bar.php';
                             <?= sanitize($s['scheme_name'] ?: 'Default') ?>
                             <br><small class="text-muted"><?= $s['scheme_name'] ? sanitize(formatSchemePoints($s)) : '10/7/5/3/2/1' ?></small>
                         </td>
-                        <?php if ($showMatchPoints): ?>
-                        <td><?= (int) $s['win_points'] ?>/<?= (int) $s['draw_points'] ?>/<?= (int) $s['loss_points'] ?></td>
-                        <?php endif; ?>
                         <td><?= (int) $s['athlete_count'] ?></td>
                         <td><?= (int) $s['match_count'] ?></td>
                         <?php if ($canManageSports): ?>
@@ -466,6 +461,12 @@ require __DIR__ . '/../_season_bar.php';
                                 first-round-loser and 3rd-place SDS ties (championship Final last).
                                 Recommended for Badminton, Table Tennis, and Lawn Tennis.
                             </div>
+                            <div class="form-text" id="modifiedConsolationHint" style="display:none">
+                                <strong>Modified Single Elimination w Consolation</strong> — 4 teams only.
+                                Game 1: Team 1 vs Team 2. Game 2: Team 3 vs Team 4.
+                                Game 3: losers of Games 1–2 (loser is 4th). Game 4: winners of Games 1–2.
+                                Game 5: Game 4 loser vs Game 3 winner. Game 6: Game 5 winner vs undefeated Game 4 winner.
+                            </div>
                             <div class="form-text">Tournament managers use this when generating match fixtures.</div>
                         </div>
                         <div class="col-12">
@@ -495,6 +496,7 @@ require __DIR__ . '/../_season_bar.php';
     const nameInput = document.getElementById('sportNameInput');
     const formatSelect = document.getElementById('tournamentFormatSelect');
     const sdsHint = document.getElementById('sdsFormatHint');
+    const modifiedConsolationHint = document.getElementById('modifiedConsolationHint');
     const copyNotice = document.getElementById('sportCopyNotice');
     const guidelinesInput = document.getElementById('sportGuidelines');
     const racketSports = <?= json_encode(racketSdsSportNames()) ?>;
@@ -556,10 +558,13 @@ require __DIR__ . '/../_season_bar.php';
         const name = (nameInput.value || '').trim();
         const isRacket = racketSports.some(function (s) { return s.toLowerCase() === name.toLowerCase(); });
         const isSds = formatSelect.value === 'team_play_sds' || formatSelect.value === 'team_play_sds_consolation';
+        const isModifiedConsolation = formatSelect.value === 'modified_single_elimination_consolation';
         if (sdsHint) sdsHint.style.display = isSds ? '' : 'none';
+        if (modifiedConsolationHint) modifiedConsolationHint.style.display = isModifiedConsolation ? '' : 'none';
         if (allowAutoSds && isRacket && formatSelect.value === 'round_robin') {
             formatSelect.value = 'team_play_sds';
             if (sdsHint) sdsHint.style.display = '';
+            if (modifiedConsolationHint) modifiedConsolationHint.style.display = 'none';
         }
     }
 

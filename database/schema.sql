@@ -351,7 +351,7 @@ CREATE TABLE IF NOT EXISTS intramural_sports (
     schedule_notes TEXT,
     venue VARCHAR(150) DEFAULT NULL,
     game_duration_minutes INT NOT NULL DEFAULT 60,
-    tournament_format ENUM('round_robin', 'single_elimination', 'single_elimination_consolation', 'double_elimination', 'group_knockout', 'rank_first_to_last', 'team_play_sds', 'team_play_sds_consolation', 'custom') NOT NULL DEFAULT 'round_robin',
+    tournament_format ENUM('round_robin', 'single_elimination', 'single_elimination_consolation', 'modified_single_elimination_consolation', 'double_elimination', 'group_knockout', 'rank_first_to_last', 'team_play_sds', 'team_play_sds_consolation', 'custom') NOT NULL DEFAULT 'round_robin',
     format_notes TEXT,
     win_points INT NOT NULL DEFAULT 3,
     draw_points INT NOT NULL DEFAULT 1,
@@ -549,6 +549,33 @@ CREATE TABLE IF NOT EXISTS intramural_event_tm_ranking (
     FOREIGN KEY (season_id) REFERENCES intramural_seasons(id) ON DELETE CASCADE,
     FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE,
     FOREIGN KEY (enabled_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS working_committees (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(150) NOT NULL,
+    category ENUM('overall', 'sporting_events', 'socio_cultural') NOT NULL DEFAULT 'overall',
+    description TEXT DEFAULT NULL,
+    sort_order INT NOT NULL DEFAULT 0,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_working_committee_name (name),
+    INDEX idx_wc_category (category)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS working_committee_members (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    committee_id INT NOT NULL,
+    full_name VARCHAR(150) NOT NULL,
+    position_title VARCHAR(120) DEFAULT NULL,
+    organization VARCHAR(150) DEFAULT NULL,
+    sort_order INT NOT NULL DEFAULT 0,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_wc_member_committee (committee_id),
+    FOREIGN KEY (committee_id) REFERENCES working_committees(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 INSERT INTO intramural_seasons (name, year_label, start_date, end_date, description, is_active) VALUES

@@ -149,6 +149,7 @@ function buildAppNavigation(): array
                 ['label' => 'Reports', 'href' => BASE_URL . '/intramurals/reports/index.php', 'icon' => 'bi-printer'],
                 ['label' => 'Certificate of Recognition', 'href' => BASE_URL . '/intramurals/reports/certificates.php', 'icon' => 'bi-award'],
                 ['label' => 'Sports / Events', 'href' => BASE_URL . '/intramurals/sports/index.php', 'icon' => 'bi-trophy'],
+                ['label' => 'Point System', 'href' => BASE_URL . '/intramurals/points/index.php', 'icon' => 'bi-calculator'],
                 ['label' => 'Sport Guidelines', 'href' => BASE_URL . '/intramurals/sports/guidelines.php', 'icon' => 'bi-journal-text'],
             ],
         ];
@@ -194,6 +195,7 @@ function buildAppNavigation(): array
             ['label' => 'Team Athlete List', 'href' => BASE_URL . '/intramurals/roster/team_list.php', 'icon' => 'bi-people'],
             ['label' => 'Incident Reports', 'href' => BASE_URL . '/incidents/index.php', 'icon' => 'bi-flag'],
             ['label' => 'Sports / Events', 'href' => BASE_URL . '/intramurals/sports/index.php', 'icon' => 'bi-trophy'],
+            ['label' => 'Point System', 'href' => BASE_URL . '/intramurals/points/index.php', 'icon' => 'bi-calculator'],
             ['label' => 'Sport Guidelines', 'href' => BASE_URL . '/intramurals/sports/guidelines.php', 'icon' => 'bi-journal-text'],
         ]);
         $nav[] = ['type' => 'group', 'label' => 'My Team', 'icon' => 'bi-shield', 'items' => $items];
@@ -208,6 +210,7 @@ function buildAppNavigation(): array
                 ['label' => 'Admin Panel', 'href' => BASE_URL . '/admin/index.php', 'icon' => 'bi-grid-1x2'],
                 ['type' => 'header', 'label' => 'People'],
                 ['label' => 'Users', 'href' => BASE_URL . '/users/index.php', 'icon' => 'bi-people'],
+                ['label' => 'Working Committees', 'href' => BASE_URL . '/admin/committees/index.php', 'icon' => 'bi-person-badge'],
                 ['label' => 'Incident Reports', 'href' => BASE_URL . '/admin/incidents/index.php', 'icon' => 'bi-flag'],
                 ['type' => 'header', 'label' => 'System'],
                 ['label' => 'Announcements', 'href' => BASE_URL . '/admin/announcements/index.php', 'icon' => 'bi-megaphone'],

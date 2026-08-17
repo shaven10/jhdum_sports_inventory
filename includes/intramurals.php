@@ -14,6 +14,7 @@ function tournamentFormatLabels(): array
         'round_robin' => 'Round Robin',
         'single_elimination' => 'Single Elimination',
         'single_elimination_consolation' => 'Single Elimination with Consolation',
+        'modified_single_elimination_consolation' => 'Modified Single Elimination w Consolation',
         'double_elimination' => 'Double Elimination',
         'group_knockout' => 'Group Stage → Knockout',
         'rank_first_to_last' => 'Rank from First to Last',
@@ -33,6 +34,7 @@ function isBracketTournamentFormat(?string $format): bool
     return in_array((string) $format, [
         'single_elimination',
         'single_elimination_consolation',
+        'modified_single_elimination_consolation',
         'double_elimination',
         'team_play_sds',
         'team_play_sds_consolation',
@@ -1153,6 +1155,8 @@ function buildTournamentFixtures(string $format, array $teamIds): array
             return buildSingleEliminationFixtures($teamIds);
         case 'single_elimination_consolation':
             return buildSingleEliminationConsolationFixtures($teamIds);
+        case 'modified_single_elimination_consolation':
+            return buildModifiedSingleElimConsolationFixtures($teamIds);
         case 'double_elimination':
             // First pass: generate single-elim bracket; consolation rounds can be added later.
             $fixtures = buildSingleEliminationFixtures($teamIds);
@@ -1602,6 +1606,168 @@ function buildSingleEliminationConsolationFixtures(array $teamIds): array
     }
 
     return $resequenced;
+}
+
+/**
+ * 4-team Modified Single Elimination with Consolation.
+ *
+ * Game 1: Team 1 vs Team 2
+ * Game 2: Team 3 vs Team 4
+ * Game 3: Loser G1 vs Loser G2 (loser of Game 3 = 4th place)
+ * Game 4: Winner G1 vs Winner G2
+ * Game 5: Loser G4 vs Winner G3
+ * Game 6: Winner G5 vs Winner G4 (remaining undefeated team)
+ *
+ * @param list<int> $teamIds
+ * @return list<array<string, mixed>>
+ */
+function buildModifiedSingleElimConsolationFixtures(array $teamIds): array
+{
+    $teamIds = array_values(array_unique(array_map('intval', $teamIds)));
+    $teamIds = array_values(array_filter($teamIds, static fn($id) => $id > 0));
+    if (count($teamIds) !== 4) {
+        return [];
+    }
+
+    return [
+        [
+            'team_a_id' => $teamIds[0],
+            'team_b_id' => $teamIds[1],
+            'round_number' => 1,
+            'round_label' => 'Game 1',
+            'match_order' => 1,
+            'notes' => 'Opening round — Team 1 vs Team 2',
+        ],
+        [
+            'team_a_id' => $teamIds[2],
+            'team_b_id' => $teamIds[3],
+            'round_number' => 1,
+            'round_label' => 'Game 2',
+            'match_order' => 2,
+            'notes' => 'Opening round — Team 3 vs Team 4',
+        ],
+        [
+            'team_a_id' => null,
+            'team_b_id' => null,
+            'round_number' => 2,
+            'round_label' => 'Game 3 — Consolation (4th Place)',
+            'match_order' => 3,
+            'notes' => 'TBD — losers of Games 1 and 2. Loser of this game is 4th place.',
+        ],
+        [
+            'team_a_id' => null,
+            'team_b_id' => null,
+            'round_number' => 3,
+            'round_label' => 'Game 4 — Winners',
+            'match_order' => 4,
+            'notes' => 'TBD — winners of Games 1 and 2. Winner stays undefeated; loser faces the Game 3 winner.',
+        ],
+        [
+            'team_a_id' => null,
+            'team_b_id' => null,
+            'round_number' => 4,
+            'round_label' => 'Game 5 — Consolation',
+            'match_order' => 5,
+            'notes' => 'TBD — loser of Game 4 vs winner of Game 3',
+        ],
+        [
+            'team_a_id' => null,
+            'team_b_id' => null,
+            'round_number' => 5,
+            'round_label' => 'Game 6 — Championship Final',
+            'match_order' => 6,
+            'notes' => 'TBD — winner of Game 5 vs remaining undefeated team (winner of Game 4)',
+        ],
+    ];
+}
+
+function modifiedConsolationGameNumber(array $match): int
+{
+    $label = (string) ($match['round_label'] ?? '');
+    if (preg_match('/\bGame\s+(\d+)\b/i', $label, $m)) {
+        return (int) $m[1];
+    }
+    return (int) ($match['match_order'] ?? 0);
+}
+
+/**
+ * Fill Games 3–6 from completed results for Modified Single Elimination w Consolation.
+ *
+ * @param list<array> $matches
+ * @param list<string> $details
+ */
+function advanceModifiedSingleElimConsolationBracket(PDO $db, array &$matches, array &$details): int
+{
+    $indexesByDivision = [];
+    foreach ($matches as $i => $m) {
+        $divKey = (string) ((int) ($m['division_id'] ?? 0));
+        $indexesByDivision[$divKey][] = $i;
+    }
+
+    $updated = 0;
+    foreach ($indexesByDivision as $indexes) {
+        $updated += advanceModifiedConsolationGroup($db, $matches, $indexes, $details);
+    }
+
+    $details = array_values(array_unique($details));
+    return $updated;
+}
+
+/**
+ * @param list<int> $indexes
+ * @param list<string> $details
+ */
+function advanceModifiedConsolationGroup(PDO $db, array &$matches, array $indexes, array &$details): int
+{
+    $indexByGame = [];
+    foreach ($indexes as $i) {
+        $n = modifiedConsolationGameNumber($matches[$i]);
+        if ($n >= 1 && $n <= 6 && !isset($indexByGame[$n])) {
+            $indexByGame[$n] = $i;
+        }
+    }
+
+    $updated = 0;
+    $fill = static function (int $game, int $teamId, string $side, string $note) use ($db, &$matches, $indexByGame, &$updated, &$details): void {
+        if ($teamId <= 0 || !isset($indexByGame[$game])) {
+            return;
+        }
+        if (assignTeamToBracketSlot($db, $matches[$indexByGame[$game]], $teamId, $side)) {
+            $updated++;
+            $details[] = $note;
+        }
+    };
+
+    $outcome = static function (int $game) use (&$matches, $indexByGame): ?array {
+        if (!isset($indexByGame[$game])) {
+            return null;
+        }
+        return getMatchOutcome($matches[$indexByGame[$game]]);
+    };
+
+    $g1 = $outcome(1);
+    $g2 = $outcome(2);
+    if ($g1 && $g2) {
+        $fill(3, (int) $g1['loser'], 'a', 'Filled Game 3 with losers of Games 1 and 2.');
+        $fill(3, (int) $g2['loser'], 'b', 'Filled Game 3 with losers of Games 1 and 2.');
+        $fill(4, (int) $g1['winner'], 'a', 'Filled Game 4 with winners of Games 1 and 2.');
+        $fill(4, (int) $g2['winner'], 'b', 'Filled Game 4 with winners of Games 1 and 2.');
+    }
+
+    $g3 = $outcome(3);
+    $g4 = $outcome(4);
+    if ($g3 && $g4) {
+        $fill(5, (int) $g4['loser'], 'a', 'Filled Game 5 with the Game 4 loser and Game 3 winner.');
+        $fill(5, (int) $g3['winner'], 'b', 'Filled Game 5 with the Game 4 loser and Game 3 winner.');
+    }
+
+    $g5 = $outcome(5);
+    if ($g4 && $g5) {
+        $fill(6, (int) $g4['winner'], 'a', 'Filled Game 6 with the undefeated Game 4 winner and Game 5 winner.');
+        $fill(6, (int) $g5['winner'], 'b', 'Filled Game 6 with the undefeated Game 4 winner and Game 5 winner.');
+    }
+
+    return $updated;
 }
 
 /**
@@ -2334,6 +2500,9 @@ function generateMatchesForSport(int $sportId, int $seasonId, array $teamIds, ?i
     if ($format === 'rank_first_to_last' && count($teamIds) % 2 !== 0) {
         return ['created' => 0, 'format' => $format, 'error' => 'Rank from First to Last requires an even number of teams (each team plays one match).'];
     }
+    if ($format === 'modified_single_elimination_consolation' && count($teamIds) !== 4) {
+        return ['created' => 0, 'format' => $format, 'error' => 'Modified Single Elimination w Consolation requires exactly 4 teams (Team 1–4 positions).'];
+    }
 
     if ($prebuiltFixtures !== null) {
         $fixtures = $prebuiltFixtures;
@@ -2670,6 +2839,15 @@ function generateMatchesForSports(array $sportIds, int $seasonId, ?array $shared
                     $label .= ' (' . $group['division_name'] . ')';
                 }
                 $errors[] = $label . ': Rank from First to Last requires an even number of teams.';
+                continue;
+            }
+
+            if ($format === 'modified_single_elimination_consolation' && count($groupTeams) !== 4) {
+                $label = sportLabel($sport);
+                if ($group['division_name'] !== '') {
+                    $label .= ' (' . $group['division_name'] . ')';
+                }
+                $errors[] = $label . ': Modified Single Elimination w Consolation requires exactly 4 teams.';
                 continue;
             }
 
@@ -3822,6 +4000,13 @@ function advanceBracketFromResults(int $sportId, int $seasonId): array
         $updated += advanceSdsConsolationBracket($db, $matches, $details);
         return ['updated' => $updated, 'details' => $details];
     }
+    if ($format === 'modified_single_elimination_consolation') {
+        $updated += advanceModifiedSingleElimConsolationBracket($db, $matches, $details);
+        if ($updated === 0 && empty($details)) {
+            $details[] = 'No TBD slots were ready to update. Complete previous games first.';
+        }
+        return ['updated' => $updated, 'details' => $details];
+    }
 
     $championship = [];
     $consolation = [];
@@ -4853,6 +5038,8 @@ function computeSportStandings(?int $sportId = null, ?int $seasonId = null): arr
         $flatRows = [];
         $divisionBlocks = [];
         $anyManual = false;
+        // Medals / placement points (overall + medal tally) only after the event is finished.
+        $eventFinished = $seasonId ? isEventFinished($sid, (int) $seasonId) : false;
 
         foreach ($byDivision as $divKey => $divRows) {
             usort($divRows, static function ($x, $y) {
@@ -4886,7 +5073,8 @@ function computeSportStandings(?int $sportId = null, ?int $seasonId = null): arr
                 $row['placement_points'] = 0;
                 $row['placement_label'] = null;
                 $row['manual_rank'] = false;
-                if ($row['played'] > 0) {
+                // Provisional W/D/L rank still shown; medals & scheme points wait until all matches are done.
+                if ($row['played'] > 0 && $eventFinished) {
                     applyEventPlacement($row, $row['rank'], $scheme, false);
                 }
             }
@@ -4933,6 +5121,7 @@ function computeSportStandings(?int $sportId = null, ?int $seasonId = null): arr
             'standings' => $flatRows,
             'divisions' => $divisionBlocks,
             'manual_ranks' => $anyManual,
+            'event_finished' => $eventFinished,
         ];
     }
 
@@ -4987,8 +5176,9 @@ function computeOverallStandings(): array
             if (!isset($overall[$tid])) {
                 continue;
             }
+            // Only finished events (or manual ranks) contribute to overall / medal tally.
             $hasPlacement = !empty($row['manual_rank']) || (int) $row['placement_points'] > 0 || !empty($row['medal']);
-            if ($row['played'] === 0 && !$hasPlacement) {
+            if (!$hasPlacement) {
                 continue;
             }
             $pts = (int) $row['placement_points'];

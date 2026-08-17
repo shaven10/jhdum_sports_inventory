@@ -718,6 +718,61 @@ a.stat-card-link:focus-visible .stat-card {
     box-shadow: 0 2px 10px rgba(0,0,0,0.05);
 }
 
+/* Compact single-row filter (e.g. delete athletes) */
+.filter-bar-inline {
+    padding: 0.85rem 1rem;
+}
+
+.filter-bar-inline__row {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 0.65rem;
+}
+
+.filter-bar-inline__team {
+    flex: 0 0 13rem;
+    min-width: 0;
+}
+
+.filter-bar-inline__search {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.filter-bar-inline__actions {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 0.5rem;
+    white-space: nowrap;
+}
+
+.filter-bar-inline .form-select,
+.filter-bar-inline .form-control {
+    width: 100%;
+}
+
+@media (max-width: 768px) {
+    .filter-bar-inline__row {
+        flex-wrap: wrap;
+    }
+
+    .filter-bar-inline__team,
+    .filter-bar-inline__search {
+        flex: 1 1 100%;
+    }
+
+    .filter-bar.filter-bar-inline .filter-bar-inline__actions {
+        width: 100%;
+        flex-wrap: nowrap;
+    }
+
+    .filter-bar.filter-bar-inline .filter-bar-inline__actions .btn {
+        flex: 1 1 auto;
+        width: auto;
+    }
+}
+
 .filter-bar [data-bs-toggle="collapse"] .filter-toggle-icon {
     display: inline-block;
     transition: transform 0.2s ease;
@@ -1973,11 +2028,13 @@ a.stat-card-link:focus-visible .stat-card {
     overflow-x: auto;
     border: 1px solid rgba(255, 255, 255, 0.1);
     background: rgba(255, 255, 255, 0.03);
+    -webkit-overflow-scrolling: touch;
 }
 
 .live-table {
     width: 100%;
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
     font-size: 0.95rem;
     min-width: 520px;
 }
@@ -1996,17 +2053,61 @@ a.stat-card-link:focus-visible .stat-card {
     text-transform: uppercase;
     opacity: 0.75;
     font-weight: 700;
-    background: rgba(0, 0, 0, 0.2);
+    background: rgba(12, 28, 22, 0.98);
 }
 
 .live-table tbody tr:hover {
     background: rgba(255, 255, 255, 0.04);
 }
 
+.live-table tbody tr:hover .live-sticky {
+    background: #173428;
+}
+
 .live-rank {
     font-family: Oswald, Impact, sans-serif;
     font-weight: 600;
     width: 2.5rem;
+}
+
+.live-sticky {
+    position: sticky;
+    z-index: 2;
+    background: #12261c;
+    background-clip: padding-box;
+    box-sizing: border-box;
+}
+
+.live-table thead .live-sticky {
+    z-index: 4;
+    background: #0f1f14;
+}
+
+.live-sticky-1 {
+    left: 0;
+    width: 2.75rem;
+    min-width: 2.75rem;
+    max-width: 2.75rem;
+}
+
+.live-sticky-2 {
+    left: 2.75rem;
+    z-index: 3;
+    min-width: 10rem;
+    border-right: 2px solid rgba(255, 255, 255, 0.16);
+    box-shadow: 6px 0 10px -4px rgba(0, 0, 0, 0.45);
+}
+
+.live-table thead .live-sticky-2 {
+    z-index: 5;
+}
+
+.live-totals .live-sticky {
+    background: #0c1a12;
+}
+
+.live-event-col {
+    text-align: center !important;
 }
 
 .live-strong {
@@ -2097,4 +2198,121 @@ a.stat-card-link:focus-visible .stat-card {
         flex-direction: column;
         align-items: stretch;
     }
+}
+
+/* —— Public working committees —— */
+.committees-hero {
+    min-height: min(42vh, 420px);
+}
+
+.committees-main {
+    padding-top: 0.5rem;
+}
+
+.committees-jump {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 0.85rem;
+    margin-top: 1rem;
+}
+
+.committees-jump a {
+    color: rgba(232, 240, 234, 0.9);
+    text-decoration: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.35);
+    font-size: 0.95rem;
+}
+
+.committees-jump a:hover {
+    color: #fff;
+    border-bottom-color: #fff;
+}
+
+.committee-group {
+    margin-bottom: 2.25rem;
+}
+
+.committee-group-head {
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.committee-group-head h2 {
+    font-family: Oswald, Impact, sans-serif;
+    font-size: clamp(1.45rem, 3vw, 2rem);
+    margin: 0;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.committee-group-head p {
+    margin: 0.25rem 0 0;
+    opacity: 0.7;
+    font-size: 0.95rem;
+}
+
+.committees-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+    gap: 1.25rem;
+}
+
+.committee-block {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.04);
+    padding: 1.15rem 1.25rem 1.25rem;
+    animation: liveFadeUp 0.45s ease-out both;
+}
+
+.committee-block-head h2,
+.committee-block-head h3 {
+    font-family: Oswald, Impact, sans-serif;
+    font-size: clamp(1.1rem, 2.2vw, 1.4rem);
+    margin: 0 0 0.35rem;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+}
+
+.committee-block-head p {
+    margin: 0 0 0.85rem;
+    opacity: 0.75;
+    font-size: 0.95rem;
+}
+
+.committee-member-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.committee-member {
+    padding: 0.7rem 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.committee-member:first-child {
+    border-top: 0;
+    padding-top: 0;
+}
+
+.committee-member-name {
+    font-weight: 700;
+    letter-spacing: 0.01em;
+}
+
+.committee-member-meta {
+    margin-top: 0.2rem;
+    font-size: 0.9rem;
+    opacity: 0.75;
+}
+
+.live-board-footer a {
+    color: inherit;
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+}
+
+.live-board-footer a:hover {
+    opacity: 1;
 }

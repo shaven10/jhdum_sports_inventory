@@ -41,6 +41,7 @@ $adminSections = [
         'description' => 'Manage accounts and roles across the system.',
         'cards' => [
             ['title' => 'Users', 'desc' => 'Create and manage user accounts', 'href' => BASE_URL . '/users/index.php', 'icon' => 'bi-people-fill', 'color' => 'primary', 'meta' => $userCount . ' active'],
+            ['title' => 'Working Committees', 'desc' => 'Public committee list on the landing page', 'href' => BASE_URL . '/admin/committees/index.php', 'icon' => 'bi-person-badge-fill', 'color' => 'info'],
             ['title' => 'Incident Reports', 'desc' => 'Queries and reports from TM / unit managers', 'href' => BASE_URL . '/admin/incidents/index.php', 'icon' => 'bi-flag-fill', 'color' => $openIncidents > 0 ? 'danger' : 'secondary', 'meta' => $openIncidents . ' open'],
             ['title' => 'Announcements', 'desc' => 'Broadcast to all staff modules (not students)', 'href' => BASE_URL . '/admin/announcements/index.php', 'icon' => 'bi-megaphone-fill', 'color' => 'warning'],
         ],

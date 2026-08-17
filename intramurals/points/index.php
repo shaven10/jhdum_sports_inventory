@@ -1,9 +1,10 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
-requireIntramuralsModule();
+requirePointSystemAccess();
 
 $db = getDB();
 $canEdit = canManageIntramurals();
+$viewOnly = isPointSystemViewOnly();
 $labels = placementLabels();
 $defaults = [1 => 10, 2 => 7, 3 => 5, 4 => 3, 5 => 2, 6 => 1];
 
@@ -101,11 +102,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
 
 $editId = (int) get('edit');
 $schemes = getAllPointSchemes(false);
-$sports = $db->query('SELECT s.id, s.name, s.category, s.point_scheme_id, ps.name as scheme_name
+$sports = $db->query('SELECT s.id, s.name, s.category, s.point_scheme_id,
+        ps.name as scheme_name, ps.is_active as scheme_active,
+        ps.points_1, ps.points_2, ps.points_3, ps.points_4, ps.points_5, ps.points_6
     FROM intramural_sports s
     LEFT JOIN intramural_point_schemes ps ON s.point_scheme_id = ps.id
     ORDER BY s.name, s.category')->fetchAll();
 $activeSchemes = getAllPointSchemes(true);
+$eventPointRows = [];
+foreach ($sports as $sport) {
+    $scheme = getPointSchemeForSport($sport);
+    $eventPointRows[] = [
+        'sport' => $sport,
+        'scheme_name' => !empty($sport['scheme_name']) ? (string) $sport['scheme_name'] : 'Default',
+        'scheme' => $scheme,
+    ];
+}
 
 $formDefaults = [
     'name' => '',
@@ -148,14 +160,24 @@ if ($formState) {
 }
 
 $pageTitle = 'Placement Point System';
+$seasonMeta = (function_exists('getCurrentSeason') && getCurrentSeason())
+    ? ('Season: ' . seasonLabel(getCurrentSeason()))
+    : '';
 require_once __DIR__ . '/../../includes/header.php';
 require __DIR__ . '/../_season_bar.php';
 ?>
 
-<div class="page-header d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
+<div class="page-header d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3 no-print">
     <div>
         <h1 class="mb-1"><i class="bi bi-calculator"></i> Placement Point System</h1>
-        <p class="text-muted mb-0">Dynamic points for Champion through 5th Runner Up — used in overall rankings</p>
+        <p class="text-muted mb-0">
+            <?php if ($viewOnly): ?>
+            Placement points assigned to each event — used in overall rankings
+            <span class="badge bg-secondary ms-1">View only</span>
+            <?php else: ?>
+            Dynamic points for Champion through 5th Runner Up — used in overall rankings
+            <?php endif; ?>
+        </p>
     </div>
     <div class="d-flex flex-wrap gap-2 ms-auto">
         <?php if ($canEdit): ?>
@@ -163,9 +185,62 @@ require __DIR__ . '/../_season_bar.php';
             <i class="bi bi-plus-lg"></i> Add Point Scheme
         </button>
         <?php endif; ?>
-        <a href="<?= BASE_URL ?>/intramurals/index.php" class="btn btn-sm btn-outline-secondary">Back</a>
+        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="printReport()">
+            <i class="bi bi-printer"></i> Print / PDF
+        </button>
+        <a href="<?= $viewOnly ? sanitize(getHomeUrl()) : BASE_URL . '/intramurals/index.php' ?>" class="btn btn-sm btn-outline-secondary">Back</a>
     </div>
 </div>
+
+<?= renderReportHeader($viewOnly ? 'Point System by Event' : 'Placement Point System', [
+    'subtitle' => $viewOnly
+        ? 'Placement points assigned to each event'
+        : 'Champion through 5th Runner Up — used in overall rankings',
+    'meta' => $seasonMeta,
+]) ?>
+
+<?php if ($viewOnly): ?>
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span><i class="bi bi-trophy"></i> Point System by Event</span>
+        <small class="text-muted"><?= count($eventPointRows) ?> event<?= count($eventPointRows) === 1 ? '' : 's' ?></small>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0 align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>Event</th>
+                        <th>Scheme</th>
+                        <?php foreach ($labels as $label): ?>
+                        <th class="text-center"><?= sanitize($label) ?></th>
+                        <?php endforeach; ?>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if (empty($eventPointRows)): ?>
+                    <tr><td colspan="<?= 2 + count($labels) ?>" class="text-center text-muted py-4">No events configured yet.</td></tr>
+                    <?php else: ?>
+                    <?php foreach ($eventPointRows as $row): ?>
+                    <?php $scheme = $row['scheme']; ?>
+                    <tr>
+                        <td><strong><?= sanitize(sportLabel($row['sport'])) ?></strong></td>
+                        <td><?= sanitize($row['scheme_name']) ?></td>
+                        <td class="text-center"><strong><?= (int) ($scheme['points_1'] ?? 10) ?></strong></td>
+                        <td class="text-center"><?= (int) ($scheme['points_2'] ?? 7) ?></td>
+                        <td class="text-center"><?= (int) ($scheme['points_3'] ?? 5) ?></td>
+                        <td class="text-center"><?= (int) ($scheme['points_4'] ?? 3) ?></td>
+                        <td class="text-center"><?= (int) ($scheme['points_5'] ?? 2) ?></td>
+                        <td class="text-center"><?= (int) ($scheme['points_6'] ?? 1) ?></td>
+                    </tr>
+                    <?php endforeach; ?>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+<?php else: ?>
 
 <div class="card mb-4">
     <div class="card-header">Point Reference</div>
@@ -176,7 +251,7 @@ require __DIR__ . '/../_season_bar.php';
                     <tr>
                         <th>Scheme</th>
                         <?php foreach ($labels as $label): ?>
-                        <th><?= sanitize($label) ?></th>
+                        <th class="text-center"><?= sanitize($label) ?></th>
                         <?php endforeach; ?>
                         <th>Status</th>
                         <?php if ($canEdit): ?><th class="text-end" style="width: 9rem;">Actions</th><?php endif; ?>
@@ -205,12 +280,12 @@ require __DIR__ . '/../_season_bar.php';
                             <strong><?= sanitize($s['name']) ?></strong>
                             <?php if ($s['description']): ?><br><small class="text-muted"><?= sanitize($s['description']) ?></small><?php endif; ?>
                         </td>
-                        <td><strong><?= (int) $s['points_1'] ?></strong></td>
-                        <td><?= (int) $s['points_2'] ?></td>
-                        <td><?= (int) $s['points_3'] ?></td>
-                        <td><?= (int) $s['points_4'] ?></td>
-                        <td><?= (int) $s['points_5'] ?></td>
-                        <td><?= (int) $s['points_6'] ?></td>
+                        <td class="text-center"><strong><?= (int) $s['points_1'] ?></strong></td>
+                        <td class="text-center"><?= (int) $s['points_2'] ?></td>
+                        <td class="text-center"><?= (int) $s['points_3'] ?></td>
+                        <td class="text-center"><?= (int) $s['points_4'] ?></td>
+                        <td class="text-center"><?= (int) $s['points_5'] ?></td>
+                        <td class="text-center"><?= (int) $s['points_6'] ?></td>
                         <td><?= $s['is_active'] ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-secondary">Inactive</span>' ?></td>
                         <?php if ($canEdit): ?>
                         <td class="text-end text-nowrap">
@@ -242,8 +317,47 @@ require __DIR__ . '/../_season_bar.php';
     </div>
 </div>
 
+<?php endif; ?>
+
 <?php if ($canEdit): ?>
-<div class="card mb-4">
+<div class="card mb-4 d-none d-print-block">
+    <div class="card-header">Point System by Event</div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-sm table-bordered mb-0 align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>Event</th>
+                        <th>Scheme</th>
+                        <?php foreach ($labels as $label): ?>
+                        <th class="text-center"><?= sanitize($label) ?></th>
+                        <?php endforeach; ?>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($eventPointRows as $row): ?>
+                    <?php $scheme = $row['scheme']; ?>
+                    <tr>
+                        <td><?= sanitize(sportLabel($row['sport'])) ?></td>
+                        <td><?= sanitize($row['scheme_name']) ?></td>
+                        <td class="text-center"><?= (int) ($scheme['points_1'] ?? 10) ?></td>
+                        <td class="text-center"><?= (int) ($scheme['points_2'] ?? 7) ?></td>
+                        <td class="text-center"><?= (int) ($scheme['points_3'] ?? 5) ?></td>
+                        <td class="text-center"><?= (int) ($scheme['points_4'] ?? 3) ?></td>
+                        <td class="text-center"><?= (int) ($scheme['points_5'] ?? 2) ?></td>
+                        <td class="text-center"><?= (int) ($scheme['points_6'] ?? 1) ?></td>
+                    </tr>
+                    <?php endforeach; ?>
+                    <?php if (empty($eventPointRows)): ?>
+                    <tr><td colspan="<?= 2 + count($labels) ?>" class="text-muted">No events configured.</td></tr>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="card mb-4 no-print">
     <div class="card-header">Assign Schemes to Events / Sports</div>
     <div class="card-body">
         <form method="POST">
@@ -291,7 +405,7 @@ require __DIR__ . '/../_season_bar.php';
     </div>
 </div>
 
-<div class="modal fade" id="schemeModal" tabindex="-1" aria-labelledby="schemeModalLabel" aria-hidden="true">
+<div class="modal fade no-print" id="schemeModal" tabindex="-1" aria-labelledby="schemeModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
             <form method="POST" id="schemeForm">
@@ -413,7 +527,9 @@ require __DIR__ . '/../_season_bar.php';
 </script>
 <?php endif; ?>
 
-<div class="alert alert-info mb-0">
+<p class="text-muted small mt-2 no-print">For PDF: click Print / PDF and choose “Save as PDF”.</p>
+
+<div class="alert alert-info mb-0 no-print">
     <strong>How ranking works:</strong> Match results determine each event’s finish order (Champion, 1st Runner Up, …).
     <?php if (canManageEventRankings()): ?>
     Staff can <a href="<?= BASE_URL ?>/intramurals/rankings/index.php">enter official ranks directly</a> only for events that do not have scheduled matches.
@@ -421,5 +537,7 @@ require __DIR__ . '/../_season_bar.php';
     Overall intramurals standing sums the <em>placement points</em> from each event’s assigned scheme.
     Change scheme values anytime — rankings recalculate automatically.
 </div>
+
+<?= renderReportFooter($viewOnly ? 'Point System by Event' : 'Placement Point System') ?>
 
 <?php require_once __DIR__ . '/../../includes/footer.php'; ?>

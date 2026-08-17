@@ -17,7 +17,7 @@ try {
 
 $pageTitle = 'Live Rankings';
 $apiUrl = BASE_URL . '/api/live_standings.php';
-$refreshSeconds = 20;
+$refreshSeconds = 60;
 $stylePath = __DIR__ . '/assets/css/style.css';
 $styleVersion = is_file($stylePath) ? (string) filemtime($stylePath) : APP_VERSION;
 ?>
@@ -51,6 +51,7 @@ $styleVersion = is_file($stylePath) ? (string) filemtime($stylePath) : APP_VERSI
             <p class="live-board-lead">Live intramurals overall rankings, medal tally, and per-event standings.</p>
             <div class="live-board-cta">
                 <a class="btn btn-light btn-lg" href="#live-panels">View standings</a>
+                <a class="btn btn-outline-light btn-lg" href="<?= BASE_URL ?>/committees.php">Working committees</a>
                 <?php if (isLoggedIn()): ?>
                 <a class="btn btn-outline-light btn-lg" href="<?= sanitize(getHomeUrl()) ?>">Go to dashboard</a>
                 <?php else: ?>
@@ -184,12 +185,12 @@ $styleVersion = is_file($stylePath) ? (string) filemtime($stylePath) : APP_VERSI
         }
         els.overall.innerHTML = groups.map(g => {
             const labels = g.sport_labels || [];
-            const headers = labels.map(l => `<th title="${esc(l)}">${esc(l)}</th>`).join('');
+            const headers = labels.map(l => `<th class="live-event-col" title="${esc(l)}">${esc(l)}</th>`).join('');
             const rows = (g.standings || []).map(r => {
-                const pts = labels.map(l => `<td>${esc(r.sports && r.sports[l] != null ? r.sports[l] : 0)}</td>`).join('');
+                const pts = labels.map(l => `<td class="live-event-col">${esc(r.sports && r.sports[l] != null ? r.sports[l] : 0)}</td>`).join('');
                 return `<tr>
-                    <td class="live-rank">${esc(r.division_rank)}</td>
-                    <td>${teamCell(r)}</td>
+                    <td class="live-rank live-sticky live-sticky-1">${esc(r.division_rank)}</td>
+                    <td class="live-sticky live-sticky-2">${teamCell(r)}</td>
                     ${pts}
                     <td class="live-strong">${esc(r.total)}</td>
                 </tr>`;
@@ -206,8 +207,8 @@ $styleVersion = is_file($stylePath) ? (string) filemtime($stylePath) : APP_VERSI
                     <table class="live-table">
                         <thead>
                             <tr>
-                                <th>#</th>
-                                <th>Team</th>
+                                <th class="live-sticky live-sticky-1">#</th>
+                                <th class="live-sticky live-sticky-2">Team</th>
                                 ${headers}
                                 <th>Total</th>
                             </tr>
@@ -228,8 +229,8 @@ $styleVersion = is_file($stylePath) ? (string) filemtime($stylePath) : APP_VERSI
         els.medals.innerHTML = groups.map(g => {
             const mt = g.medal_totals || {};
             const rows = (g.medal_tally || []).map(r => `<tr>
-                <td class="live-rank">${esc(r.medal_rank)}</td>
-                <td>${teamCell(r)}</td>
+                <td class="live-rank live-sticky live-sticky-1">${esc(r.medal_rank)}</td>
+                <td class="live-sticky live-sticky-2">${teamCell(r)}</td>
                 <td class="live-medal-col live-medal-col--gold">${esc(r.gold)}</td>
                 <td class="live-medal-col live-medal-col--silver">${esc(r.silver)}</td>
                 <td class="live-medal-col live-medal-col--bronze">${esc(r.bronze)}</td>
@@ -248,8 +249,8 @@ $styleVersion = is_file($stylePath) ? (string) filemtime($stylePath) : APP_VERSI
                     <table class="live-table">
                         <thead>
                             <tr>
-                                <th>#</th>
-                                <th>Team</th>
+                                <th class="live-sticky live-sticky-1">#</th>
+                                <th class="live-sticky live-sticky-2">Team</th>
                                 <th>Gold</th>
                                 <th>Silver</th>
                                 <th>Bronze</th>
@@ -259,7 +260,8 @@ $styleVersion = is_file($stylePath) ? (string) filemtime($stylePath) : APP_VERSI
                         </thead>
                         <tbody>${rows || '<tr><td colspan="7" class="live-empty-cell">No teams.</td></tr>'}
                         ${(g.medal_tally || []).length ? `<tr class="live-totals">
-                            <td></td><td>Total</td>
+                            <td class="live-sticky live-sticky-1"></td>
+                            <td class="live-sticky live-sticky-2">Total</td>
                             <td class="live-medal-col live-medal-col--gold">${esc(mt.gold || 0)}</td>
                             <td class="live-medal-col live-medal-col--silver">${esc(mt.silver || 0)}</td>
                             <td class="live-medal-col live-medal-col--bronze">${esc(mt.bronze || 0)}</td>
@@ -298,9 +300,9 @@ $styleVersion = is_file($stylePath) ? (string) filemtime($stylePath) : APP_VERSI
                 const rows = (d.standings || []).map(r => {
                     const rank = r.rank >= 1000 ? '—' : r.rank;
                     return `<tr>
-                        <td class="live-rank">${esc(rank)}</td>
+                        <td class="live-rank live-sticky live-sticky-1">${esc(rank)}</td>
+                        <td class="live-sticky live-sticky-2">${teamCell(r)}</td>
                         <td>${esc(r.placement_label || '—')}</td>
-                        <td>${teamCell(r)}</td>
                         <td>${esc(r.played)}</td>
                         <td>${esc(r.wins)}-${esc(r.losses)}-${esc(r.draws)}</td>
                         <td>${esc(r.points)}</td>
@@ -314,9 +316,9 @@ $styleVersion = is_file($stylePath) ? (string) filemtime($stylePath) : APP_VERSI
                         <table class="live-table">
                             <thead>
                                 <tr>
-                                    <th>#</th>
+                                    <th class="live-sticky live-sticky-1">#</th>
+                                    <th class="live-sticky live-sticky-2">Team</th>
                                     <th>Place</th>
-                                    <th>Team</th>
                                     <th>P</th>
                                     <th>W-L-D</th>
                                     <th>Match</th>

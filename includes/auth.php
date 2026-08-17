@@ -6,6 +6,7 @@
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/functions.php';
 require_once __DIR__ . '/intramurals.php';
+require_once __DIR__ . '/committees.php';
 
 function isLoggedIn(): bool
 {
@@ -538,6 +539,26 @@ function requireSportsCatalogAccess(): void
     requireIntramuralsAccess();
     if (!canViewSportsCatalog()) {
         flash('error', 'You do not have permission to view Sports Management.');
+        redirect(getHomeUrl());
+    }
+}
+
+/** Placement Point System — staff can edit; unit managers and secretariat may view only. */
+function canViewPointSystem(): bool
+{
+    return canManageIntramurals() || hasRole('unit_manager') || isSecretariat();
+}
+
+function isPointSystemViewOnly(): bool
+{
+    return !canManageIntramurals() && (hasRole('unit_manager') || isSecretariat());
+}
+
+function requirePointSystemAccess(): void
+{
+    requireIntramuralsAccess();
+    if (!canViewPointSystem()) {
+        flash('error', 'You do not have permission to view the Point System.');
         redirect(getHomeUrl());
     }
 }

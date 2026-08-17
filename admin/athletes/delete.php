@@ -4,8 +4,8 @@ requireRole(['admin']);
 
 $db = getDB();
 $errors = [];
-$search = trim((string) get('search'));
-$teamFilter = trim((string) get('team'));
+$search = trim((string) (($_SERVER['REQUEST_METHOD'] === 'POST') ? post('search') : get('search')));
+$teamFilter = trim((string) (($_SERVER['REQUEST_METHOD'] === 'POST') ? post('team') : get('team')));
 $page = max(1, (int) get('page', '1'));
 $perPage = 20;
 
@@ -15,6 +15,25 @@ $filterQuery = static function (array $extra = []) use ($search, $teamFilter): s
         'team' => $teamFilter !== '' ? $teamFilter : null,
     ] + $extra, static fn($v) => $v !== null && $v !== '');
     return $q === [] ? '' : ('?' . http_build_query($q));
+};
+
+$buildAthleteFilter = static function (string $search, string $teamFilter): array {
+    $where = ['1=1'];
+    $params = [];
+    if ($search !== '') {
+        $where[] = '(a.first_name LIKE ? OR a.last_name LIKE ? OR a.student_id LIKE ? OR a.athlete_code LIKE ?)';
+        $like = '%' . $search . '%';
+        $params = array_merge($params, [$like, $like, $like, $like]);
+    }
+    if ($teamFilter !== '') {
+        if ($teamFilter === '0') {
+            $where[] = 'a.team_id IS NULL';
+        } else {
+            $where[] = 'a.team_id = ?';
+            $params[] = (int) $teamFilter;
+        }
+    }
+    return [implode(' AND ', $where), $params];
 };
 
 /**
@@ -28,6 +47,9 @@ $hardDeleteAthlete = static function (PDO $db, array $athlete): void {
         deleteUploadedFile((string) $photo, UPLOAD_PATH_ATHLETES);
     }
 };
+
+[$whereClause, $params] = $buildAthleteFilter($search, $teamFilter);
+$hasActiveFilter = ($search !== '' || $teamFilter !== '');
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
     $action = post('action');
@@ -59,55 +81,62 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
         redirect(BASE_URL . '/admin/athletes/delete.php' . $filterQuery($page > 1 ? ['page' => (string) $page] : []));
     }
 
-    if ($action === 'delete_all') {
+    if ($action === 'delete_filtered') {
         $confirm = trim((string) post('confirm_text'));
-        if ($confirm !== 'DELETE ALL') {
-            $errors[] = 'Type DELETE ALL exactly to confirm wiping every athlete record.';
+        $expectedConfirm = $hasActiveFilter ? 'DELETE FILTERED' : 'DELETE ALL';
+        if ($confirm !== $expectedConfirm) {
+            $errors[] = 'Type ' . $expectedConfirm . ' exactly to confirm.';
         } else {
             try {
-                $photos = $db->query('SELECT photo FROM intramural_athletes WHERE photo IS NOT NULL AND photo != ""')->fetchAll(PDO::FETCH_COLUMN) ?: [];
-                $count = (int) $db->query('SELECT COUNT(*) FROM intramural_athletes')->fetchColumn();
+                $countStmt = $db->prepare("SELECT COUNT(*) FROM intramural_athletes a WHERE $whereClause");
+                $countStmt->execute($params);
+                $count = (int) $countStmt->fetchColumn();
+
+                if ($count === 0) {
+                    flash('danger', 'No athletes match the current filters.');
+                    redirect(BASE_URL . '/admin/athletes/delete.php' . $filterQuery());
+                }
+
+                $photoStmt = $db->prepare(
+                    "SELECT a.photo FROM intramural_athletes a
+                     WHERE $whereClause AND a.photo IS NOT NULL AND a.photo != ''"
+                );
+                $photoStmt->execute($params);
+                $photos = $photoStmt->fetchAll(PDO::FETCH_COLUMN) ?: [];
+
                 $db->beginTransaction();
-                // Registrations cascade from athletes; clear explicitly for clarity on older DBs.
-                $db->exec('DELETE FROM intramural_registrations');
-                $db->exec('DELETE FROM intramural_athletes');
+                // Registrations cascade from athletes; clear explicitly for older DBs.
+                $db->prepare(
+                    "DELETE r FROM intramural_registrations r
+                     INNER JOIN intramural_athletes a ON a.id = r.athlete_id
+                     WHERE $whereClause"
+                )->execute($params);
+                $db->prepare("DELETE a FROM intramural_athletes a WHERE $whereClause")->execute($params);
                 $db->commit();
+
                 foreach ($photos as $photo) {
                     if (function_exists('deleteUploadedFile')) {
                         deleteUploadedFile((string) $photo, UPLOAD_PATH_ATHLETES);
                     }
                 }
-                auditLog((int) $_SESSION['user_id'], 'hard_delete_all', 'intramural_athlete', null, null, [
+
+                auditLog((int) $_SESSION['user_id'], 'hard_delete_filtered', 'intramural_athlete', null, null, [
                     'deleted_count' => $count,
+                    'search' => $search,
+                    'team' => $teamFilter,
                 ]);
-                flash('success', $count . ' athlete(s) permanently deleted.');
-                redirect(BASE_URL . '/admin/athletes/delete.php');
+                flash('success', $count . ' athlete(s) permanently deleted'
+                    . ($hasActiveFilter ? ' matching the current filters.' : '.'));
+                redirect(BASE_URL . '/admin/athletes/delete.php' . $filterQuery());
             } catch (Throwable $e) {
                 if ($db->inTransaction()) {
                     $db->rollBack();
                 }
-                $errors[] = 'Delete all failed. Some records may still be linked. Try again or check the database.';
+                $errors[] = 'Delete failed. Some records may still be linked. Try again or check the database.';
             }
         }
     }
 }
-
-$where = ['1=1'];
-$params = [];
-if ($search !== '') {
-    $where[] = '(a.first_name LIKE ? OR a.last_name LIKE ? OR a.student_id LIKE ? OR a.athlete_code LIKE ?)';
-    $like = '%' . $search . '%';
-    $params = array_merge($params, [$like, $like, $like, $like]);
-}
-if ($teamFilter !== '') {
-    if ($teamFilter === '0') {
-        $where[] = 'a.team_id IS NULL';
-    } else {
-        $where[] = 'a.team_id = ?';
-        $params[] = (int) $teamFilter;
-    }
-}
-$whereClause = implode(' AND ', $where);
 
 $teams = $db->query('SELECT id, name FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll() ?: [];
 
@@ -130,6 +159,27 @@ $athletes = $listStmt->fetchAll() ?: [];
 
 $totalAthletes = (int) $db->query('SELECT COUNT(*) FROM intramural_athletes')->fetchColumn();
 $inactiveCount = (int) $db->query('SELECT COUNT(*) FROM intramural_athletes WHERE is_active = 0')->fetchColumn();
+
+$filterSummaryParts = [];
+if ($search !== '') {
+    $filterSummaryParts[] = 'search “' . $search . '”';
+}
+if ($teamFilter === '0') {
+    $filterSummaryParts[] = 'no team';
+} elseif ($teamFilter !== '') {
+    $teamName = 'team #' . $teamFilter;
+    foreach ($teams as $t) {
+        if ((string) $t['id'] === $teamFilter) {
+            $teamName = (string) $t['name'];
+            break;
+        }
+    }
+    $filterSummaryParts[] = 'team “' . $teamName . '”';
+}
+$filterSummary = $filterSummaryParts === []
+    ? 'all athletes (no filters applied)'
+    : implode(' and ', $filterSummaryParts);
+$confirmPhrase = $hasActiveFilter ? 'DELETE FILTERED' : 'DELETE ALL';
 
 $pageTitle = 'Delete Athletes';
 require_once __DIR__ . '/../../includes/header.php';
@@ -161,6 +211,14 @@ require_once __DIR__ . '/../../includes/header.php';
     <div class="col-6 col-md-3">
         <div class="card h-100">
             <div class="card-body">
+                <div class="text-muted small">Matching filters</div>
+                <div class="fs-4 fw-semibold"><?= $totalFiltered ?></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card h-100">
+            <div class="card-body">
                 <div class="text-muted small">Inactive (soft-deleted)</div>
                 <div class="fs-4 fw-semibold"><?= $inactiveCount ?></div>
             </div>
@@ -168,36 +226,11 @@ require_once __DIR__ . '/../../includes/header.php';
     </div>
 </div>
 
-<div class="card border-danger mb-4">
-    <div class="card-header bg-danger text-white">
-        <i class="bi bi-exclamation-triangle"></i> Delete all athletes
-    </div>
-    <div class="card-body">
-        <p class="mb-3">
-            Removes <strong>every</strong> athlete and all sport registrations. Photos on disk are removed too.
-            Match results are kept (they do not store athlete IDs).
-        </p>
-        <form method="POST" class="row g-2 align-items-end" onsubmit="return confirm('Permanently delete ALL <?= (int) $totalAthletes ?> athletes? This cannot be undone.');">
-            <?= csrfField() ?>
-            <input type="hidden" name="action" value="delete_all">
-            <div class="col-md-6">
-                <label class="form-label" for="confirm_text">Type <code>DELETE ALL</code> to confirm</label>
-                <input type="text" name="confirm_text" id="confirm_text" class="form-control" autocomplete="off" <?= $totalAthletes === 0 ? 'disabled' : '' ?>>
-            </div>
-            <div class="col-md-auto">
-                <button type="submit" class="btn btn-danger" <?= $totalAthletes === 0 ? 'disabled' : '' ?>>
-                    Delete all athletes
-                </button>
-            </div>
-        </form>
-    </div>
-</div>
-
-<div class="card">
-    <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
-        <span>Delete individual athletes</span>
-        <form method="GET" class="d-flex flex-wrap gap-2 align-items-center">
-            <select name="team" class="form-select form-select-sm" style="min-width: 10rem;">
+<div class="filter-bar filter-bar-inline mb-4">
+    <form method="GET" class="filter-bar-inline__row">
+        <div class="filter-bar-inline__field filter-bar-inline__team">
+            <label class="visually-hidden" for="teamFilter">Team</label>
+            <select name="team" id="teamFilter" class="form-select">
                 <option value="">All teams</option>
                 <option value="0" <?= $teamFilter === '0' ? 'selected' : '' ?>>No team</option>
                 <?php foreach ($teams as $t): ?>
@@ -206,13 +239,68 @@ require_once __DIR__ . '/../../includes/header.php';
                 </option>
                 <?php endforeach; ?>
             </select>
-            <input type="search" name="search" class="form-control form-control-sm" placeholder="Search name / ID"
-                   value="<?= sanitize($search) ?>" style="min-width: 12rem;">
-            <button type="submit" class="btn btn-sm btn-outline-primary">Filter</button>
-            <?php if ($search !== '' || $teamFilter !== ''): ?>
-            <a href="<?= BASE_URL ?>/admin/athletes/delete.php" class="btn btn-sm btn-outline-secondary">Clear</a>
+        </div>
+        <div class="filter-bar-inline__field filter-bar-inline__search">
+            <label class="visually-hidden" for="athleteSearch">Search</label>
+            <input type="search" name="search" id="athleteSearch" class="form-control" placeholder="Search name, student ID, or athlete code"
+                   value="<?= sanitize($search) ?>">
+        </div>
+        <div class="filter-bar-inline__actions">
+            <button type="submit" class="btn btn-primary"><i class="bi bi-funnel"></i> Filter</button>
+            <?php if ($hasActiveFilter): ?>
+            <a href="<?= BASE_URL ?>/admin/athletes/delete.php" class="btn btn-outline-secondary">Clear</a>
             <?php endif; ?>
+        </div>
+    </form>
+    <?php if ($hasActiveFilter): ?>
+    <div class="small text-muted mt-2 mb-0">
+        Showing <?= (int) $totalFiltered ?> of <?= (int) $totalAthletes ?> · <?= sanitize($filterSummary) ?>
+    </div>
+    <?php endif; ?>
+</div>
+
+<div class="card border-danger mb-4">
+    <div class="card-header bg-danger text-white">
+        <i class="bi bi-exclamation-triangle"></i>
+        <?= $hasActiveFilter ? 'Delete filtered athletes' : 'Delete all athletes' ?>
+    </div>
+    <div class="card-body">
+        <p class="mb-2">
+            <?php if ($hasActiveFilter): ?>
+            Removes <strong><?= (int) $totalFiltered ?></strong> athlete(s) matching
+            <strong><?= sanitize($filterSummary) ?></strong>, including their sport registrations and photos.
+            Athletes outside this filter are left untouched.
+            <?php else: ?>
+            No filters are applied, so this removes <strong>every</strong> athlete (<?= (int) $totalAthletes ?>)
+            and all sport registrations. Photos on disk are removed too.
+            <?php endif; ?>
+            Match results are kept (they do not store athlete IDs).
+        </p>
+        <p class="small text-muted mb-3">Current filter: <?= sanitize($filterSummary) ?>.</p>
+        <form method="POST" class="row g-2 align-items-end"
+              onsubmit="return confirm('Permanently delete <?= (int) $totalFiltered ?> athlete(s) matching the current filters? This cannot be undone.');">
+            <?= csrfField() ?>
+            <input type="hidden" name="action" value="delete_filtered">
+            <input type="hidden" name="search" value="<?= sanitize($search) ?>">
+            <input type="hidden" name="team" value="<?= sanitize($teamFilter) ?>">
+            <div class="col-md-6">
+                <label class="form-label" for="confirm_text">Type <code><?= sanitize($confirmPhrase) ?></code> to confirm</label>
+                <input type="text" name="confirm_text" id="confirm_text" class="form-control" autocomplete="off"
+                       <?= $totalFiltered === 0 ? 'disabled' : '' ?>>
+            </div>
+            <div class="col-md-auto">
+                <button type="submit" class="btn btn-danger" <?= $totalFiltered === 0 ? 'disabled' : '' ?>>
+                    <?= $hasActiveFilter ? 'Delete filtered athletes' : 'Delete all athletes' ?>
+                </button>
+            </div>
         </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        Delete individual athletes
+        <span class="text-muted small ms-1">(<?= (int) $totalFiltered ?> matching)</span>
     </div>
     <div class="card-body p-0">
         <?php if (empty($athletes)): ?>
@@ -249,6 +337,8 @@ require_once __DIR__ . '/../../includes/header.php';
                                 <?= csrfField() ?>
                                 <input type="hidden" name="action" value="delete_one">
                                 <input type="hidden" name="athlete_id" value="<?= (int) $a['id'] ?>">
+                                <input type="hidden" name="search" value="<?= sanitize($search) ?>">
+                                <input type="hidden" name="team" value="<?= sanitize($teamFilter) ?>">
                                 <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
                             </form>
                         </td>
