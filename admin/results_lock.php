@@ -38,7 +38,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
             if ($lockDate > date('Y-m-d')) {
                 flash('success', 'Results lock scheduled for ' . formatDate($lockDate) . ' (' . $season['year_label'] . ').');
             } else {
-                flash('success', 'Match results locked for ' . $season['year_label'] . '. Score updates and event rankings are disabled.');
+                flash('success', 'Match results locked for ' . $season['year_label'] . '. Score updates and manual entry of ranks are disabled.');
             }
             redirect(BASE_URL . '/admin/results_lock.php');
         } else {
@@ -209,7 +209,7 @@ $lockedEventCount = count($eventLocks);
                     <li>Live score updates on match details</li>
                     <li>Record / edit match scores and final status</li>
                     <li>Bracket advance from completed results</li>
-                    <li>Manual event rankings entry</li>
+                    <li>Manual entry of ranks</li>
                 </ul>
                 <p class="small text-muted mt-3 mb-0">
                     Season-wide lock covers every event. Per-event lock only blocks that sport. Viewing standings, calendars, and reports stays available. Scheduling match date/time is not blocked.

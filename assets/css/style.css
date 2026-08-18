@@ -1401,7 +1401,7 @@ a.stat-card-link:focus-visible .stat-card {
 }
 
 @media print {
-    .navbar, .footer, .no-print, .btn, .filter-bar, .season-bar {
+    .navbar, .footer, .no-print, .btn, .filter-bar, .season-bar, .modal, .alert-dismissible {
         display: none !important;
     }
     .team-positions-print-division,
@@ -1411,6 +1411,61 @@ a.stat-card-link:focus-visible .stat-card {
     }
     .team-positions-print-report table {
         font-size: 11pt;
+    }
+    .match-schedule-print {
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+    .match-schedule-print .match-schedule-sport-group {
+        break-inside: auto;
+        page-break-inside: auto;
+        margin: 0 0 0.35rem;
+        border-bottom: 1px solid #bbb;
+    }
+    .match-schedule-print .match-schedule-sport-group:last-child {
+        border-bottom: 0;
+        margin-bottom: 0;
+    }
+    .match-schedule-print .match-schedule-sport-header {
+        break-inside: avoid;
+        page-break-inside: avoid;
+        break-after: avoid;
+        page-break-after: avoid;
+        padding: 0.25rem 0 !important;
+        margin: 0 0 0.15rem;
+        background: transparent !important;
+        border-bottom: 1px solid #999 !important;
+    }
+    .match-schedule-print .table-responsive {
+        margin: 0;
+        padding: 0;
+        overflow: visible !important;
+    }
+    .match-schedule-print .match-schedule-table {
+        font-size: 9pt;
+        margin: 0 !important;
+    }
+    .match-schedule-print .match-schedule-table th,
+    .match-schedule-print .match-schedule-table td {
+        padding: 0.2rem 0.35rem !important;
+        vertical-align: top;
+    }
+    .match-schedule-print .match-schedule-table thead {
+        display: table-header-group;
+    }
+    .match-schedule-print .match-schedule-table tr {
+        break-inside: avoid;
+        page-break-inside: avoid;
+    }
+    .match-schedule-print .match-schedule-table .table-warning {
+        background: transparent !important;
+    }
+    .match-schedule-print .badge {
+        border: 1px solid #999;
+        padding: 0.1rem 0.35rem;
+        font-size: 8pt;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
     }
     main, .app-main, .container-fluid {
         padding: 0 !important;
@@ -1480,18 +1535,22 @@ a.stat-card-link:focus-visible .stat-card {
         color: #000 !important;
         text-decoration: none !important;
     }
-    .report-brand-header,
+    .report-brand-header {
+        display: block !important;
+        margin-bottom: 0.35rem !important;
+    }
     .report-brand-footer {
         display: block !important;
+        margin-top: 0.5rem !important;
     }
     .report-brand-inner {
         display: flex !important;
         align-items: center !important;
-        gap: 0.75rem !important;
+        gap: 0.5rem !important;
     }
     .report-brand-logo {
-        height: 72px !important;
-        width: 72px !important;
+        height: 56px !important;
+        width: 56px !important;
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
     }
@@ -1503,8 +1562,23 @@ a.stat-card-link:focus-visible .stat-card {
     .report-brand-generated {
         color: #000 !important;
     }
+    .report-brand-title {
+        font-size: 1.15rem !important;
+        margin: 0.15rem 0 0.05rem !important;
+    }
+    .report-brand-subtitle,
+    .report-brand-meta,
+    .report-brand-generated {
+        font-size: 8pt !important;
+        line-height: 1.25 !important;
+        margin: 0 !important;
+    }
     .report-brand-rule {
         border-top: 2px solid #000 !important;
+        margin: 0.35rem 0 0.5rem !important;
+    }
+    .report-brand-header + .match-schedule-print {
+        margin-top: 0 !important;
     }
 }
 

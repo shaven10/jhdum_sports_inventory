@@ -3,7 +3,7 @@
 .match-team-name .match-roster-trigger,
 .fs-4 .match-roster-trigger { font-size: inherit; line-height: inherit; }
 </style>
-<div class="modal fade" id="matchRosterModal" tabindex="-1" aria-labelledby="matchRosterModalLabel" aria-hidden="true">
+<div class="modal fade no-print" id="matchRosterModal" tabindex="-1" aria-labelledby="matchRosterModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header">

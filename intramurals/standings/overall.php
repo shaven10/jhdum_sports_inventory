@@ -76,7 +76,7 @@ require __DIR__ . '/../_season_bar.php';
         <a href="<?= BASE_URL ?>/admin/divisions/index.php" class="btn btn-outline-secondary"><i class="bi bi-diagram-3"></i> Divisions</a>
         <?php endif; ?>
         <?php if (canManageEventRankings()): ?>
-        <a href="<?= BASE_URL ?>/intramurals/rankings/index.php" class="btn btn-outline-warning"><i class="bi bi-list-ol"></i> Event Rankings</a>
+        <a href="<?= BASE_URL ?>/intramurals/rankings/index.php" class="btn btn-outline-warning"><i class="bi bi-list-ol"></i> Manual Entry of Ranks</a>
         <?php endif; ?>
         <a href="<?= BASE_URL ?>/intramurals/standings/index.php" class="btn btn-outline-primary">Per-Sport Standings</a>
         <a href="?export=medals" class="btn btn-outline-warning"><i class="bi bi-trophy"></i> Medal Excel</a>

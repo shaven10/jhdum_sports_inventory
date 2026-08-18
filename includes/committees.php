@@ -852,6 +852,16 @@ function getPublicWorkingCommitteesGrouped(): array
         ];
     }
 
+    foreach ($buckets as &$bucket) {
+        if (!in_array($bucket['category'], ['sporting_events', 'socio_cultural'], true)) {
+            continue;
+        }
+        usort($bucket['committees'], static function (array $a, array $b): int {
+            return compareWorkingCommitteesChronologically($a['committee'], $b['committee']);
+        });
+    }
+    unset($bucket);
+
     return array_values(array_filter($buckets, static fn(array $b) => $b['committees'] !== []));
 }
 
@@ -868,4 +878,173 @@ function getPublicWorkingCommittees(): array
         }
     }
     return $flat;
+}
+
+/** Parse the first schedule line like "August 24, 2026 @ 8am" from a committee description. */
+function parseCommitteeDescriptionDateTime(?string $description): ?int
+{
+    if ($description === null || trim($description) === '') {
+        return null;
+    }
+    if (preg_match(
+        '/\b(January|February|March|April|May|June|July|August|September|October|November|December'
+        . '\s+\d{1,2},\s+\d{4}\s*@\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?)/i',
+        $description,
+        $m
+    )) {
+        $ts = strtotime(trim($m[1]));
+        return $ts !== false ? $ts : null;
+    }
+
+    return null;
+}
+
+/** Compare committees for chronological display (date/time, then sort order, then name). */
+function compareWorkingCommitteesChronologically(array $a, array $b): int
+{
+    $ta = parseCommitteeDescriptionDateTime($a['description'] ?? null);
+    $tb = parseCommitteeDescriptionDateTime($b['description'] ?? null);
+    if ($ta !== null && $tb !== null && $ta !== $tb) {
+        return $ta <=> $tb;
+    }
+    if ($ta !== null && $tb === null) {
+        return -1;
+    }
+    if ($ta === null && $tb !== null) {
+        return 1;
+    }
+
+    $sort = ((int) ($a['sort_order'] ?? 0)) <=> ((int) ($b['sort_order'] ?? 0));
+    if ($sort !== 0) {
+        return $sort;
+    }
+
+    return strcasecmp((string) ($a['name'] ?? ''), (string) ($b['name'] ?? ''));
+}
+
+/** Sporting + socio-cultural committees in chronological order (cached per request). */
+function getChronologicalEventCommittees(): array
+{
+    static $cache = null;
+    if ($cache !== null) {
+        return $cache;
+    }
+
+    ensureWorkingCommitteesSchema();
+    $cache = array_values(array_filter(
+        getWorkingCommittees(true),
+        static fn(array $c): bool => in_array((string) ($c['category'] ?? ''), ['sporting_events', 'socio_cultural'], true)
+    ));
+    usort($cache, 'compareWorkingCommitteesChronologically');
+
+    return $cache;
+}
+
+function committeeGenderMatchesSport(string $committeeName, string $sportCategory): bool
+{
+    $committeeName = strtolower($committeeName);
+    $sportCategory = strtolower(trim($sportCategory));
+    $hasMen = str_contains($committeeName, 'men');
+    $hasWomen = str_contains($committeeName, 'women');
+    $isMixed = str_contains($committeeName, 'mix')
+        || str_contains($committeeName, 'men & women')
+        || str_contains($committeeName, 'men and women');
+
+    if ($isMixed || (!$hasMen && !$hasWomen)) {
+        return true;
+    }
+    if ($sportCategory === 'mixed') {
+        return $isMixed;
+    }
+    if ($sportCategory === 'men') {
+        return $hasMen;
+    }
+    if ($sportCategory === 'women') {
+        return $hasWomen;
+    }
+
+    return true;
+}
+
+function sportMatchesCommittee(array $sport, array $committee): bool
+{
+    $sportName = strtolower(trim((string) ($sport['name'] ?? '')));
+    $sportCat = strtolower(trim((string) ($sport['category'] ?? '')));
+    $committeeName = strtolower(trim((string) ($committee['name'] ?? '')));
+
+    if ($sportName === '' || $committeeName === '') {
+        return false;
+    }
+
+    $aliasSportToCommittee = [
+        'mlbb/codm' => ['esports', 'mlbb', 'codm'],
+        'basketball 5x5' => ['basketball'],
+        'basketball 3x3' => ['basketball'],
+        'mass power dance' => ['opening program', 'power dance'],
+        'dance sports' => ['dance arts', 'dancesport', 'dance sport'],
+    ];
+    foreach ($aliasSportToCommittee as $sportKey => $committeeKeys) {
+        if (str_starts_with($sportName, $sportKey)) {
+            foreach ($committeeKeys as $key) {
+                if (str_contains($committeeName, $key)) {
+                    return committeeGenderMatchesSport($committeeName, $sportCat);
+                }
+            }
+        }
+    }
+
+    $directSportNames = [
+        'volleyball', 'sepak takraw', 'table tennis', 'badminton', 'lawn tennis',
+        'pickleball', 'athletics', 'chess', 'baseball', 'softball', 'frisbee',
+    ];
+    foreach ($directSportNames as $base) {
+        if (str_starts_with($sportName, $base) && str_contains($committeeName, $base)) {
+            return committeeGenderMatchesSport($committeeName, $sportCat);
+        }
+    }
+
+    $socioNames = ['visual arts', 'literary arts', 'quiz bowl', 'music', 'opening program'];
+    foreach ($socioNames as $name) {
+        if (str_contains($sportName, $name) && str_contains($committeeName, $name)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/** Chronological rank for an intramural sport/event (lower = earlier). */
+function sportChronologicalRank(array $sport): int
+{
+    static $rankBySportId = [];
+    $id = (int) ($sport['id'] ?? 0);
+    if ($id > 0 && isset($rankBySportId[$id])) {
+        return $rankBySportId[$id];
+    }
+
+    foreach (getChronologicalEventCommittees() as $i => $committee) {
+        if (sportMatchesCommittee($sport, $committee)) {
+            if ($id > 0) {
+                $rankBySportId[$id] = $i;
+            }
+            return $i;
+        }
+    }
+
+    $fallback = 9000 + (abs(crc32(strtolower(sportLabel($sport)))) % 1000);
+    if ($id > 0) {
+        $rankBySportId[$id] = $fallback;
+    }
+
+    return $fallback;
+}
+
+function compareSportsChronologically(array $a, array $b): int
+{
+    $rank = sportChronologicalRank($a) <=> sportChronologicalRank($b);
+    if ($rank !== 0) {
+        return $rank;
+    }
+
+    return strcasecmp(sportLabel($a), sportLabel($b));
 }

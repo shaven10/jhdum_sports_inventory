@@ -1261,7 +1261,7 @@ function sdsRubberLegs(): array
     return [
         ['suffix' => 'Singles 1', 'note' => 'First singles rubber'],
         ['suffix' => 'Doubles', 'note' => 'Doubles rubber'],
-        ['suffix' => 'Singles 2', 'note' => 'Second singles rubber'],
+        ['suffix' => 'Singles 2', 'note' => 'Deciding singles rubber if tied 1–1 after Singles 1 and Doubles'],
     ];
 }
 
@@ -1293,7 +1293,7 @@ function expandTiesToSdsFixtures(array $ties): array
             } elseif ($isTbd) {
                 $noteParts[] = 'TBD — fill teams after previous SDS ties';
             }
-            $noteParts[] = 'SDS tie #' . $tieNum . ' — ' . $leg['note'] . '. Team wins the tie with 2 of 3 rubbers.';
+            $noteParts[] = 'SDS tie #' . $tieNum . ' — ' . $leg['note'] . '. Team wins the tie with 2 of 3 rubbers; Singles 2 plays only if tied 1–1 after Singles 1 and Doubles.';
             $fixtures[] = [
                 'team_a_id' => $tie['team_a_id'],
                 'team_b_id' => $tie['team_b_id'],
@@ -1397,6 +1397,113 @@ function expandChessBoardFixtures(array $fixtures, int $boardsPerTeam): array
     }
 
     return $expanded;
+}
+
+function isSepakTakrawSport(string $sportName): bool
+{
+    return str_contains(strtolower(trim($sportName)), 'sepak');
+}
+
+/** Elimination formats where Sepak Takraw team ties expand into 1st/2nd/3rd Regu (best of 3). */
+function isSepakTakrawReguFormat(?string $format): bool
+{
+    return in_array((string) $format, [
+        'single_elimination',
+        'single_elimination_consolation',
+        'modified_single_elimination_consolation',
+    ], true);
+}
+
+function shouldExpandSepakTakrawRegus(array $sport): bool
+{
+    $name = (string) ($sport['name'] ?? $sport['sport_name'] ?? '');
+    return isSepakTakrawSport($name)
+        && isSepakTakrawReguFormat($sport['tournament_format'] ?? null);
+}
+
+/** Attach sport name / format to a match row when only sport_id is present. */
+function enrichMatchWithSport(PDO $db, array $match): array
+{
+    $name = (string) ($match['name'] ?? $match['sport_name'] ?? '');
+    $format = $match['tournament_format'] ?? null;
+    if ($name !== '' && $format !== null) {
+        return $match;
+    }
+    $sportId = (int) ($match['sport_id'] ?? 0);
+    if ($sportId <= 0) {
+        return $match;
+    }
+
+    static $cache = [];
+    if (!isset($cache[$sportId])) {
+        $stmt = $db->prepare('SELECT name, tournament_format FROM intramural_sports WHERE id = ?');
+        $stmt->execute([$sportId]);
+        $cache[$sportId] = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    if ($name === '') {
+        $match['name'] = $cache[$sportId]['name'] ?? '';
+        $match['sport_name'] = $match['name'];
+    }
+    if ($format === null) {
+        $match['tournament_format'] = $cache[$sportId]['tournament_format'] ?? null;
+    }
+
+    return $match;
+}
+
+/** Regu order for each Sepak Takraw team tie (best of 3; 3rd regu only if tied 1–1). */
+function sepakTakrawReguLegs(): array
+{
+    return [
+        ['suffix' => '1st Regu', 'note' => 'First regu'],
+        ['suffix' => '2nd Regu', 'note' => 'Second regu'],
+        ['suffix' => '3rd Regu', 'note' => 'Deciding regu if tied 1–1 after the first two'],
+    ];
+}
+
+/**
+ * Expand each team-vs-team tie into Sepak Takraw regus (best of 3).
+ *
+ * @param list<array<string, mixed>> $ties
+ * @return list<array<string, mixed>>
+ */
+function expandTiesToReguFixtures(array $ties): array
+{
+    $legs = sepakTakrawReguLegs();
+    $fixtures = [];
+    $order = 0;
+    $tieNum = 0;
+
+    foreach ($ties as $tie) {
+        $tieNum++;
+        $roundLabel = (string) ($tie['round_label'] ?? ('Round ' . (int) ($tie['round_number'] ?? 1)));
+        $baseRound = (int) ($tie['round_number'] ?? 1);
+        $isTbd = empty($tie['team_a_id']) || empty($tie['team_b_id']);
+        $baseNotes = trim((string) ($tie['notes'] ?? ''));
+
+        foreach ($legs as $leg) {
+            $order++;
+            $noteParts = [];
+            if ($baseNotes !== '') {
+                $noteParts[] = $baseNotes;
+            } elseif ($isTbd) {
+                $noteParts[] = 'TBD — fill teams after previous regu ties';
+            }
+            $noteParts[] = 'Regu tie #' . $tieNum . ' — ' . $leg['note']
+                . '. Team wins the tie with 2 regus; 3rd regu plays only if tied 1–1 after the first two.';
+            $fixtures[] = [
+                'team_a_id' => $tie['team_a_id'],
+                'team_b_id' => $tie['team_b_id'],
+                'round_number' => $baseRound,
+                'round_label' => $roundLabel . ' — ' . $leg['suffix'],
+                'match_order' => $order,
+                'notes' => implode('. ', $noteParts),
+            ];
+        }
+    }
+
+    return $fixtures;
 }
 
 /**
@@ -2866,6 +2973,10 @@ function generateMatchesForSports(array $sportIds, int $seasonId, ?array $shared
                 $fixtures = expandChessBoardFixtures($fixtures, $boards);
             }
 
+            if (shouldExpandSepakTakrawRegus($sport)) {
+                $fixtures = expandTiesToReguFixtures($fixtures);
+            }
+
             $batches[] = [
                 'sport_id' => $sportId,
                 'division_id' => $group['division_id'],
@@ -3777,11 +3888,13 @@ function getMatchOutcome(array $match): ?array
     }
 
     $status = (string) ($match['status'] ?? '');
+    $scoreA = array_key_exists('score_a', $match) && $match['score_a'] !== null ? (int) $match['score_a'] : null;
+    $scoreB = array_key_exists('score_b', $match) && $match['score_b'] !== null ? (int) $match['score_b'] : null;
     $winner = !empty($match['winner_team_id'])
         ? (int) $match['winner_team_id']
         : determineMatchWinner(
-            $match['score_a'] !== null ? (int) $match['score_a'] : null,
-            $match['score_b'] !== null ? (int) $match['score_b'] : null,
+            $scoreA,
+            $scoreB,
             $teamA,
             $teamB,
             $status,
@@ -3809,6 +3922,26 @@ function isChampionshipFinalMatch(array $match): bool
     $label = strtolower(trim((string) ($match['round_label'] ?? '')));
     $base = trim(preg_replace('/\s*—\s*SDS.*$/i', '', $label) ?? $label);
     return ($base === 'final' || str_starts_with($label, 'final')) && !isConsolationMatch($match);
+}
+
+/**
+ * Split generated matches into per-division buckets (0 = unassigned).
+ *
+ * @param list<array> $matches
+ * @return array<string, list<array>>
+ */
+function partitionMatchesByDivision(array $matches): array
+{
+    $groups = [];
+    foreach ($matches as $m) {
+        $key = (string) ((int) ($m['division_id'] ?? 0));
+        if (!isset($groups[$key])) {
+            $groups[$key] = [];
+        }
+        $groups[$key][] = $m;
+    }
+
+    return $groups;
 }
 
 /**
@@ -3908,28 +4041,15 @@ function collapseSdsTies(array $matches): array
     $buffer = [];
 
     $flush = static function () use (&$ties, &$buffer): void {
-        if (count($buffer) < 1) {
-            return;
-        }
-        $wins = [];
-        foreach ($buffer as $m) {
-            $out = getMatchOutcome($m);
-            if (!$out) {
-                $buffer = [];
-                return;
-            }
-            $w = (int) $out['winner'];
-            $wins[$w] = ($wins[$w] ?? 0) + 1;
-        }
-        arsort($wins);
-        $winner = (int) array_key_first($wins);
-        $teamA = (int) ($buffer[0]['team_a_id'] ?? 0);
-        $teamB = (int) ($buffer[0]['team_b_id'] ?? 0);
-        $loser = $winner === $teamA ? $teamB : $teamA;
-        if ($winner > 0 && $loser > 0) {
-            $ties[] = ['winner' => $winner, 'loser' => $loser, 'matches' => $buffer];
+        $result = sdsTieIsDecided($buffer);
+        if ($result) {
+            $ties[] = $result;
         }
         $buffer = [];
+    };
+
+    $baseLabel = static function (array $m): string {
+        return preg_replace('/\s*—\s*SDS\s+.*$/i', '', (string) ($m['round_label'] ?? '')) ?? '';
     };
 
     foreach ($matches as $m) {
@@ -3941,13 +4061,12 @@ function collapseSdsTies(array $matches): array
         if ($buffer && (
             (int) ($buffer[0]['team_a_id'] ?? 0) !== (int) ($m['team_a_id'] ?? 0)
             || (int) ($buffer[0]['team_b_id'] ?? 0) !== (int) ($m['team_b_id'] ?? 0)
-            || preg_replace('/\s*—\s*SDS.*/', '', (string) ($buffer[0]['round_label'] ?? ''))
-                !== preg_replace('/\s*—\s*SDS.*/', '', $label)
+            || $baseLabel($buffer[0]) !== $baseLabel($m)
         )) {
             $flush();
         }
         $buffer[] = $m;
-        if (count($buffer) >= 3) {
+        if (sdsTieIsDecided($buffer) || count($buffer) >= 3) {
             $flush();
         }
     }
@@ -3993,12 +4112,40 @@ function advanceBracketFromResults(int $sportId, int $seasonId): array
     $details = [];
 
     if ($format === 'team_play_sds') {
-        $updated += advanceSdsBracket($db, $matches, $details);
+        foreach (partitionMatchesByDivision($matches) as $divMatches) {
+            $updated += advanceSdsBracket($db, $divMatches, $details);
+        }
         return ['updated' => $updated, 'details' => $details];
     }
     if ($format === 'team_play_sds_consolation') {
-        $updated += advanceSdsConsolationBracket($db, $matches, $details);
+        foreach (partitionMatchesByDivision($matches) as $divMatches) {
+            $updated += advanceSdsConsolationBracket($db, $divMatches, $details);
+        }
         return ['updated' => $updated, 'details' => $details];
+    }
+    if (shouldExpandSepakTakrawRegus($sport)) {
+        if ($format === 'single_elimination') {
+            foreach (partitionMatchesByDivision($matches) as $divMatches) {
+                $updated += advanceReguBracket($db, $divMatches, $details);
+            }
+            if ($updated === 0 && empty($details)) {
+                $details[] = 'No regu TBD ties were ready to update. Complete previous regus first.';
+            }
+            return ['updated' => $updated, 'details' => $details];
+        }
+        if ($format === 'single_elimination_consolation') {
+            foreach (partitionMatchesByDivision($matches) as $divMatches) {
+                $updated += advanceReguConsolationBracket($db, $divMatches, $details);
+            }
+            return ['updated' => $updated, 'details' => $details];
+        }
+        if ($format === 'modified_single_elimination_consolation') {
+            $updated += advanceModifiedSepakTakrawConsolationBracket($db, $matches, $details);
+            if ($updated === 0 && empty($details)) {
+                $details[] = 'No TBD slots were ready to update. Complete previous regus first.';
+            }
+            return ['updated' => $updated, 'details' => $details];
+        }
     }
     if ($format === 'modified_single_elimination_consolation') {
         $updated += advanceModifiedSingleElimConsolationBracket($db, $matches, $details);
@@ -4008,6 +4155,26 @@ function advanceBracketFromResults(int $sportId, int $seasonId): array
         return ['updated' => $updated, 'details' => $details];
     }
 
+    foreach (partitionMatchesByDivision($matches) as $divMatches) {
+        $updated += advanceClassicBracketGroup($db, $divMatches, $format, $details);
+    }
+
+    if ($updated === 0 && empty($details)) {
+        $details[] = 'No TBD slots were ready to update. Complete previous round matches first.';
+    }
+
+    return ['updated' => $updated, 'details' => $details];
+}
+
+/**
+ * Fill TBD slots for one division in a classic (non-SDS/regu) bracket.
+ *
+ * @param list<array> $matches
+ * @param list<string> $details
+ */
+function advanceClassicBracketGroup(PDO $db, array $matches, string $format, array &$details): int
+{
+    $updated = 0;
     $championship = [];
     $consolation = [];
     foreach ($matches as $m) {
@@ -4032,7 +4199,6 @@ function advanceBracketFromResults(int $sportId, int $seasonId): array
     for ($i = 0; $i < count($champLabels) - 1; $i++) {
         $srcLabel = $champLabels[$i];
         $dstLabel = $champLabels[$i + 1];
-        // Skip pairing into Final from non-semi when consolation exists between — labels are already championship-only
         $src = $champRounds[$srcLabel];
         $dst = $champRounds[$dstLabel];
         $count = fillNextRoundFromWinners($db, $src, $dst, 'winner');
@@ -4124,11 +4290,7 @@ function advanceBracketFromResults(int $sportId, int $seasonId): array
         }
     }
 
-    if ($updated === 0 && empty($details)) {
-        $details[] = 'No TBD slots were ready to update. Complete previous round matches first.';
-    }
-
-    return ['updated' => $updated, 'details' => $details];
+    return $updated;
 }
 
 /**
@@ -4350,6 +4512,819 @@ function advanceSdsConsolationBracket(PDO $db, array $matches, array &$details):
     }
 
     return $updated;
+}
+
+/**
+ * Determine Sepak Takraw regu tie winner when tie is decided (2 regu wins, or 3 regus played).
+ *
+ * @param list<array> $reguMatches
+ * @return array{winner:int,loser:int,matches:list<array>}|null
+ */
+function reguTieIsDecided(array $reguMatches): ?array
+{
+    if (empty($reguMatches)) {
+        return null;
+    }
+
+    $wins = [];
+    foreach ($reguMatches as $m) {
+        $out = getMatchOutcome($m);
+        if (!$out) {
+            continue;
+        }
+        $w = (int) $out['winner'];
+        $wins[$w] = ($wins[$w] ?? 0) + 1;
+    }
+    if (empty($wins)) {
+        return null;
+    }
+
+    arsort($wins);
+    $winner = (int) array_key_first($wins);
+    $topWins = (int) ($wins[$winner] ?? 0);
+    $completed = array_sum($wins);
+    $decided = $topWins >= 2 || $completed >= 3;
+    if (!$decided) {
+        return null;
+    }
+
+    $teamA = (int) ($reguMatches[0]['team_a_id'] ?? 0);
+    $teamB = (int) ($reguMatches[0]['team_b_id'] ?? 0);
+    $loser = $winner === $teamA ? $teamB : $teamA;
+    if ($winner > 0 && $loser > 0) {
+        return ['winner' => $winner, 'loser' => $loser, 'matches' => $reguMatches];
+    }
+
+    return null;
+}
+
+/**
+ * Collapse regu triples into virtual ties with a team winner/loser.
+ *
+ * @param list<array> $matches
+ * @return list<array{winner:int,loser:int,matches:list<array>}>
+ */
+function collapseReguTies(array $matches): array
+{
+    $ties = [];
+    $buffer = [];
+
+    $flush = static function () use (&$ties, &$buffer): void {
+        $result = reguTieIsDecided($buffer);
+        if ($result) {
+            $ties[] = $result;
+        }
+        $buffer = [];
+    };
+
+    $baseLabel = static function (array $m): string {
+        return preg_replace('/\s*—\s*\d+(?:st|nd|rd)\s+Regu.*$/i', '', (string) ($m['round_label'] ?? '')) ?? '';
+    };
+
+    foreach ($matches as $m) {
+        $label = (string) ($m['round_label'] ?? '');
+        if (!preg_match('/\bRegu\b/i', $label)) {
+            $flush();
+            continue;
+        }
+        if ($buffer && (
+            (int) ($buffer[0]['team_a_id'] ?? 0) !== (int) ($m['team_a_id'] ?? 0)
+            || (int) ($buffer[0]['team_b_id'] ?? 0) !== (int) ($m['team_b_id'] ?? 0)
+            || $baseLabel($buffer[0]) !== $baseLabel($m)
+        )) {
+            $flush();
+        }
+        $buffer[] = $m;
+        if (reguTieIsDecided($buffer) || count($buffer) >= 3) {
+            $flush();
+        }
+    }
+    $flush();
+
+    return $ties;
+}
+
+/**
+ * Group regu matches by round label (strip regu suffix).
+ *
+ * @param list<array> $matches
+ * @return array<string, list<array>>
+ */
+function groupReguRoundsByBaseLabel(array $matches): array
+{
+    $rounds = [];
+    foreach ($matches as $m) {
+        $base = trim(preg_replace('/\s*—\s*\d+(?:st|nd|rd)\s+Regu.*$/i', '', (string) ($m['round_label'] ?? '')));
+        if ($base === '') {
+            $base = 'Round ' . (int) ($m['round_number'] ?? 1);
+        }
+        if (!isset($rounds[$base])) {
+            $rounds[$base] = [];
+        }
+        $rounds[$base][] = $m;
+    }
+
+    return $rounds;
+}
+
+/**
+ * Group destination regu rubbers into tie shells (3 legs each).
+ *
+ * @param list<array> $dstMatches
+ * @return list<array{anchor: array, all: list<array>}>
+ */
+function groupReguTieShells(array $dstMatches): array
+{
+    $dstTies = [];
+    foreach ($dstMatches as $m) {
+        $label = (string) ($m['round_label'] ?? '');
+        if (!preg_match('/1st Regu/i', $label)) {
+            continue;
+        }
+        $dstTies[] = ['anchor' => $m, 'all' => []];
+    }
+
+    if (empty($dstTies)) {
+        foreach (array_chunk($dstMatches, 3) as $chunk) {
+            if ($chunk) {
+                $dstTies[] = ['anchor' => $chunk[0], 'all' => $chunk];
+            }
+        }
+        return $dstTies;
+    }
+
+    foreach ($dstTies as &$tie) {
+        $anchorOrder = (int) $tie['anchor']['match_order'];
+        $tie['all'] = array_values(array_filter($dstMatches, static function ($m) use ($anchorOrder) {
+            $mo = (int) $m['match_order'];
+            return $mo >= $anchorOrder && $mo <= $anchorOrder + 2;
+        }));
+    }
+    unset($tie);
+
+    return $dstTies;
+}
+
+/**
+ * Fill regu rubber shells from ordered team pairs.
+ *
+ * @param list<array> $dstMatches
+ * @param list<array{0:int,1:int}> $teamPairs
+ */
+function fillReguTiesFromTeams(PDO $db, array $dstMatches, array $teamPairs): int
+{
+    $dstTies = groupReguTieShells($dstMatches);
+    $updated = 0;
+    foreach ($dstTies as $ti => $dstTie) {
+        $pair = $teamPairs[$ti] ?? null;
+        if (!$pair) {
+            continue;
+        }
+        $a = (int) ($pair[0] ?? 0);
+        $b = (int) ($pair[1] ?? 0);
+        foreach ($dstTie['all'] as $slot) {
+            $row = $slot;
+            if ($a && assignTeamToBracketSlot($db, $row, $a, 'a')) {
+                $updated++;
+            }
+            if ($b && assignTeamToBracketSlot($db, $row, $b, 'b')) {
+                $updated++;
+            }
+        }
+    }
+
+    return $updated;
+}
+
+/**
+ * Resolve a modified-consolation game (Games 1–6) from its regu rubbers.
+ *
+ * @param list<array> $matches
+ * @return array{winner:int,loser:int}|null
+ */
+function getReguGameOutcome(int $game, array $matches): ?array
+{
+    $gameMatches = [];
+    foreach ($matches as $m) {
+        if (modifiedConsolationGameNumber($m) === $game) {
+            $gameMatches[] = $m;
+        }
+    }
+    if (empty($gameMatches)) {
+        return null;
+    }
+    if (count($gameMatches) === 1 && !preg_match('/\bRegu\b/i', (string) ($gameMatches[0]['round_label'] ?? ''))) {
+        return getMatchOutcome($gameMatches[0]);
+    }
+
+    usort($gameMatches, static fn($a, $b) => (int) ($a['match_order'] ?? 0) <=> (int) ($b['match_order'] ?? 0));
+    $ties = collapseReguTies($gameMatches);
+
+    return $ties[0] ?? null;
+}
+
+/**
+ * Assign both teams to every regu slot for a modified-consolation game.
+ *
+ * @param list<array> $matches
+ */
+function fillReguGameTeams(PDO $db, array &$matches, int $game, int $teamA, int $teamB): int
+{
+    $updated = 0;
+    foreach ($matches as &$m) {
+        if (modifiedConsolationGameNumber($m) !== $game) {
+            continue;
+        }
+        if (!preg_match('/\bRegu\b/i', (string) ($m['round_label'] ?? ''))) {
+            continue;
+        }
+        if ($teamA && assignTeamToBracketSlot($db, $m, $teamA, 'a')) {
+            $updated++;
+        }
+        if ($teamB && assignTeamToBracketSlot($db, $m, $teamB, 'b')) {
+            $updated++;
+        }
+    }
+    unset($m);
+
+    return $updated;
+}
+
+/**
+ * Fill Games 3–6 from completed regu results (Modified SE w Consolation + Sepak Takraw).
+ *
+ * @param list<array> $matches
+ * @param list<int> $indexes
+ * @param list<string> $details
+ */
+function advanceModifiedSepakTakrawConsolationGroup(PDO $db, array &$matches, array $indexes, array &$details): int
+{
+    $updated = 0;
+    $fillGame = static function (int $game, int $teamA, int $teamB, string $note) use ($db, &$matches, &$updated, &$details): void {
+        if ($teamA <= 0 || $teamB <= 0) {
+            return;
+        }
+        $count = fillReguGameTeams($db, $matches, $game, $teamA, $teamB);
+        if ($count > 0) {
+            $updated += $count;
+            $details[] = $note;
+        }
+    };
+
+    $outcome = static function (int $game) use (&$matches): ?array {
+        return getReguGameOutcome($game, $matches);
+    };
+
+    $g1 = $outcome(1);
+    $g2 = $outcome(2);
+    if ($g1 && $g2) {
+        $fillGame(3, (int) $g1['loser'], (int) $g2['loser'], 'Filled Game 3 regus with losers of Games 1 and 2.');
+        $fillGame(4, (int) $g1['winner'], (int) $g2['winner'], 'Filled Game 4 regus with winners of Games 1 and 2.');
+    }
+
+    $g3 = $outcome(3);
+    $g4 = $outcome(4);
+    if ($g3 && $g4) {
+        $fillGame(5, (int) $g4['loser'], (int) $g3['winner'], 'Filled Game 5 regus with the Game 4 loser and Game 3 winner.');
+    }
+
+    $g5 = $outcome(5);
+    if ($g4 && $g5) {
+        $fillGame(6, (int) $g4['winner'], (int) $g5['winner'], 'Filled Game 6 regus with the undefeated Game 4 winner and Game 5 winner.');
+    }
+
+    return $updated;
+}
+
+/**
+ * @param list<array> $matches
+ * @param list<string> $details
+ */
+function advanceModifiedSepakTakrawConsolationBracket(PDO $db, array &$matches, array &$details): int
+{
+    $indexesByDivision = [];
+    foreach ($matches as $i => $m) {
+        $divKey = (string) ((int) ($m['division_id'] ?? 0));
+        $indexesByDivision[$divKey][] = $i;
+    }
+
+    $updated = 0;
+    foreach ($indexesByDivision as $indexes) {
+        $updated += advanceModifiedSepakTakrawConsolationGroup($db, $matches, $indexes, $details);
+    }
+
+    $details = array_values(array_unique($details));
+    return $updated;
+}
+
+/**
+ * Advance regu single-elim ties (best of 3) into later TBD ties.
+ *
+ * @param list<array> $matches
+ * @param list<string> $details
+ */
+function advanceReguBracket(PDO $db, array $matches, array &$details, bool $quiet = false): int
+{
+    $rounds = groupReguRoundsByBaseLabel($matches);
+    $labels = array_keys($rounds);
+    $updated = 0;
+
+    for ($i = 0; $i < count($labels) - 1; $i++) {
+        $srcTies = collapseReguTies($rounds[$labels[$i]]);
+        if (empty($srcTies)) {
+            continue;
+        }
+
+        $winners = array_map(static fn($t) => (int) $t['winner'], $srcTies);
+        $dstTies = groupReguTieShells($rounds[$labels[$i + 1]]);
+        $needed = count($dstTies) * 2;
+        if ($needed < 1 || count($winners) < $needed) {
+            continue;
+        }
+
+        $pairs = [];
+        for ($p = 0; $p < count($dstTies); $p++) {
+            $pairs[] = [$winners[$p * 2] ?? 0, $winners[$p * 2 + 1] ?? 0];
+        }
+        $count = fillReguTiesFromTeams($db, $rounds[$labels[$i + 1]], $pairs);
+        if ($count > 0) {
+            $updated += $count;
+            $details[] = 'Advanced regu winners from ' . $labels[$i] . ' → ' . $labels[$i + 1] . '.';
+        }
+    }
+
+    if ($updated === 0 && !$quiet) {
+        $details[] = 'No regu TBD ties were ready to update.';
+    }
+
+    return $updated;
+}
+
+/**
+ * Advance regu championship + consolation ties (3rd place and 5th–8th).
+ *
+ * @param list<array> $matches
+ * @param list<string> $details
+ */
+function advanceReguConsolationBracket(PDO $db, array $matches, array &$details): int
+{
+    $championship = [];
+    $consolation = [];
+    foreach ($matches as $m) {
+        if (isConsolationMatch($m)) {
+            $consolation[] = $m;
+        } else {
+            $championship[] = $m;
+        }
+    }
+
+    $updated = advanceReguBracket($db, $championship, $details, true);
+    $champRounds = groupReguRoundsByBaseLabel($championship);
+    $champLabels = array_keys($champRounds);
+
+    $semiLabel = null;
+    foreach ($champLabels as $label) {
+        if (stripos($label, 'semi') !== false) {
+            $semiLabel = $label;
+            break;
+        }
+    }
+
+    $thirdMatches = [];
+    $consolationPlain = [];
+    foreach ($consolation as $cm) {
+        if (stripos((string) $cm['round_label'], '3rd') !== false) {
+            $thirdMatches[] = $cm;
+        } else {
+            $consolationPlain[] = $cm;
+        }
+    }
+
+    if ($semiLabel && $thirdMatches) {
+        $semiTies = collapseReguTies($champRounds[$semiLabel]);
+        if (count($semiTies) >= 2) {
+            $count = fillReguTiesFromTeams($db, $thirdMatches, [[
+                (int) $semiTies[0]['loser'],
+                (int) $semiTies[1]['loser'],
+            ]]);
+            if ($count > 0) {
+                $updated += $count;
+                $details[] = 'Filled Consolation Final (3rd Place) regus from semi-final losers.';
+            }
+        }
+    }
+
+    $consolationRounds = groupReguRoundsByBaseLabel($consolationPlain);
+    $consolationLabels = array_keys($consolationRounds);
+
+    if (!empty($champLabels) && !empty($consolationLabels)) {
+        $firstChampTies = collapseReguTies($champRounds[$champLabels[0]]);
+        $firstConsolation = $consolationRounds[$consolationLabels[0]];
+        $neededLosers = count(groupReguTieShells($firstConsolation)) * 2;
+        if ($neededLosers > 0 && count($firstChampTies) >= $neededLosers) {
+            $pairs = [];
+            for ($i = 0; $i < $neededLosers; $i += 2) {
+                $pairs[] = [
+                    (int) $firstChampTies[$i]['loser'],
+                    (int) ($firstChampTies[$i + 1]['loser'] ?? 0),
+                ];
+            }
+            $count = fillReguTiesFromTeams($db, $firstConsolation, $pairs);
+            if ($count > 0) {
+                $updated += $count;
+                $details[] = "Filled {$count} consolation regu slot(s) from first-round losers.";
+            }
+        }
+    }
+
+    $updated += advanceReguBracket($db, $consolationPlain, $details, true);
+
+    if ($updated === 0) {
+        $details[] = 'No regu TBD ties were ready to update.';
+    }
+
+    return $updated;
+}
+
+/** Strip the regu suffix from a Sepak Takraw match round label. */
+function sepakTakrawReguBaseLabel(array $match): string
+{
+    return trim(preg_replace('/\s*—\s*\d+(?:st|nd|rd)\s+Regu.*$/i', '', (string) ($match['round_label'] ?? '')));
+}
+
+function isSepakTakrawReguMatch(array $match, ?PDO $db = null): bool
+{
+    if (!preg_match('/\d+(?:st|nd|rd)\s+Regu/i', (string) ($match['round_label'] ?? ''))) {
+        return false;
+    }
+    if ($db !== null) {
+        $match = enrichMatchWithSport($db, $match);
+    }
+    $name = (string) ($match['name'] ?? $match['sport_name'] ?? '');
+
+    return isSepakTakrawSport($name);
+}
+
+function isSepakTakrawThirdReguMatch(array $match, ?PDO $db = null): bool
+{
+    return isSepakTakrawReguMatch($match, $db)
+        && preg_match('/3rd\s+Regu/i', (string) ($match['round_label'] ?? ''));
+}
+
+/**
+ * All regu rubbers for the same team tie (1st, 2nd, 3rd Regu).
+ *
+ * @return list<array>
+ */
+function getSepakTakrawReguSiblings(PDO $db, array $match): array
+{
+    $match = enrichMatchWithSport($db, $match);
+    if (!isSepakTakrawReguMatch($match, $db)) {
+        return [];
+    }
+
+    $seasonId = (int) ($match['season_id'] ?? 0);
+    $sportId = (int) ($match['sport_id'] ?? 0);
+    $teamA = (int) ($match['team_a_id'] ?? 0);
+    $teamB = (int) ($match['team_b_id'] ?? 0);
+    $baseLabel = sepakTakrawReguBaseLabel($match);
+    if (!$seasonId || !$sportId || !$teamA || !$teamB || $baseLabel === '') {
+        return [];
+    }
+
+    $like = $baseLabel . ' — % Regu';
+    $divId = isset($match['division_id']) ? (int) $match['division_id'] : 0;
+    if ($divId > 0) {
+        $stmt = $db->prepare('SELECT * FROM intramural_matches
+            WHERE season_id = ? AND sport_id = ? AND division_id = ?
+              AND team_a_id = ? AND team_b_id = ?
+              AND round_label LIKE ?
+            ORDER BY match_order ASC, id ASC');
+        $stmt->execute([$seasonId, $sportId, $divId, $teamA, $teamB, $like]);
+    } else {
+        $stmt = $db->prepare('SELECT * FROM intramural_matches
+            WHERE season_id = ? AND sport_id = ?
+              AND (division_id IS NULL OR division_id = 0)
+              AND team_a_id = ? AND team_b_id = ?
+              AND round_label LIKE ?
+            ORDER BY match_order ASC, id ASC');
+        $stmt->execute([$seasonId, $sportId, $teamA, $teamB, $like]);
+    }
+
+    $siblings = $stmt->fetchAll() ?: [];
+    usort($siblings, static function ($a, $b) {
+        preg_match('/(\d+)(?:st|nd|rd)\s+Regu/i', (string) ($a['round_label'] ?? ''), $ma);
+        preg_match('/(\d+)(?:st|nd|rd)\s+Regu/i', (string) ($b['round_label'] ?? ''), $mb);
+
+        return ((int) ($ma[1] ?? 0)) <=> ((int) ($mb[1] ?? 0));
+    });
+
+    return $siblings;
+}
+
+/** True when the same team won both 1st and 2nd Regu (tie decided 2–0). */
+function reguTieDecidedTwoNil(array $reguMatches): bool
+{
+    if (count($reguMatches) < 2) {
+        return false;
+    }
+
+    $wins = [];
+    foreach (array_slice($reguMatches, 0, 2) as $m) {
+        $out = getMatchOutcome($m);
+        if (!$out) {
+            return false;
+        }
+        $w = (int) $out['winner'];
+        $wins[$w] = ($wins[$w] ?? 0) + 1;
+    }
+
+    return max($wins) >= 2;
+}
+
+/**
+ * True when this is the 3rd Regu and the tie was already decided 2–0 in regus 1 and 2.
+ */
+function isSepakTakrawThirdReguDisabled(PDO $db, array $match): bool
+{
+    $match = enrichMatchWithSport($db, $match);
+    if (!isSepakTakrawThirdReguMatch($match, $db)) {
+        return false;
+    }
+    if ((string) ($match['status'] ?? '') === 'cancelled') {
+        return true;
+    }
+
+    $siblings = getSepakTakrawReguSiblings($db, $match);
+
+    return reguTieDecidedTwoNil($siblings);
+}
+
+/**
+ * Cancel the 3rd regu when a Sepak Takraw tie is already decided 2–0 after regus 1 and 2.
+ */
+function maybeCancelUnneededSepakTakrawRegu(PDO $db, int $matchId): int
+{
+    $stmt = $db->prepare('SELECT m.*, s.name AS sport_name, s.tournament_format
+        FROM intramural_matches m
+        JOIN intramural_sports s ON s.id = m.sport_id
+        WHERE m.id = ?');
+    $stmt->execute([$matchId]);
+    $match = $stmt->fetch();
+    if (!$match) {
+        return 0;
+    }
+    $match = enrichMatchWithSport($db, $match);
+    if (!isSepakTakrawReguMatch($match, $db)) {
+        return 0;
+    }
+
+    $siblings = getSepakTakrawReguSiblings($db, $match);
+    if (count($siblings) < 3 || !reguTieDecidedTwoNil($siblings)) {
+        return 0;
+    }
+
+    $third = $siblings[2];
+    if ((string) ($third['status'] ?? '') === 'cancelled') {
+        return 0;
+    }
+    if (in_array((string) ($third['status'] ?? ''), ['completed', 'forfeit'], true)) {
+        return 0;
+    }
+
+    $cancel = $db->prepare("UPDATE intramural_matches SET status = 'cancelled', score_a = NULL, score_b = NULL, winner_team_id = NULL, forfeit_team_id = NULL, notes = CONCAT(COALESCE(notes, ''), CASE WHEN notes IS NULL OR notes = '' THEN '' ELSE '. ' END, 'Not required — tie decided 2–0 in 1st and 2nd Regu.') WHERE id = ?");
+    $cancel->execute([(int) $third['id']]);
+
+    return $cancel->rowCount();
+}
+
+/** Strip the SDS rubber suffix from a Team Play SDS match round label. */
+function sdsRubberBaseLabel(array $match): string
+{
+    return trim(preg_replace('/\s*—\s*SDS\s+.*$/i', '', (string) ($match['round_label'] ?? '')));
+}
+
+function isSdsRubberMatch(array $match, ?PDO $db = null): bool
+{
+    if (!preg_match('/\s—\s*SDS\s+(Singles\s+1|Doubles|Singles\s+2)/i', (string) ($match['round_label'] ?? ''))) {
+        return false;
+    }
+    if ($db !== null) {
+        $match = enrichMatchWithSport($db, $match);
+    }
+
+    return isSdsTournamentFormat($match['tournament_format'] ?? null);
+}
+
+function isSdsSingles2RubberMatch(array $match, ?PDO $db = null): bool
+{
+    return isSdsRubberMatch($match, $db)
+        && preg_match('/SDS\s+Singles\s+2/i', (string) ($match['round_label'] ?? ''));
+}
+
+/**
+ * Determine SDS tie winner when decided (2 rubber wins, or all 3 rubbers played).
+ *
+ * @param list<array> $rubberMatches
+ * @return array{winner:int,loser:int,matches:list<array>}|null
+ */
+function sdsTieIsDecided(array $rubberMatches): ?array
+{
+    if (empty($rubberMatches)) {
+        return null;
+    }
+
+    $wins = [];
+    foreach ($rubberMatches as $m) {
+        $out = getMatchOutcome($m);
+        if (!$out) {
+            continue;
+        }
+        $w = (int) $out['winner'];
+        $wins[$w] = ($wins[$w] ?? 0) + 1;
+    }
+    if (empty($wins)) {
+        return null;
+    }
+
+    arsort($wins);
+    $winner = (int) array_key_first($wins);
+    $topWins = (int) ($wins[$winner] ?? 0);
+    $completed = array_sum($wins);
+    $decided = $topWins >= 2 || $completed >= 3;
+    if (!$decided) {
+        return null;
+    }
+
+    $teamA = (int) ($rubberMatches[0]['team_a_id'] ?? 0);
+    $teamB = (int) ($rubberMatches[0]['team_b_id'] ?? 0);
+    $loser = $winner === $teamA ? $teamB : $teamA;
+    if ($winner > 0 && $loser > 0) {
+        return ['winner' => $winner, 'loser' => $loser, 'matches' => $rubberMatches];
+    }
+
+    return null;
+}
+
+/** Sort SDS rubbers Singles 1 → Doubles → Singles 2. */
+function sortSdsRubberSiblings(array $siblings): array
+{
+    $rank = static function (array $m): int {
+        $label = (string) ($m['round_label'] ?? '');
+        if (stripos($label, 'SDS Singles 1') !== false) {
+            return 1;
+        }
+        if (stripos($label, 'SDS Doubles') !== false) {
+            return 2;
+        }
+        if (stripos($label, 'SDS Singles 2') !== false) {
+            return 3;
+        }
+
+        return 99;
+    };
+
+    usort($siblings, static fn($a, $b) => $rank($a) <=> $rank($b));
+
+    return $siblings;
+}
+
+/**
+ * All SDS rubbers for the same team tie (Singles 1, Doubles, Singles 2).
+ *
+ * @return list<array>
+ */
+function getSdsRubberSiblings(PDO $db, array $match): array
+{
+    $match = enrichMatchWithSport($db, $match);
+    if (!isSdsRubberMatch($match, $db)) {
+        return [];
+    }
+
+    $seasonId = (int) ($match['season_id'] ?? 0);
+    $sportId = (int) ($match['sport_id'] ?? 0);
+    $teamA = (int) ($match['team_a_id'] ?? 0);
+    $teamB = (int) ($match['team_b_id'] ?? 0);
+    $baseLabel = sdsRubberBaseLabel($match);
+    if (!$seasonId || !$sportId || !$teamA || !$teamB || $baseLabel === '') {
+        return [];
+    }
+
+    $like = $baseLabel . ' — SDS %';
+    $divId = isset($match['division_id']) ? (int) $match['division_id'] : 0;
+    if ($divId > 0) {
+        $stmt = $db->prepare('SELECT * FROM intramural_matches
+            WHERE season_id = ? AND sport_id = ? AND division_id = ?
+              AND team_a_id = ? AND team_b_id = ?
+              AND round_label LIKE ?
+            ORDER BY match_order ASC, id ASC');
+        $stmt->execute([$seasonId, $sportId, $divId, $teamA, $teamB, $like]);
+    } else {
+        $stmt = $db->prepare('SELECT * FROM intramural_matches
+            WHERE season_id = ? AND sport_id = ?
+              AND (division_id IS NULL OR division_id = 0)
+              AND team_a_id = ? AND team_b_id = ?
+              AND round_label LIKE ?
+            ORDER BY match_order ASC, id ASC');
+        $stmt->execute([$seasonId, $sportId, $teamA, $teamB, $like]);
+    }
+
+    return sortSdsRubberSiblings($stmt->fetchAll() ?: []);
+}
+
+/** True when the same team won both Singles 1 and Doubles (tie decided 2–0). */
+function sdsTieDecidedTwoNil(array $rubberMatches): bool
+{
+    return reguTieDecidedTwoNil($rubberMatches);
+}
+
+/** True when this is SDS Singles 2 and the tie was already decided 2–0. */
+function isSdsSingles2Disabled(PDO $db, array $match): bool
+{
+    $match = enrichMatchWithSport($db, $match);
+    if (!isSdsSingles2RubberMatch($match, $db)) {
+        return false;
+    }
+    if ((string) ($match['status'] ?? '') === 'cancelled') {
+        return true;
+    }
+
+    $siblings = getSdsRubberSiblings($db, $match);
+
+    return sdsTieDecidedTwoNil($siblings);
+}
+
+/** Cancel SDS Singles 2 when Singles 1 and Doubles were both won by the same team. */
+function maybeCancelUnneededSdsSingles2(PDO $db, int $matchId): int
+{
+    $stmt = $db->prepare('SELECT m.*, s.name AS sport_name, s.tournament_format
+        FROM intramural_matches m
+        JOIN intramural_sports s ON s.id = m.sport_id
+        WHERE m.id = ?');
+    $stmt->execute([$matchId]);
+    $match = $stmt->fetch();
+    if (!$match) {
+        return 0;
+    }
+    $match = enrichMatchWithSport($db, $match);
+    if (!isSdsRubberMatch($match, $db)) {
+        return 0;
+    }
+
+    $siblings = getSdsRubberSiblings($db, $match);
+    if (count($siblings) < 3 || !sdsTieDecidedTwoNil($siblings)) {
+        return 0;
+    }
+
+    $deciding = $siblings[2];
+    if ((string) ($deciding['status'] ?? '') === 'cancelled') {
+        return 0;
+    }
+    if (in_array((string) ($deciding['status'] ?? ''), ['completed', 'forfeit'], true)) {
+        return 0;
+    }
+
+    $cancel = $db->prepare("UPDATE intramural_matches SET status = 'cancelled', score_a = NULL, score_b = NULL, winner_team_id = NULL, forfeit_team_id = NULL, notes = CONCAT(COALESCE(notes, ''), CASE WHEN notes IS NULL OR notes = '' THEN '' ELSE '. ' END, 'Not required — tie decided 2–0 in SDS Singles 1 and Doubles.') WHERE id = ?");
+    $cancel->execute([(int) $deciding['id']]);
+
+    return $cancel->rowCount();
+}
+
+/** Cancel deciding rubbers (Sepak Takraw 3rd Regu / SDS Singles 2) when tie is already 2–0. */
+function maybeCancelUnneededDecidingRubber(PDO $db, int $matchId): int
+{
+    return maybeCancelUnneededSepakTakrawRegu($db, $matchId)
+        + maybeCancelUnneededSdsSingles2($db, $matchId);
+}
+
+function isDecidingRubberDisabled(PDO $db, array $match): bool
+{
+    return isSepakTakrawThirdReguDisabled($db, $match)
+        || isSdsSingles2Disabled($db, $match);
+}
+
+function decidingRubberDisabledMessage(PDO $db, array $match): ?string
+{
+    if (isSepakTakrawThirdReguDisabled($db, $match)) {
+        return '3rd Regu is not required — one team already won 1st and 2nd Regu (2–0). This match is disabled.';
+    }
+    if (isSdsSingles2Disabled($db, $match)) {
+        return 'SDS Singles 2 is not required — one team already won Singles 1 and Doubles (2–0). This match is disabled.';
+    }
+
+    return null;
+}
+
+function decidingRubberDisabledAlert(PDO $db, array $match): ?string
+{
+    if (isSepakTakrawThirdReguDisabled($db, $match)) {
+        return 'One team already won both the 1st and 2nd Regu (2–0), so this deciding regu is not required and cannot be scored.';
+    }
+    if (isSdsSingles2Disabled($db, $match)) {
+        return 'One team already won both SDS Singles 1 and Doubles (2–0), so the deciding Singles 2 rubber is not required and cannot be scored.';
+    }
+
+    return null;
 }
 
 function getIntramuralsStats(?int $seasonId = null): array
@@ -5195,6 +6170,18 @@ function computeOverallStandings(): array
         }
     }
 
+    usort($sportLabels, static function (string $labelA, string $labelB) use ($sportIdByLabel, $all): int {
+        $sidA = (int) ($sportIdByLabel[$labelA] ?? 0);
+        $sidB = (int) ($sportIdByLabel[$labelB] ?? 0);
+        $nameA = strtolower((string) ($all[$sidA]['sport']['name'] ?? $labelA));
+        $nameB = strtolower((string) ($all[$sidB]['sport']['name'] ?? $labelB));
+        $cmp = strcmp($nameA, $nameB);
+        if ($cmp !== 0) {
+            return $cmp;
+        }
+        return strcasecmp($labelA, $labelB);
+    });
+
     $rows = array_values($overall);
     usort($rows, function ($a, $b) {
         if ($a['total'] !== $b['total']) {
@@ -5708,6 +6695,68 @@ function matchTeamRosterTrigger(array $match, string $side = 'a'): string
         . ' title="View official roster for ' . sanitize($name) . '">'
         . sanitize($name)
         . '</button>';
+}
+
+/** Plain team label for schedules / print (no roster dialog). */
+function matchTeamLabelPlain(array $match, string $side = 'a'): string
+{
+    $isB = $side === 'b';
+    $teamId = (int) ($isB ? ($match['team_b_id'] ?? 0) : ($match['team_a_id'] ?? 0));
+    $name = trim((string) ($isB ? ($match['team_b_name'] ?? '') : ($match['team_a_name'] ?? '')));
+    if ($teamId <= 0 || $name === '') {
+        return 'TBD';
+    }
+
+    return $name;
+}
+
+/**
+ * Group match rows by sport for scheduling views (sorted by date/time within each sport).
+ *
+ * @param list<array> $matches
+ * @return array<int, array{sport_id:int,sport_name:string,sport_category:string,tournament_format:?string,matches:list<array>}>
+ */
+function groupMatchesBySportSchedule(array $matches): array
+{
+    $groups = [];
+    foreach ($matches as $m) {
+        $sid = (int) ($m['sport_id'] ?? 0);
+        if ($sid <= 0) {
+            continue;
+        }
+        if (!isset($groups[$sid])) {
+            $groups[$sid] = [
+                'sport_id' => $sid,
+                'sport_name' => (string) ($m['sport_name'] ?? ''),
+                'sport_category' => (string) ($m['sport_category'] ?? ''),
+                'tournament_format' => $m['tournament_format'] ?? null,
+                'matches' => [],
+            ];
+        }
+        $groups[$sid]['matches'][] = $m;
+    }
+
+    foreach ($groups as &$sportGroup) {
+        usort($sportGroup['matches'], static function (array $a, array $b): int {
+            $aTime = $a['scheduled_at'] ?? null;
+            $bTime = $b['scheduled_at'] ?? null;
+            if ($aTime === null || $aTime === '') {
+                return ($bTime === null || $bTime === '') ? ((int) ($a['match_order'] ?? 0) <=> (int) ($b['match_order'] ?? 0)) : 1;
+            }
+            if ($bTime === null || $bTime === '') {
+                return -1;
+            }
+            $cmp = strcmp((string) $aTime, (string) $bTime);
+            if ($cmp !== 0) {
+                return $cmp;
+            }
+
+            return ((int) ($a['match_order'] ?? 0) <=> (int) ($b['match_order'] ?? 0));
+        });
+    }
+    unset($sportGroup);
+
+    return $groups;
 }
 
 /**

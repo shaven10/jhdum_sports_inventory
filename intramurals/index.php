@@ -210,7 +210,7 @@ if ($coachAssignments) {
     <div class="col-lg-3 col-6"><a class="btn btn-outline-primary w-100" href="<?= BASE_URL ?>/intramurals/standings/overall.php"><i class="bi bi-award"></i> Overall</a></div>
     <?php endif; ?>
     <?php if (canManageEventRankings()): ?>
-    <div class="col-lg-3 col-6"><a class="btn btn-outline-warning w-100" href="<?= BASE_URL ?>/intramurals/rankings/index.php"><i class="bi bi-list-ol"></i> Event Rankings</a></div>
+    <div class="col-lg-3 col-6"><a class="btn btn-outline-warning w-100" href="<?= BASE_URL ?>/intramurals/rankings/index.php"><i class="bi bi-list-ol"></i> Manual Entry of Ranks</a></div>
     <?php endif; ?>
     <?php if (canManageIntramurals()): ?>
     <div class="col-lg-3 col-6"><a class="btn btn-outline-primary w-100" href="<?= BASE_URL ?>/intramurals/points/index.php"><i class="bi bi-calculator"></i> Point System</a></div>

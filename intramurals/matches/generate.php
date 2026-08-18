@@ -385,6 +385,9 @@ foreach ($selectedSportIds as $sid) {
             $boards = $chessBoardsBySport[$sid] ?? defaultChessBoardsPerTeam($sport);
             $fixtures = expandChessBoardFixtures($fixtures, $boards);
         }
+        if ($fixtures && shouldExpandSepakTakrawRegus($sport)) {
+            $fixtures = expandTiesToReguFixtures($fixtures);
+        }
 
         $blockIndex = count($previewBlocks);
         $previewBlocks[] = [
@@ -590,6 +593,8 @@ $renderSlotSelects = static function (string $namePrefix, array $slotMap, array 
     After scores are recorded, use <strong>Update Bracket</strong> on the Matches page (filter by event) to fill TBD teams from previous-round winners/losers.
     Bracket updates also run automatically when a match is marked completed.
     SDS with consolation generates championship ties first, then consolation / 3rd-place SDS ties, with the championship Final last.
+    Each SDS tie is Singles 1, Doubles, then Singles 2 (best of 3). Singles 2 is disabled automatically if one team wins Singles 1 and Doubles; it is played only if the first two rubbers split 1–1.
+    Sepak Takraw elimination events expand each team tie into 1st, 2nd, and 3rd Regu (best of 3; the 3rd Regu is disabled automatically if one team wins the first two).
 </div>
 
 <?php if ($scheduleStartDate && $scheduleEndDate): ?>
@@ -926,6 +931,9 @@ $renderSlotSelects = static function (string $namePrefix, array $slotMap, array 
                                     <span class="badge bg-info text-dark ms-1"><?= sanitize(tournamentFormatLabel($block['sport']['tournament_format'] ?? 'round_robin')) ?></span>
                                     <?php if (isChessSport((string) ($block['sport']['name'] ?? ''))): ?>
                                     <span class="badge bg-dark ms-1"><?= (int) ($chessBoardsBySport[(int) $block['sport']['id']] ?? defaultChessBoardsPerTeam($block['sport'])) ?> boards / tie</span>
+                                    <?php endif; ?>
+                                    <?php if (shouldExpandSepakTakrawRegus($block['sport'])): ?>
+                                    <span class="badge bg-dark ms-1">3 regus / tie</span>
                                     <?php endif; ?>
                                     <?php if (!empty($block['sport']['venue'])): ?>
                                     <span class="badge bg-secondary ms-1"><i class="bi bi-geo-alt"></i> <?= sanitize($block['sport']['venue']) ?></span>

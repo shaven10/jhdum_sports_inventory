@@ -46,6 +46,19 @@ if (isTournamentManager() && !canManageIntramurals()) {
 }
 $whereClause = implode(' AND ', $where);
 
+$sports = filterSportsForUser($db->query('SELECT id, name, category, tournament_format FROM intramural_sports ORDER BY name')->fetchAll());
+
+if ($seasonId && canManageMatches()) {
+    $sportIdsToAdvance = $sportId !== ''
+        ? [(int) $sportId]
+        : array_values(array_filter(array_map(static fn($s) => (int) $s['id'], $sports)));
+    foreach ($sportIdsToAdvance as $advanceSportId) {
+        if ($advanceSportId > 0 && !isResultsLocked(null, $advanceSportId)) {
+            advanceBracketFromResults($advanceSportId, $seasonId);
+        }
+    }
+}
+
 $countStmt = $db->prepare("SELECT COUNT(*) FROM intramural_matches m
     LEFT JOIN intramural_teams ta ON m.team_a_id = ta.id
     LEFT JOIN intramural_teams tb ON m.team_b_id = tb.id
@@ -61,13 +74,29 @@ $sql = "SELECT m.*, s.name as sport_name, s.category as sport_category, s.tourna
         LEFT JOIN intramural_teams ta ON m.team_a_id = ta.id
         LEFT JOIN intramural_teams tb ON m.team_b_id = tb.id
         WHERE $whereClause
-        ORDER BY (m.scheduled_at IS NULL) DESC, m.round_number ASC, m.match_order ASC, m.scheduled_at ASC
+        ORDER BY s.name ASC, s.category ASC, (m.scheduled_at IS NULL) ASC, m.scheduled_at ASC, m.match_order ASC, m.id ASC
         LIMIT {$pagination['offset']}, $perPage";
 $stmt = $db->prepare($sql);
 $stmt->execute($params);
 $matches = $stmt->fetchAll();
+$matchesBySport = groupMatchesBySportSchedule($matches);
 
-$sports = filterSportsForUser($db->query('SELECT id, name, category, tournament_format FROM intramural_sports ORDER BY name')->fetchAll());
+$printSql = "SELECT m.*, s.name as sport_name, s.category as sport_category, s.tournament_format,
+               ta.name as team_a_name, ta.color as team_a_color,
+               tb.name as team_b_name, tb.color as team_b_color
+        FROM intramural_matches m
+        JOIN intramural_sports s ON m.sport_id = s.id
+        LEFT JOIN intramural_teams ta ON m.team_a_id = ta.id
+        LEFT JOIN intramural_teams tb ON m.team_b_id = tb.id
+        WHERE $whereClause
+        ORDER BY s.name ASC, s.category ASC, (m.scheduled_at IS NULL) ASC, m.scheduled_at ASC, m.match_order ASC, m.id ASC";
+$printStmt = $db->prepare($printSql);
+$printStmt->execute($params);
+$printMatchesBySport = groupMatchesBySportSchedule($printStmt->fetchAll());
+$printMatchTotal = 0;
+foreach ($printMatchesBySport as $pg) {
+    $printMatchTotal += count($pg['matches']);
+}
 
 $pendingCount = 0;
 $generatedCount = 0;
@@ -88,7 +117,7 @@ if ($seasonId) {
 $pageTitle = 'Match Scheduling';
 require_once __DIR__ . '/../../includes/header.php';
 require __DIR__ . '/../_season_bar.php';
-echo renderResultsLockAlerts();
+echo '<div class="no-print">' . renderResultsLockAlerts() . '</div>';
 
 $queryBase = BASE_URL . '/intramurals/matches/index.php?search=' . urlencode($search) . '&sport=' . urlencode($sportId) . '&status=' . urlencode($status) . '&unscheduled=' . urlencode($unscheduled);
 
@@ -101,21 +130,7 @@ if ($sportId !== '') {
         }
     }
 }
-?>
 
-<div class="page-header">
-    <h1><i class="bi bi-calendar3"></i> Match Scheduling</h1>
-    <p class="text-muted mb-0">Generate fixtures by tournament style, auto-schedule, then edit any date/time as needed. Click a team name to view that match’s official players.</p>
-</div>
-
-<?php if ($pendingCount > 0 && canManageMatches()): ?>
-<div class="alert alert-warning d-flex justify-content-between align-items-center flex-wrap gap-2">
-    <span><i class="bi bi-clock"></i> <?= $pendingCount ?> generated match<?= $pendingCount === 1 ? '' : 'es' ?> still need a date &amp; time.</span>
-    <a href="?unscheduled=1" class="btn btn-sm btn-warning">Show unscheduled</a>
-</div>
-<?php endif; ?>
-
-<?php
 $filtersActive = $search !== '' || $sportId !== '' || $status !== '' || $unscheduled === '1';
 $filterSummary = [];
 if ($search !== '') {
@@ -135,8 +150,57 @@ if ($status !== '') {
 if ($unscheduled === '1') {
     $filterSummary[] = 'Needs date/time';
 }
+
+$reportMetaParts = [];
+if ($season) {
+    $reportMetaParts[] = seasonLabel($season);
+}
+if ($filtersActive) {
+    $reportMetaParts[] = implode(' · ', $filterSummary);
+} else {
+    $reportMetaParts[] = 'All matches';
+}
+$reportMeta = implode(' · ', $reportMetaParts);
 ?>
-<div class="filter-bar">
+
+<div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2 no-print">
+    <div>
+        <h1><i class="bi bi-calendar3"></i> Match Scheduling</h1>
+        <p class="text-muted mb-0">Generate fixtures by tournament style, auto-schedule, then edit any date/time as needed. Matches are grouped by sport and sorted by date/time. Click a team name to view that match’s official players.</p>
+    </div>
+    <?php if ($printMatchTotal > 0): ?>
+    <div class="d-flex gap-2 flex-wrap">
+        <button type="button" class="btn btn-outline-secondary" onclick="printReport()">
+            <i class="bi bi-printer"></i> Print / PDF
+        </button>
+    </div>
+    <?php endif; ?>
+</div>
+
+<?= renderReportHeader('Match Schedule', [
+    'subtitle' => 'Intramural match fixtures grouped by sport',
+    'meta' => $reportMeta,
+]) ?>
+
+<?php if ($printMatchTotal > 0): ?>
+<div class="d-none d-print-block match-schedule-print">
+    <?php
+    $scheduleGroups = $printMatchesBySport;
+    $showActions = false;
+    $plainTeamLabels = true;
+    require __DIR__ . '/_schedule_groups.php';
+    ?>
+</div>
+<?php endif; ?>
+
+<?php if ($pendingCount > 0 && canManageMatches()): ?>
+<div class="alert alert-warning d-flex justify-content-between align-items-center flex-wrap gap-2 no-print">
+    <span><i class="bi bi-clock"></i> <?= $pendingCount ?> generated match<?= $pendingCount === 1 ? '' : 'es' ?> still need a date &amp; time.</span>
+    <a href="?unscheduled=1" class="btn btn-sm btn-warning">Show unscheduled</a>
+</div>
+<?php endif; ?>
+
+<div class="filter-bar no-print">
     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
         <div class="d-flex gap-2 flex-wrap align-items-center">
             <?php if (canGenerateMatches()): ?>
@@ -206,86 +270,34 @@ if ($unscheduled === '1') {
     </div>
 </div>
 
-<div class="card">
+<div class="card no-print">
     <div class="card-body p-0">
-        <div class="table-responsive">
-            <table class="table table-hover mb-0">
-                <thead class="table-light">
-                    <tr>
-                        <th>Date/Time</th>
-                        <th>Sport</th>
-                        <th>Category</th>
-                        <th>Round</th>
-                        <th>Match</th>
-                        <th>Score</th>
-                        <th>Venue</th>
-                        <th>Status</th>
-                        <th></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($matches as $m): ?>
-                    <tr class="<?= empty($m['scheduled_at']) ? 'table-warning' : '' ?>">
-                        <td>
-                            <?php if (!empty($m['scheduled_at'])): ?>
-                            <?= formatDateTime($m['scheduled_at']) ?>
-                            <?php else: ?>
-                            <span class="badge bg-warning text-dark">Unscheduled</span>
-                            <?php endif; ?>
-                        </td>
-                        <td>
-                            <?= sanitize($m['sport_name']) ?>
-                            <br><small class="text-muted"><?= sanitize(tournamentFormatLabel($m['tournament_format'] ?? null)) ?></small>
-                        </td>
-                        <td><span class="badge bg-secondary"><?= ucfirst($m['sport_category']) ?></span></td>
-                        <td><?= sanitize($m['round_label'] ?: ('R' . (int) ($m['round_number'] ?? 1))) ?></td>
-                        <td>
-                            <?= matchTeamRosterTrigger($m, 'a') ?>
-                            vs
-                            <?= matchTeamRosterTrigger($m, 'b') ?>
-                        </td>
-                        <td>
-                            <?php if ($m['score_a'] !== null && $m['score_b'] !== null): ?>
-                            <strong><?= (int) $m['score_a'] ?> - <?= (int) $m['score_b'] ?></strong>
-                            <?php else: ?>-<?php endif; ?>
-                        </td>
-                        <td><?= sanitize($m['venue'] ?: '-') ?></td>
-                        <td><?= statusBadge($m['status']) ?></td>
-                        <td class="text-nowrap">
-                            <a href="<?= BASE_URL ?>/intramurals/matches/view.php?id=<?= $m['id'] ?>" class="btn btn-sm btn-outline-primary">View</a>
-                            <?php if (canManageMatches()): ?>
-                            <a href="<?= BASE_URL ?>/intramurals/matches/schedule.php?id=<?= $m['id'] ?>" class="btn btn-sm btn-<?= empty($m['scheduled_at']) ? 'warning' : 'outline-secondary' ?>">
-                                <?= empty($m['scheduled_at']) ? 'Set Date/Time' : 'Reschedule' ?>
-                            </a>
-                            <?php if (canManageIntramurals()): ?>
-                            <a href="<?= BASE_URL ?>/intramurals/matches/edit.php?id=<?= $m['id'] ?>" class="btn btn-sm btn-outline-secondary">Edit</a>
-                            <?php endif; ?>
-                            <?php if (canDeleteAllMatches()): ?>
-                            <form method="POST" action="<?= BASE_URL ?>/intramurals/matches/delete_generated.php" class="d-inline">
-                                <?= csrfField() ?>
-                                <input type="hidden" name="action" value="single">
-                                <input type="hidden" name="match_id" value="<?= (int) $m['id'] ?>">
-                                <input type="hidden" name="return" value="<?= sanitize($queryBase . '&page=' . $page) ?>">
-                                <button type="submit" class="btn btn-sm btn-outline-danger" data-confirm="Delete this match permanently?">Delete</button>
-                            </form>
-                            <?php endif; ?>
-                            <?php endif; ?>
-                        </td>
-                    </tr>
-                    <?php endforeach; ?>
-                    <?php if (empty($matches)): ?>
-                    <tr><td colspan="9" class="text-muted p-3">No matches found. <?php if (canManageMatches()): ?><a href="<?= BASE_URL ?>/intramurals/matches/generate.php">Generate fixtures</a><?php endif; ?></td></tr>
-                    <?php endif; ?>
-                </tbody>
-            </table>
+        <?php if (empty($matches)): ?>
+        <div class="text-muted p-3">
+            No matches found.
+            <?php if (canManageMatches()): ?>
+            <a href="<?= BASE_URL ?>/intramurals/matches/generate.php">Generate fixtures</a>
+            <?php endif; ?>
         </div>
+        <?php else: ?>
+        <?php
+        $scheduleGroups = $matchesBySport;
+        $showActions = true;
+        $plainTeamLabels = false;
+        require __DIR__ . '/_schedule_groups.php';
+        ?>
+        <?php endif; ?>
     </div>
 </div>
 
-<div class="mt-3"><?= paginationLinks($pagination, $queryBase) ?></div>
+<div class="mt-3 no-print"><?= paginationLinks($pagination, $queryBase) ?></div>
+
+<p class="text-muted small mt-2 no-print">For PDF: click <strong>Print / PDF</strong> and choose “Save as PDF” in your browser print dialog. The report includes all matches matching your current filters (not just this page).</p>
+
+<?= renderReportFooter($reportMeta) ?>
 
 <?php if (canDeleteAllMatches() && $totalMatchCount > 0): ?>
-<div class="modal fade" id="deleteMatchesModal" tabindex="-1" aria-labelledby="deleteMatchesModalLabel" aria-hidden="true">
+<div class="modal fade no-print" id="deleteMatchesModal" tabindex="-1" aria-labelledby="deleteMatchesModalLabel" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
             <form method="POST" action="<?= BASE_URL ?>/intramurals/matches/delete_generated.php" id="deleteMatchesForm">

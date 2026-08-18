@@ -55,7 +55,7 @@ function buildAppNavigation(): array
             $items[] = ['label' => 'Per-Sport Standings', 'href' => BASE_URL . '/intramurals/standings/index.php', 'icon' => 'bi-bar-chart-steps'];
         }
         if (canManageEventRankings()) {
-            $items[] = ['label' => 'Event Rankings', 'href' => BASE_URL . '/intramurals/rankings/index.php', 'icon' => 'bi-list-ol'];
+            $items[] = ['label' => 'Manual Entry of Ranks', 'href' => BASE_URL . '/intramurals/rankings/index.php', 'icon' => 'bi-list-ol'];
         }
         if (isTournamentManager() && !canManageIntramurals()) {
             $items[] = ['type' => 'header', 'label' => 'Reports'];
@@ -119,7 +119,7 @@ function buildAppNavigation(): array
                 $items[] = ['label' => 'Overall Standing', 'href' => BASE_URL . '/intramurals/standings/overall.php', 'icon' => 'bi-award'];
             }
             if (canManageEventRankings()) {
-                $items[] = ['label' => 'Event Rankings', 'href' => BASE_URL . '/intramurals/rankings/index.php', 'icon' => 'bi-list-ol'];
+                $items[] = ['label' => 'Manual Entry of Ranks', 'href' => BASE_URL . '/intramurals/rankings/index.php', 'icon' => 'bi-list-ol'];
             }
             $items[] = ['label' => 'Point System', 'href' => BASE_URL . '/intramurals/points/index.php', 'icon' => 'bi-calculator'];
             $items[] = ['type' => 'header', 'label' => 'Reports'];
@@ -144,7 +144,7 @@ function buildAppNavigation(): array
                 ['type' => 'header', 'label' => 'Standings'],
                 ['label' => 'Team Standings', 'href' => BASE_URL . '/intramurals/standings/index.php', 'icon' => 'bi-bar-chart-steps'],
                 ['label' => 'Overall Standing', 'href' => BASE_URL . '/intramurals/standings/overall.php', 'icon' => 'bi-award'],
-                ['label' => 'Event Rankings', 'href' => BASE_URL . '/intramurals/rankings/index.php', 'icon' => 'bi-list-ol'],
+                ['label' => 'Manual Entry of Ranks', 'href' => BASE_URL . '/intramurals/rankings/index.php', 'icon' => 'bi-list-ol'],
                 ['type' => 'header', 'label' => 'More'],
                 ['label' => 'Reports', 'href' => BASE_URL . '/intramurals/reports/index.php', 'icon' => 'bi-printer'],
                 ['label' => 'Certificate of Recognition', 'href' => BASE_URL . '/intramurals/reports/certificates.php', 'icon' => 'bi-award'],

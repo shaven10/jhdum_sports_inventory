@@ -75,7 +75,7 @@ require_once __DIR__ . '/../includes/header.php';
     <div>
         <h1><i class="bi bi-list-ol"></i> TM Ranking Access</h1>
         <p class="text-muted mb-0">
-            Activate Event Rankings for tournament managers on specific events<?= $season ? ' · ' . sanitize(seasonLabel($season)) : '' ?>.
+            Activate Manual Entry of Ranks for tournament managers on specific events<?= $season ? ' · ' . sanitize(seasonLabel($season)) : '' ?>.
         </p>
     </div>
     <a href="<?= BASE_URL ?>/admin/index.php" class="btn btn-outline-secondary">Back to Admin</a>
@@ -106,7 +106,7 @@ require_once __DIR__ . '/../includes/header.php';
                 <p class="mb-1"><strong>How it works</strong></p>
                 <ul class="mb-0 small text-muted">
                     <li>Assign a tournament manager to the event under Sports → Tournament Managers.</li>
-                    <li>Activate ranking here so that manager can open <strong>Event Rankings</strong> for that event only.</li>
+                    <li>Activate ranking here so that manager can open <strong>Manual Entry of Ranks</strong> for that event only.</li>
                     <li>Manual ranking still requires no scheduled matches and unlocked results.</li>
                 </ul>
             </div>
@@ -175,7 +175,7 @@ require_once __DIR__ . '/../includes/header.php';
                                 <?= csrfField() ?>
                                 <input type="hidden" name="action" value="disable">
                                 <input type="hidden" name="sport_id" value="<?= $sid ?>">
-                                <button type="submit" class="btn btn-sm btn-outline-secondary" data-confirm="Deactivate Event Rankings for tournament managers on <?= sanitize(sportLabel($s)) ?>?">
+                                <button type="submit" class="btn btn-sm btn-outline-secondary" data-confirm="Deactivate Manual Entry of Ranks for tournament managers on <?= sanitize(sportLabel($s)) ?>?">
                                     Deactivate
                                 </button>
                             </form>

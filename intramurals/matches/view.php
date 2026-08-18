@@ -26,10 +26,17 @@ if (!$match) {
 
 requireEventViewAccess((int) $match['sport_id']);
 
+maybeCancelUnneededDecidingRubber($db, $id);
+$stmt->execute([$id]);
+$match = $stmt->fetch();
+$decidingRubberDisabled = isDecidingRubberDisabled($db, $match);
+$decidingRubberDisabledAlert = decidingRubberDisabledAlert($db, $match);
+
 $seasonId = getCurrentSeasonId();
 $sportId = (int) $match['sport_id'];
 $teamAId = (int) ($match['team_a_id'] ?? 0);
 $teamBId = (int) ($match['team_b_id'] ?? 0);
+$teamsReady = $teamAId > 0 && $teamBId > 0;
 $fromDashboard = get('from') === 'dashboard';
 $backUrl = $fromDashboard ? (BASE_URL . '/dashboard.php') : (BASE_URL . '/intramurals/matches/index.php');
 $fromQuery = $fromDashboard ? '&from=dashboard' : '';
@@ -41,6 +48,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
         requireUnlockedResults(null, $sportId);
         $action = post('action');
         if ($action === 'live_score') {
+            if (!$teamsReady) {
+                flash('error', 'Both teams must be assigned before recording scores.');
+                redirect(BASE_URL . '/intramurals/matches/view.php?id=' . $id . ($fromDashboard ? '&from=dashboard' : ''));
+            }
+            if (isDecidingRubberDisabled($db, $match)) {
+                $msg = decidingRubberDisabledMessage($db, $match) ?: 'This deciding rubber is disabled.';
+                flash('error', $msg);
+                redirect(BASE_URL . '/intramurals/matches/view.php?id=' . $id . ($fromDashboard ? '&from=dashboard' : ''));
+            }
             $scoreA = (int) post('score_a');
             $scoreB = (int) post('score_b');
             $status = post('status', 'ongoing');
@@ -51,6 +67,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
             $db->prepare('UPDATE intramural_matches SET score_a=?, score_b=?, status=?, winner_team_id=? WHERE id=?')
                 ->execute([$scoreA, $scoreB, $status, $winner, $id]);
             auditLog($_SESSION['user_id'], 'score_update', 'intramural_match', $id, null, ['score_a' => $scoreA, 'score_b' => $scoreB, 'status' => $status]);
+
+            if (in_array($status, ['completed', 'forfeit'], true)) {
+                maybeCancelUnneededDecidingRubber($db, $id);
+            }
 
             if (in_array($status, ['completed', 'forfeit'], true)) {
                 notifyMatchFinished($id, (string) ($match['status'] ?? ''));
@@ -149,7 +169,14 @@ echo renderResultsLockAlerts();
             </div>
         </div>
 
-        <?php if (canRecordScores($sportId) && in_array($match['status'], ['scheduled', 'ongoing'], true)): ?>
+        <?php if ($decidingRubberDisabled && $decidingRubberDisabledAlert): ?>
+        <div class="alert alert-secondary mt-3 mb-0">
+            <i class="bi bi-slash-circle"></i>
+            <strong>Deciding rubber disabled.</strong> <?= sanitize($decidingRubberDisabledAlert) ?>
+        </div>
+        <?php endif; ?>
+
+        <?php if ($teamsReady && canRecordScores($sportId) && in_array($match['status'], ['scheduled', 'ongoing'], true) && !$decidingRubberDisabled): ?>
         <div class="card mt-3 match-live-score-card">
             <div class="card-header">Live Score Update</div>
             <div class="card-body">
@@ -157,11 +184,11 @@ echo renderResultsLockAlerts();
                     <?= csrfField() ?>
                     <input type="hidden" name="action" value="live_score">
                     <div class="col-md-3">
-                        <label class="form-label"><?= sanitize($match['team_a_name']) ?></label>
+                        <label class="form-label"><?= sanitize($match['team_a_name'] ?? 'Team A') ?></label>
                         <input type="number" name="score_a" class="form-control form-control-lg" min="0" value="<?= (int) ($match['score_a'] ?? 0) ?>">
                     </div>
                     <div class="col-md-3">
-                        <label class="form-label"><?= sanitize($match['team_b_name']) ?></label>
+                        <label class="form-label"><?= sanitize($match['team_b_name'] ?? 'Team B') ?></label>
                         <input type="number" name="score_b" class="form-control form-control-lg" min="0" value="<?= (int) ($match['score_b'] ?? 0) ?>">
                     </div>
                     <div class="col-md-3">
@@ -174,6 +201,10 @@ echo renderResultsLockAlerts();
                     <div class="col-md-3"><button class="btn btn-primary btn-lg w-100">Update Score</button></div>
                 </form>
             </div>
+        </div>
+        <?php elseif (canRecordScores($sportId) && in_array($match['status'], ['scheduled', 'ongoing'], true) && !$teamsReady): ?>
+        <div class="alert alert-info mt-3 mb-0">
+            <i class="bi bi-info-circle"></i> Assign both teams (via bracket update or schedule edit) before recording scores.
         </div>
         <?php endif; ?>
     </div>

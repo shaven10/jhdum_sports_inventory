@@ -68,7 +68,7 @@ require __DIR__ . '/../_season_bar.php';
     </div>
     <div class="d-flex gap-2">
         <?php if (canManageEventRankings() && $sportId && $seasonId): ?>
-        <a href="<?= BASE_URL ?>/intramurals/rankings/index.php?sport=<?= (int) $sportId ?>" class="btn btn-outline-warning"><i class="bi bi-list-ol"></i> Enter Event Ranks</a>
+        <a href="<?= BASE_URL ?>/intramurals/rankings/index.php?sport=<?= (int) $sportId ?>" class="btn btn-outline-warning"><i class="bi bi-list-ol"></i> Manual Entry of Ranks</a>
         <?php endif; ?>
         <a href="<?= BASE_URL ?>/intramurals/standings/overall.php" class="btn btn-outline-primary">Overall Standing</a>
         <?php if ($block): ?>
@@ -182,7 +182,7 @@ require __DIR__ . '/../_season_bar.php';
 
 <p class="text-muted small no-print">Event Pts (Champion → 5th Runner Up) feed the <a href="<?= BASE_URL ?>/intramurals/standings/overall.php">Overall Standing</a> by division.
 <?php if (canManageEventRankings()): ?>
-Use <a href="<?= BASE_URL ?>/intramurals/rankings/index.php<?= $sportId ? '?sport=' . (int) $sportId : '' ?>">Event Rankings</a> to enter places per division for events without scheduled matches.
+Use <a href="<?= BASE_URL ?>/intramurals/rankings/index.php<?= $sportId ? '?sport=' . (int) $sportId : '' ?>">Manual Entry of Ranks</a> to enter places per division for events without scheduled matches.
 <?php endif; ?>
 <?php if (canManageIntramurals()): ?> Manage point values in <a href="<?= BASE_URL ?>/intramurals/points/index.php">Point System</a>.<?php endif; ?></p>
 <?= renderReportFooter($block ? sportLabel($block['sport']) : 'Result Tabulation') ?>

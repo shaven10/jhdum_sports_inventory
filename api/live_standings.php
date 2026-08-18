@@ -132,8 +132,12 @@ try {
         ];
     }
 
-    usort($events, static function ($a, $b) {
-        return strcasecmp($a['label'], $b['label']);
+    usort($events, static function (array $a, array $b): int {
+        $cmp = strcasecmp((string) ($a['name'] ?? ''), (string) ($b['name'] ?? ''));
+        if ($cmp !== 0) {
+            return $cmp;
+        }
+        return strcasecmp((string) ($a['category'] ?? ''), (string) ($b['category'] ?? ''));
     });
 
     echo json_encode([

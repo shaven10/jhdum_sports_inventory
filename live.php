@@ -294,7 +294,7 @@ $styleVersion = is_file($stylePath) ? (string) filemtime($stylePath) : APP_VERSI
         els.events.innerHTML = `<article class="live-block">
             <header class="live-block-head">
                 <h2>${esc(event.label)}</h2>
-                <p>${event.manual_ranks ? 'Manual ranks applied · ' : ''}Per-division event ranking</p>
+                <p>${event.manual_ranks ? 'Manual ranks applied · ' : ''}Per-division manual entry of ranks</p>
             </header>
             ${divisions.map(d => {
                 const rows = (d.standings || []).map(r => {

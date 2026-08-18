@@ -1028,7 +1028,7 @@ function renderResultsLockNotice(?int $seasonId = null): string
             <i class="bi bi-lock-fill"></i>
             <strong>Results locked</strong> for intramurals {$year}.
             {$dateLine}
-            Score updates, live scoring, and event ranking edits are disabled until an administrator unlocks results.
+            Score updates, live scoring, and manual entry of ranks are disabled until an administrator unlocks results.
         </div>
     </div>
 </div>

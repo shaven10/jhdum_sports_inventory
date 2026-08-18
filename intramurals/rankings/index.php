@@ -6,7 +6,7 @@ ensureEventRanksTable();
 ensureIntramuralDivisionsSchema();
 
 if (!canManageEventRankings()) {
-    flash('error', 'Event rankings are not available for your account. Ask an administrator to activate ranking for your assigned events.');
+    flash('error', 'Manual entry of ranks is not available for your account. Ask an administrator to activate ranking for your assigned events.');
     redirect(getHomeUrl());
 }
 
@@ -172,7 +172,7 @@ usort($listedIds, static function ($a, $b) use ($teamMap, $registeredIds) {
 $maxPlace = max(6, count($listedIds));
 $multiDivision = count($divisionGroups) > 1;
 
-$pageTitle = 'Event Rankings';
+$pageTitle = 'Manual Entry of Ranks';
 require_once __DIR__ . '/../../includes/header.php';
 require __DIR__ . '/../_season_bar.php';
 echo renderResultsLockAlerts();
@@ -180,7 +180,7 @@ echo renderResultsLockAlerts();
 
 <div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2">
     <div>
-        <h1><i class="bi bi-list-ol"></i> Event Rankings</h1>
+        <h1><i class="bi bi-list-ol"></i> Manual Entry of Ranks</h1>
         <p class="text-muted mb-0">Rank teams per division for events without a match schedule — Champion / runners-up feed the medal tally</p>
     </div>
     <div class="d-flex gap-2 flex-wrap">
@@ -367,7 +367,7 @@ echo renderResultsLockAlerts();
             <?php elseif (isTournamentManager() && !isAdmin() && !isSecretariat()): ?>
             Ranking is not activated for this event. Ask an administrator to enable it under Admin → TM Ranking Access.
             <?php else: ?>
-            You can view ranks. Only administrators, secretariat, or activated tournament managers can edit event rankings.
+            You can view ranks. Only administrators, secretariat, or activated tournament managers can edit manual ranks.
             <?php endif; ?>
         </div>
         <?php endif; ?>
