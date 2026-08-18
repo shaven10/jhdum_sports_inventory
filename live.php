@@ -17,7 +17,7 @@ try {
 
 $pageTitle = 'Live Rankings';
 $apiUrl = BASE_URL . '/api/live_standings.php';
-$refreshSeconds = 60;
+$refreshSeconds = 600;
 $stylePath = __DIR__ . '/assets/css/style.css';
 $styleVersion = is_file($stylePath) ? (string) filemtime($stylePath) : APP_VERSION;
 ?>
