@@ -5,6 +5,9 @@ requireMatchResultsAccess();
 
 $db = getDB();
 $seasonId = getCurrentSeasonId();
+if ($seasonId) {
+    ensureVenueGameNumbersCurrent($seasonId);
+}
 $month = get('month', date('Y-m'));
 if (!preg_match('/^\d{4}-\d{2}$/', $month)) {
     $month = date('Y-m');
@@ -38,6 +41,7 @@ if (isTournamentManager() && !canManageIntramurals()) {
         $params = array_merge($params, $tmSportIds);
     }
 }
+appendUnitManagerMatchFilter($sql, $params);
 $sql .= ' ORDER BY m.scheduled_at';
 $stmt = $db->prepare($sql);
 $stmt->execute($params);
@@ -51,6 +55,7 @@ foreach ($matches as $m) {
     $calendarPayload[$d][] = [
         'id' => (int) $m['id'],
         'time' => date('g:i A', strtotime($m['scheduled_at'])),
+        'game_number' => !empty($m['game_number']) ? (int) $m['game_number'] : null,
         'sport' => (string) $m['sport_name'],
         'category' => ucfirst((string) ($m['sport_category'] ?? '')),
         'round' => (string) ($m['round_label'] ?? ''),
@@ -168,6 +173,7 @@ require __DIR__ . '/../_season_bar.php';
                     <table class="table table-hover mb-0 align-middle">
                         <thead class="table-light">
                             <tr>
+                                <th>Game #</th>
                                 <th>Time</th>
                                 <th>Event</th>
                                 <th>Match</th>
@@ -285,7 +291,9 @@ require __DIR__ . '/../_season_bar.php';
         bodyEl.innerHTML = matches.map(function (m) {
             const eventBits = [m.sport, m.category].filter(Boolean).join(' · ');
             const round = m.round ? '<div class="small text-muted">' + esc(m.round) + '</div>' : '';
+            const gameNum = m.game_number ? '<span class="badge bg-dark">' + esc(String(m.game_number)) + '</span>' : '—';
             return '<tr>'
+                + '<td class="text-nowrap">' + gameNum + '</td>'
                 + '<td class="text-nowrap">' + esc(m.time) + '</td>'
                 + '<td>' + esc(eventBits) + round + '</td>'
                 + '<td><span style="color:' + esc(m.team_a_color) + '">' + esc(m.team_a) + '</span>'

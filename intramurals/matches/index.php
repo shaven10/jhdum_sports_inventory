@@ -6,10 +6,17 @@ requireMatchResultsAccess();
 $db = getDB();
 $seasonId = getCurrentSeasonId();
 $season = getCurrentSeason();
+if ($seasonId) {
+    ensureVenueGameNumbersCurrent($seasonId);
+}
 $search = get('search');
 $sportId = get('sport');
 $status = get('status');
 $unscheduled = get('unscheduled');
+$sort = get('sort', 'schedule');
+if (!in_array($sort, ['schedule', 'game_number'], true)) {
+    $sort = 'schedule';
+}
 $page = max(1, (int) get('page', '1'));
 $perPage = 20;
 
@@ -45,6 +52,7 @@ if (isTournamentManager() && !canManageIntramurals()) {
     }
 }
 $whereClause = implode(' AND ', $where);
+appendUnitManagerMatchFilter($whereClause, $params);
 
 $sports = filterSportsForUser($db->query('SELECT id, name, category, tournament_format FROM intramural_sports ORDER BY name')->fetchAll());
 
@@ -66,33 +74,40 @@ $countStmt = $db->prepare("SELECT COUNT(*) FROM intramural_matches m
 $countStmt->execute($params);
 $pagination = paginate((int) $countStmt->fetchColumn(), $perPage, $page);
 
+$orderBy = matchScheduleSqlOrderClause($sort);
+$selectEffectiveVenue = ', COALESCE(NULLIF(TRIM(m.venue), \'\'), NULLIF(TRIM(s.venue), \'\')) AS effective_venue';
+
 $sql = "SELECT m.*, s.name as sport_name, s.category as sport_category, s.tournament_format,
                ta.name as team_a_name, ta.color as team_a_color,
-               tb.name as team_b_name, tb.color as team_b_color
+               tb.name as team_b_name, tb.color as team_b_color{$selectEffectiveVenue}
         FROM intramural_matches m
         JOIN intramural_sports s ON m.sport_id = s.id
         LEFT JOIN intramural_teams ta ON m.team_a_id = ta.id
         LEFT JOIN intramural_teams tb ON m.team_b_id = tb.id
         WHERE $whereClause
-        ORDER BY s.name ASC, s.category ASC, (m.scheduled_at IS NULL) ASC, m.scheduled_at ASC, m.match_order ASC, m.id ASC
+        ORDER BY $orderBy
         LIMIT {$pagination['offset']}, $perPage";
 $stmt = $db->prepare($sql);
 $stmt->execute($params);
 $matches = $stmt->fetchAll();
-$matchesBySport = groupMatchesBySportSchedule($matches);
+$matchesBySport = $sort === 'game_number'
+    ? groupMatchesByVenueDaySchedule($matches)
+    : groupMatchesBySportSchedule($matches);
 
 $printSql = "SELECT m.*, s.name as sport_name, s.category as sport_category, s.tournament_format,
                ta.name as team_a_name, ta.color as team_a_color,
-               tb.name as team_b_name, tb.color as team_b_color
+               tb.name as team_b_name, tb.color as team_b_color{$selectEffectiveVenue}
         FROM intramural_matches m
         JOIN intramural_sports s ON m.sport_id = s.id
         LEFT JOIN intramural_teams ta ON m.team_a_id = ta.id
         LEFT JOIN intramural_teams tb ON m.team_b_id = tb.id
         WHERE $whereClause
-        ORDER BY s.name ASC, s.category ASC, (m.scheduled_at IS NULL) ASC, m.scheduled_at ASC, m.match_order ASC, m.id ASC";
+        ORDER BY $orderBy";
 $printStmt = $db->prepare($printSql);
 $printStmt->execute($params);
-$printMatchesBySport = groupMatchesBySportSchedule($printStmt->fetchAll());
+$printMatchesBySport = $sort === 'game_number'
+    ? groupMatchesByVenueDaySchedule($printStmt->fetchAll())
+    : groupMatchesBySportSchedule($printStmt->fetchAll());
 $printMatchTotal = 0;
 foreach ($printMatchesBySport as $pg) {
     $printMatchTotal += count($pg['matches']);
@@ -103,8 +118,11 @@ $generatedCount = 0;
 $generatedUnplayedCount = 0;
 $totalMatchCount = 0;
 if ($seasonId) {
-    $p = $db->prepare('SELECT COUNT(*) FROM intramural_matches WHERE season_id = ? AND scheduled_at IS NULL');
-    $p->execute([$seasonId]);
+    $pendingSql = 'SELECT COUNT(*) FROM intramural_matches m WHERE m.season_id = ? AND m.scheduled_at IS NULL';
+    $pendingParams = [$seasonId];
+    appendUnitManagerMatchFilter($pendingSql, $pendingParams);
+    $p = $db->prepare($pendingSql);
+    $p->execute($pendingParams);
     $pendingCount = (int) $p->fetchColumn();
     if (canDeleteAllMatches()) {
         $sportFilter = $sportId !== '' ? (int) $sportId : null;
@@ -119,7 +137,7 @@ require_once __DIR__ . '/../../includes/header.php';
 require __DIR__ . '/../_season_bar.php';
 echo '<div class="no-print">' . renderResultsLockAlerts() . '</div>';
 
-$queryBase = BASE_URL . '/intramurals/matches/index.php?search=' . urlencode($search) . '&sport=' . urlencode($sportId) . '&status=' . urlencode($status) . '&unscheduled=' . urlencode($unscheduled);
+$queryBase = BASE_URL . '/intramurals/matches/index.php?search=' . urlencode($search) . '&sport=' . urlencode($sportId) . '&status=' . urlencode($status) . '&unscheduled=' . urlencode($unscheduled) . '&sort=' . urlencode($sort);
 
 $filterSportLabel = 'All events';
 if ($sportId !== '') {
@@ -150,12 +168,15 @@ if ($status !== '') {
 if ($unscheduled === '1') {
     $filterSummary[] = 'Needs date/time';
 }
+if ($sort === 'game_number') {
+    $filterSummary[] = 'Sorted by game #';
+}
 
 $reportMetaParts = [];
 if ($season) {
     $reportMetaParts[] = seasonLabel($season);
 }
-if ($filtersActive) {
+if ($filtersActive || $sort === 'game_number') {
     $reportMetaParts[] = implode(' · ', $filterSummary);
 } else {
     $reportMetaParts[] = 'All matches';
@@ -166,7 +187,7 @@ $reportMeta = implode(' · ', $reportMetaParts);
 <div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2 no-print">
     <div>
         <h1><i class="bi bi-calendar3"></i> Match Scheduling</h1>
-        <p class="text-muted mb-0">Generate fixtures by tournament style, auto-schedule, then edit any date/time as needed. Matches are grouped by sport and sorted by date/time. Click a team name to view that match’s official players.</p>
+        <p class="text-muted mb-0">Generate fixtures by tournament style, auto-schedule, then edit any date/time as needed. Matches are grouped <?= $sort === 'game_number' ? 'by play date and venue, sorted by game #' : 'by sport and sorted by date/time' ?>. Click a team name to view that match’s official players.<?php if (hasRole('unit_manager') && !canManageIntramurals() && getUserTeamId()): ?> Showing only matches involving your assigned team.<?php endif; ?></p>
     </div>
     <?php if ($printMatchTotal > 0): ?>
     <div class="d-flex gap-2 flex-wrap">
@@ -178,7 +199,7 @@ $reportMeta = implode(' · ', $reportMetaParts);
 </div>
 
 <?= renderReportHeader('Match Schedule', [
-    'subtitle' => 'Intramural match fixtures grouped by sport',
+    'subtitle' => $sort === 'game_number' ? 'Intramural matches grouped by date and venue' : 'Intramural match fixtures grouped by sport',
     'meta' => $reportMeta,
 ]) ?>
 
@@ -188,6 +209,7 @@ $reportMeta = implode(' · ', $reportMetaParts);
     $scheduleGroups = $printMatchesBySport;
     $showActions = false;
     $plainTeamLabels = true;
+    $scheduleGroupMode = $sort === 'game_number' ? 'venue_day' : 'sport';
     require __DIR__ . '/_schedule_groups.php';
     ?>
 </div>
@@ -228,16 +250,16 @@ $reportMeta = implode(' · ', $reportMetaParts);
             <a href="<?= BASE_URL ?>/intramurals/index.php" class="btn btn-outline-secondary">Back</a>
         </div>
         <div class="d-flex gap-2 align-items-center flex-wrap">
-            <?php if ($filtersActive): ?>
+            <?php if ($filtersActive || $sort === 'game_number'): ?>
             <span class="text-muted small"><?= sanitize(implode(' · ', $filterSummary)) ?></span>
             <?php endif; ?>
-            <button type="button" class="btn btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#matchFilters" aria-expanded="<?= $filtersActive ? 'true' : 'false' ?>" aria-controls="matchFilters">
+            <button type="button" class="btn btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#matchFilters" aria-expanded="<?= ($filtersActive || $sort === 'game_number') ? 'true' : 'false' ?>" aria-controls="matchFilters">
                 <i class="bi bi-funnel"></i> Filters
                 <i class="bi bi-chevron-down ms-1 filter-toggle-icon"></i>
             </button>
         </div>
     </div>
-    <div id="matchFilters" class="collapse<?= $filtersActive ? ' show' : '' ?>">
+    <div id="matchFilters" class="collapse<?= ($filtersActive || $sort === 'game_number') ? ' show' : '' ?>">
         <form method="GET" class="row g-2 align-items-end mt-2">
             <div class="col-md-3"><label class="form-label">Search</label><input type="text" name="search" class="form-control" value="<?= sanitize($search) ?>"></div>
             <div class="col-md-3">
@@ -265,7 +287,14 @@ $reportMeta = implode(' · ', $reportMetaParts);
                     <option value="1" <?= $unscheduled === '1' ? 'selected' : '' ?> >Needs date/time</option>
                 </select>
             </div>
-            <div class="col-md-2"><button class="btn btn-primary w-100">Filter</button></div>
+            <div class="col-md-2">
+                <label class="form-label">Sort by</label>
+                <select name="sort" class="form-select">
+                    <option value="schedule" <?= $sort === 'schedule' ? 'selected' : '' ?>>Date/time (by sport)</option>
+                    <option value="game_number" <?= $sort === 'game_number' ? 'selected' : '' ?>>Game # (by date &amp; venue)</option>
+                </select>
+            </div>
+            <div class="col-md-12 col-lg-auto"><button class="btn btn-primary w-100">Apply</button></div>
         </form>
     </div>
 </div>
@@ -284,6 +313,7 @@ $reportMeta = implode(' · ', $reportMetaParts);
         $scheduleGroups = $matchesBySport;
         $showActions = true;
         $plainTeamLabels = false;
+        $scheduleGroupMode = $sort === 'game_number' ? 'venue_day' : 'sport';
         require __DIR__ . '/_schedule_groups.php';
         ?>
         <?php endif; ?>

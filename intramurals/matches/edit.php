@@ -109,6 +109,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ]);
         auditLog($_SESSION['user_id'], 'update', 'intramural_match', $id, null, ['status' => $status, 'score_a' => $scoreA, 'score_b' => $scoreB]);
 
+        if (!empty($match['season_id'])) {
+            recalculateVenueGameNumbers((int) $match['season_id']);
+        }
+
         if (in_array($status, ['completed', 'forfeit'], true)) {
             maybeCancelUnneededDecidingRubber($db, $id);
         }

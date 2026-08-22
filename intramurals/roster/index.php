@@ -71,6 +71,20 @@ $stmt = $db->prepare($sql);
 $stmt->execute($params);
 $rows = $stmt->fetchAll();
 
+$scopedTeamForDupes = ($teamId !== '') ? (int) $teamId : null;
+if ($lockTeamFilter && $teamId !== '') {
+    $scopedTeamForDupes = (int) $teamId;
+} elseif (hasRole('unit_manager') && !canManageIntramurals() && getUserTeamId()) {
+    $scopedTeamForDupes = (int) getUserTeamId();
+}
+$duplicateGroups = getDuplicateAthleteNameGroups($seasonId, $scopedTeamForDupes);
+$duplicateAthleteIds = [];
+foreach ($duplicateGroups as $group) {
+    foreach ($group['athletes'] as $athlete) {
+        $duplicateAthleteIds[(int) $athlete['id']] = $group['display_name'];
+    }
+}
+
 $categoryBadgeClass = static function (string $cat): string {
     $cat = strtolower($cat);
     if ($cat === 'men') {
@@ -143,6 +157,11 @@ require __DIR__ . '/../_season_bar.php';
         <?php endif; ?>
         <a href="<?= BASE_URL ?>/intramurals/roster/gallery.php" class="btn btn-outline-primary"><i class="bi bi-images"></i> Entry Form Gallery</a>
         <a href="<?= BASE_URL ?>/intramurals/roster/team_list.php" class="btn btn-outline-primary"><i class="bi bi-people"></i> Team Athlete List</a>
+        <?php if (!empty($duplicateGroups) && (canManageTeamAthletes() || canManageIntramurals())): ?>
+        <a href="<?= BASE_URL ?>/intramurals/roster/duplicates.php" class="btn btn-warning">
+            <i class="bi bi-exclamation-triangle"></i> Duplicates (<?= count($duplicateGroups) ?>)
+        </a>
+        <?php endif; ?>
         <a href="?<?= $querySuffix ?>&export=excel" class="btn btn-outline-success"><i class="bi bi-file-earmark-excel"></i> Export Excel</a>
         <button type="button" class="btn btn-outline-secondary" onclick="printReport()"><i class="bi bi-printer"></i> Print / PDF</button>
         <a href="<?= BASE_URL ?>/intramurals/index.php" class="btn btn-outline-secondary">Back</a>
@@ -190,6 +209,18 @@ require __DIR__ . '/../_season_bar.php';
         <div class="col-md-2"><button class="btn btn-primary w-100">Apply</button></div>
     </form>
 </div>
+
+<?php if (!empty($duplicateGroups)): ?>
+<div class="alert alert-warning no-print">
+    <i class="bi bi-exclamation-triangle"></i>
+    <strong><?= count($duplicateGroups) ?></strong> athlete name<?= count($duplicateGroups) === 1 ? '' : 's' ?>
+    appear<?= count($duplicateGroups) === 1 ? 's' : '' ?> on multiple accounts (different student IDs).
+    Multiple events should use one account only.
+    <?php if (canManageTeamAthletes() || canManageIntramurals()): ?>
+    <a href="<?= BASE_URL ?>/intramurals/roster/duplicates.php" class="alert-link">Review and merge duplicates</a>
+    <?php endif; ?>
+</div>
+<?php endif; ?>
 
 <div class="roster-print-doc">
     <?php
@@ -261,12 +292,18 @@ require __DIR__ . '/../_season_bar.php';
                     </thead>
                     <tbody>
                         <?php foreach ($athletes as $i => $r): ?>
-                        <tr>
+                        <?php $isDuplicateAccount = isset($duplicateAthleteIds[(int) $r['athlete_id']]); ?>
+                        <tr class="<?= $isDuplicateAccount ? 'table-warning' : '' ?>">
                             <td><?= $i + 1 ?></td>
                             <td><?= sanitize($r['jersey_number'] ?: '—') ?></td>
                             <td><?= sanitize($r['student_id']) ?></td>
                             <td>
-                                <span class="d-print-none"><a class="roster-athlete-link" href="<?= BASE_URL ?>/intramurals/athletes/view.php?id=<?= $r['athlete_id'] ?>"><?= sanitize(athleteFullNameReport($r)) ?></a></span>
+                                <span class="d-print-none">
+                                    <a class="roster-athlete-link" href="<?= BASE_URL ?>/intramurals/athletes/view.php?id=<?= $r['athlete_id'] ?>"><?= sanitize(athleteFullNameReport($r)) ?></a>
+                                    <?php if ($isDuplicateAccount): ?>
+                                    <span class="badge bg-warning text-dark ms-1 no-print" title="Same name exists on another account">Duplicate name</span>
+                                    <?php endif; ?>
+                                </span>
                                 <span class="d-none d-print-inline"><?= sanitize(athleteFullNameReport($r)) ?></span>
                             </td>
                             <td><?= sanitize(ucfirst($r['gender'] ?: '—')) ?></td>

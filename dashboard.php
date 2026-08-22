@@ -53,7 +53,7 @@ if ($showInventory) {
 try {
     if ($showCompetition) {
         $competitionStats = getIntramuralsStats();
-        $showUnfinishedMatches = $isTmDashboard || isAdmin();
+        $showUnfinishedMatches = $isTmDashboard || isAdmin() || (hasRole('unit_manager') && getUserTeamId());
         if ($showUnfinishedMatches) {
             $unfinishedMatches = getDashboardUnfinishedMatches(12);
         }

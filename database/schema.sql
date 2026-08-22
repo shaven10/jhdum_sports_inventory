@@ -496,6 +496,7 @@ CREATE TABLE IF NOT EXISTS intramural_matches (
     team_b_id INT DEFAULT NULL,
     scheduled_at DATETIME DEFAULT NULL,
     venue VARCHAR(150) DEFAULT NULL,
+    game_number INT DEFAULT NULL,
     referee_name VARCHAR(100) DEFAULT NULL,
     status ENUM('scheduled', 'ongoing', 'completed', 'cancelled', 'forfeit') NOT NULL DEFAULT 'scheduled',
     score_a INT DEFAULT NULL,

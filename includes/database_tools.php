@@ -3,6 +3,163 @@
  * Admin database backup and restore helpers.
  */
 
+function getDefaultDatabaseSnapshotDir(): string
+{
+    return dirname(__DIR__) . '/storage/database';
+}
+
+function getDefaultDatabaseSnapshotSqlPath(): string
+{
+    return getDefaultDatabaseSnapshotDir() . '/default_snapshot.sql';
+}
+
+function getDefaultDatabaseSnapshotMetaPath(): string
+{
+    return getDefaultDatabaseSnapshotDir() . '/default_snapshot.json';
+}
+
+function ensureDefaultDatabaseSnapshotDir(): void
+{
+    $dir = getDefaultDatabaseSnapshotDir();
+    if (!is_dir($dir)) {
+        mkdir($dir, 0755, true);
+    }
+
+    $htaccess = $dir . '/.htaccess';
+    if (!is_file($htaccess)) {
+        file_put_contents($htaccess, "Require all denied\nDeny from all\n");
+    }
+}
+
+function defaultDatabaseSnapshotExists(): bool
+{
+    $sqlPath = getDefaultDatabaseSnapshotSqlPath();
+    return is_file($sqlPath) && filesize($sqlPath) > 0;
+}
+
+/** @return array<string,mixed>|null */
+function getDefaultDatabaseSnapshotInfo(): ?array
+{
+    if (!defaultDatabaseSnapshotExists()) {
+        return null;
+    }
+
+    $meta = null;
+    $metaPath = getDefaultDatabaseSnapshotMetaPath();
+    if (is_file($metaPath)) {
+        $decoded = json_decode((string) file_get_contents($metaPath), true);
+        if (is_array($decoded)) {
+            $meta = $decoded;
+        }
+    }
+
+    $sqlPath = getDefaultDatabaseSnapshotSqlPath();
+    $fileSize = (int) filesize($sqlPath);
+    $savedAt = $meta['saved_at'] ?? date('Y-m-d H:i:s', (int) filemtime($sqlPath));
+
+    return array_merge([
+        'database' => DB_NAME,
+        'host' => DB_HOST,
+        'saved_at' => $savedAt,
+        'saved_by_user_id' => null,
+        'saved_by_username' => null,
+        'tables' => null,
+        'total_rows' => null,
+        'file_size' => $fileSize,
+    ], $meta ?? []);
+}
+
+/**
+ * Save the current database as the default restore snapshot.
+ *
+ * @return array{success:bool,message:string,info:?array<string,mixed>}
+ */
+function saveDefaultDatabaseSnapshot(PDO $db, ?int $userId = null, ?string $username = null): array
+{
+    ensureDefaultDatabaseSnapshotDir();
+
+    $info = getDatabaseToolInfo();
+    $sql = exportDatabaseSql($db);
+    $sqlPath = getDefaultDatabaseSnapshotSqlPath();
+    $metaPath = getDefaultDatabaseSnapshotMetaPath();
+
+    $tmpPath = $sqlPath . '.tmp';
+    if (file_put_contents($tmpPath, $sql) === false) {
+        return [
+            'success' => false,
+            'message' => 'Could not write the default database snapshot file.',
+            'info' => null,
+        ];
+    }
+
+    if (!rename($tmpPath, $sqlPath)) {
+        @unlink($tmpPath);
+        return [
+            'success' => false,
+            'message' => 'Could not finalize the default database snapshot file.',
+            'info' => null,
+        ];
+    }
+
+    $meta = [
+        'database' => DB_NAME,
+        'host' => DB_HOST,
+        'charset' => DB_CHARSET,
+        'saved_at' => date('Y-m-d H:i:s'),
+        'saved_by_user_id' => $userId,
+        'saved_by_username' => $username,
+        'tables' => $info['tables'],
+        'total_rows' => $info['total_rows'],
+        'file_size' => strlen($sql),
+    ];
+
+    file_put_contents($metaPath, json_encode($meta, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+
+    return [
+        'success' => true,
+        'message' => 'Current database saved as the default restore point.',
+        'info' => $meta,
+    ];
+}
+
+/**
+ * Restore the database from the saved default snapshot.
+ *
+ * @return array{success:bool,message:string,executed:int,errors:array<int,string>,info:?array<string,mixed>}
+ */
+function resetDatabaseToDefault(PDO $db): array
+{
+    if (!defaultDatabaseSnapshotExists()) {
+        return [
+            'success' => false,
+            'message' => 'No default database snapshot is saved yet. Save the current database as default first.',
+            'executed' => 0,
+            'errors' => [],
+            'info' => null,
+        ];
+    }
+
+    $sql = file_get_contents(getDefaultDatabaseSnapshotSqlPath());
+    if ($sql === false || trim($sql) === '') {
+        return [
+            'success' => false,
+            'message' => 'Default database snapshot file is missing or empty.',
+            'executed' => 0,
+            'errors' => [],
+            'info' => getDefaultDatabaseSnapshotInfo(),
+        ];
+    }
+
+    $result = importDatabaseSql($db, $sql);
+    $result['info'] = getDefaultDatabaseSnapshotInfo();
+
+    if ($result['success']) {
+        $result['message'] = 'Database reset to the saved default snapshot.';
+    }
+
+    return $result;
+}
+
 function getDatabaseToolInfo(): array
 {
     $db = getDB();

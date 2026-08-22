@@ -40,23 +40,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
 
     if ($name === '') {
         $errors[] = 'Division name is required.';
+    } else {
+        $dup = $db->prepare('SELECT id FROM intramural_divisions WHERE name = ? AND id != ? LIMIT 1');
+        $dup->execute([$name, $id]);
+        if ($dup->fetch()) {
+            $errors[] = 'Another division already uses this name.';
+        }
     }
 
     if (empty($errors)) {
         try {
+            $db->beginTransaction();
             $db->prepare('UPDATE intramural_divisions SET name = ?, description = ?, sort_order = ?, is_active = ? WHERE id = ?')
                 ->execute([$name, $description !== '' ? $description : null, $sortOrder, $isActive, $id]);
             saveDivisionSports($id, $selectedSportIds);
             saveDivisionTeams($id, $selectedTeamIds);
-            auditLog((int) $_SESSION['user_id'], 'update', 'intramural_division', $id, null, [
-                'name' => $name,
-                'sports' => count($selectedSportIds),
-                'teams' => count($selectedTeamIds),
-            ]);
+            $db->commit();
+        } catch (PDOException $e) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+            $sqlState = (string) (($e->errorInfo[0] ?? null) ?: $e->getCode());
+            $message = $e->getMessage();
+            if ($sqlState === '23000' && str_contains($message, 'uq_division_name')) {
+                $errors[] = 'Another division already uses this name.';
+            } elseif ($sqlState === '23000' && str_contains($message, 'uq_division_sport')) {
+                $errors[] = 'Could not save events for this division. Remove duplicate event selections and try again.';
+            } elseif ($sqlState === '23000') {
+                $errors[] = 'Could not save division changes. A database constraint was violated.';
+            } else {
+                $errors[] = 'Could not save division changes. Please try again or contact support.';
+            }
+        }
+
+        if (empty($errors)) {
+            try {
+                auditLog((int) $_SESSION['user_id'], 'update', 'intramural_division', $id, null, [
+                    'name' => $name,
+                    'sports' => count($selectedSportIds),
+                    'teams' => count($selectedTeamIds),
+                ]);
+            } catch (PDOException $e) {
+                // Save succeeded; do not block the user if audit logging fails.
+            }
             flash('success', 'Division updated.');
             redirect(BASE_URL . '/admin/divisions/edit.php?id=' . $id);
-        } catch (PDOException $e) {
-            $errors[] = 'Could not save. Another division may already use this name.';
         }
     }
 

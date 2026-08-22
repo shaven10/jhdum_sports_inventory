@@ -11,3 +11,8 @@ Thumbs.db
 # Environment / secrets
 .env
 *.log
+
+# Local default database snapshot (admin-managed restore point)
+storage/database/*
+!storage/database/.gitkeep
+!storage/database/.htaccess

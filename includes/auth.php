@@ -136,6 +136,7 @@ function getCurrentUser(): ?array
 function logLoginAttempt(int $userId, string $status): void
 {
     $db = getDB();
+    ensureTablePrimaryAutoIncrement($db, 'login_history');
     $stmt = $db->prepare('INSERT INTO login_history (user_id, ip_address, user_agent, status) VALUES (?, ?, ?, ?)');
     $stmt->execute([
         $userId,
@@ -996,6 +997,60 @@ function appendTmSportFilter(string &$sql, array &$params, string $column = 'm.s
     $placeholders = implode(',', array_fill(0, count($tmSportIds), '?'));
     $sql .= " AND $column IN ($placeholders)";
     $params = array_merge($params, $tmSportIds);
+}
+
+/**
+ * Assigned team id for unit-manager match scoping, or null when not scoped.
+ */
+function getUnitManagerTeamScopeId(): ?int
+{
+    if (canManageIntramurals() || !hasRole('unit_manager')) {
+        return null;
+    }
+
+    $tid = getUserTeamId();
+
+    return $tid ? (int) $tid : 0;
+}
+
+/** Restrict match queries to games where the unit manager's team is playing. */
+function appendUnitManagerMatchFilter(string &$sql, array &$params, string $teamAColumn = 'm.team_a_id', string $teamBColumn = 'm.team_b_id'): void
+{
+    $teamId = getUnitManagerTeamScopeId();
+    if ($teamId === null) {
+        return;
+    }
+    if ($teamId <= 0) {
+        $sql .= ' AND 0=1';
+
+        return;
+    }
+    $sql .= " AND ($teamAColumn = ? OR $teamBColumn = ?)";
+    $params[] = $teamId;
+    $params[] = $teamId;
+}
+
+/** Whether the current unit manager's team is in this match (always true for other roles). */
+function unitManagerParticipatesInMatch(array $match): bool
+{
+    $teamId = getUnitManagerTeamScopeId();
+    if ($teamId === null) {
+        return true;
+    }
+    if ($teamId <= 0) {
+        return false;
+    }
+
+    return (int) ($match['team_a_id'] ?? 0) === $teamId || (int) ($match['team_b_id'] ?? 0) === $teamId;
+}
+
+function requireMatchViewAccess(array $match): void
+{
+    if (!unitManagerParticipatesInMatch($match)) {
+        flash('error', 'You can only view matches involving your assigned team.');
+        redirect(BASE_URL . '/intramurals/matches/index.php');
+    }
+    requireEventViewAccess((int) $match['sport_id']);
 }
 
 function canBorrowEquipment(): bool

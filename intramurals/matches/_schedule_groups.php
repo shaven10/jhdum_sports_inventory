@@ -1,13 +1,16 @@
 <?php
 /**
- * Match schedule grouped by sport.
+ * Match schedule grouped by sport or by play date + venue.
  *
- * @var array<int, array{sport_id:int,sport_name:string,sport_category:string,tournament_format:?string,matches:list<array>}> $scheduleGroups
+ * @var array<int, array<string,mixed>> $scheduleGroups
  * @var bool $showActions
  * @var bool $plainTeamLabels
+ * @var string $scheduleGroupMode sport|venue_day
  */
 $showActions = $showActions ?? false;
 $plainTeamLabels = $plainTeamLabels ?? false;
+$scheduleGroupMode = $scheduleGroupMode ?? 'sport';
+$byVenueDay = $scheduleGroupMode === 'venue_day';
 ?>
 <?php if (empty($scheduleGroups)): ?>
 <div class="text-muted p-3">No matches found.</div>
@@ -25,9 +28,22 @@ foreach ($sportGroup['matches'] as $gm) {
 <section class="match-schedule-sport-group border-bottom">
     <div class="match-schedule-sport-header d-flex justify-content-between align-items-center flex-wrap gap-2 px-3 py-2 bg-light border-bottom">
         <div>
+            <?php if ($byVenueDay): ?>
+            <strong>
+                <?php if (!empty($sportGroup['day'])): ?>
+                <?= formatDate($sportGroup['day']) ?>
+                <?php else: ?>
+                Unscheduled
+                <?php endif; ?>
+            </strong>
+            <?php if (!empty($sportGroup['day'])): ?>
+            <span class="badge bg-secondary ms-1"><i class="bi bi-geo-alt"></i> <?= sanitize($sportGroup['venue_label'] ?? 'Venue TBD') ?></span>
+            <?php endif; ?>
+            <?php else: ?>
             <strong><?= sanitize($sportGroup['sport_name']) ?></strong>
             <span class="badge bg-secondary ms-1"><?= ucfirst($sportGroup['sport_category']) ?></span>
             <span class="badge bg-info text-dark ms-1"><?= sanitize(tournamentFormatLabel($sportGroup['tournament_format'])) ?></span>
+            <?php endif; ?>
         </div>
         <span class="text-muted small">
             <?= $sportMatchCount ?> match<?= $sportMatchCount === 1 ? '' : 'es' ?>
@@ -40,11 +56,13 @@ foreach ($sportGroup['matches'] as $gm) {
         <table class="table table-hover mb-0 match-schedule-table">
             <thead class="table-light">
                 <tr>
+                    <th>Game #</th>
                     <th>Date/Time</th>
+                    <?php if ($byVenueDay): ?><th>Event</th><?php endif; ?>
                     <th>Round</th>
                     <th>Match</th>
                     <th>Score</th>
-                    <th>Venue</th>
+                    <?php if (!$byVenueDay): ?><th>Venue</th><?php endif; ?>
                     <th>Status</th>
                     <?php if ($showActions): ?><th class="text-end"></th><?php endif; ?>
                 </tr>
@@ -53,12 +71,27 @@ foreach ($sportGroup['matches'] as $gm) {
                 <?php foreach ($sportGroup['matches'] as $m): ?>
                 <tr class="<?= empty($m['scheduled_at']) ? 'table-warning' : '' ?>">
                     <td>
+                        <?php if (!empty($m['game_number'])): ?>
+                        <span class="badge bg-dark"><?= (int) $m['game_number'] ?></span>
+                        <?php else: ?>
+                        <span class="text-muted">—</span>
+                        <?php endif; ?>
+                    </td>
+                    <td>
                         <?php if (!empty($m['scheduled_at'])): ?>
                         <?= formatDateTime($m['scheduled_at']) ?>
                         <?php else: ?>
                         <span class="badge bg-warning text-dark">Unscheduled</span>
                         <?php endif; ?>
                     </td>
+                    <?php if ($byVenueDay): ?>
+                    <td>
+                        <?= sanitize($m['sport_name'] ?? '') ?>
+                        <?php if (!empty($m['sport_category'])): ?>
+                        <span class="badge bg-secondary ms-1"><?= ucfirst($m['sport_category']) ?></span>
+                        <?php endif; ?>
+                    </td>
+                    <?php endif; ?>
                     <td><?= sanitize($m['round_label'] ?: ('R' . (int) ($m['round_number'] ?? 1))) ?></td>
                     <td>
                         <?php if ($plainTeamLabels): ?>
@@ -74,7 +107,9 @@ foreach ($sportGroup['matches'] as $gm) {
                         <strong><?= (int) $m['score_a'] ?> - <?= (int) $m['score_b'] ?></strong>
                         <?php else: ?>-<?php endif; ?>
                     </td>
+                    <?php if (!$byVenueDay): ?>
                     <td><?= sanitize($m['venue'] ?: '-') ?></td>
+                    <?php endif; ?>
                     <td><?= statusBadge($m['status']) ?></td>
                     <?php if ($showActions): ?>
                     <td class="text-nowrap text-end">

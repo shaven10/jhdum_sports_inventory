@@ -349,20 +349,27 @@ foreach ($selectedSportIds as $sid) {
 
     $groups = [];
     $shouldSplitDivisions = ($divisionFilter === 'all' && !empty($divisions));
+    $rosterCandidateIds = null;
+    if ($teamMode === 'division' || $teamMode === 'roster') {
+        if ($seasonId) {
+            $regTeamsStmt->execute([$sid, $seasonId]);
+            $rosterCandidateIds = array_map('intval', $regTeamsStmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
+        }
+    }
     if ($shouldSplitDivisions) {
-        $groups = array_values(groupEligibleTeamsByDivisionForSport($sid, $baseTeamIds));
+        $groups = buildSportDivisionGroups($sid, (int) ($seasonId ?: 0), $rosterCandidateIds);
     } elseif ($fixedDivisionId > 0) {
         $div = getDivisionById($fixedDivisionId);
         $groups[] = [
             'division_id' => $fixedDivisionId,
             'division_name' => $div['name'] ?? ('Division #' . $fixedDivisionId),
-            'team_ids' => array_values(array_intersect($baseTeamIds, getTeamIdsInDivision($fixedDivisionId))),
+            'team_ids' => resolveDivisionSportTeamIds($sid, $fixedDivisionId, (int) ($seasonId ?: 0), $rosterCandidateIds),
         ];
     } elseif ($divisionFilter === 'none') {
         $groups[] = [
             'division_id' => null,
             'division_name' => 'Unassigned',
-            'team_ids' => array_values(array_intersect($baseTeamIds, getTeamIdsInDivision(null))),
+            'team_ids' => resolveDivisionSportTeamIds($sid, null, (int) ($seasonId ?: 0), $rosterCandidateIds),
         ];
     } else {
         $groups[] = ['division_id' => null, 'division_name' => '', 'team_ids' => $baseTeamIds];
@@ -424,6 +431,7 @@ if ($fixturesBySportPreview && scheduleWindowIsValid($scheduleWindow)) {
         }
         unset($fx);
     }
+    assignVenueGameNumbersToFixtures($fixturesBySportPreview, $sportsByIdPreview);
     foreach ($previewBatchRanges as $bi => [$sid, $start, $len]) {
         for ($j = 0; $j < $len; $j++) {
             if (isset($fixturesBySportPreview[$sid][$start + $j])) {
@@ -487,19 +495,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && post('action') === 'generate') {
         $perSport = null;
         if ($teamMode === 'per_sport') {
             $perSport = $teamsBySport;
-        } elseif ($teamMode === 'division') {
-            $perSport = [];
-            foreach ($selectedSportIds as $sid) {
-                $ids = [];
-                if ($seasonId) {
-                    $regTeamsStmt->execute([$sid, $seasonId]);
-                    $ids = array_map('intval', $regTeamsStmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
-                }
-                if (count($ids) < 2) {
-                    $ids = getTeamIdsEligibleForSport($sid);
-                }
-                $perSport[$sid] = $ids;
-            }
         }
         $scheduleOptions = [
             'start_date' => $scheduleStartDate ?: null,
@@ -948,12 +943,12 @@ $renderSlotSelects = static function (string $namePrefix, array $slotMap, array 
                             <div class="table-responsive" style="max-height:220px;overflow:auto">
                                 <table class="table table-sm mb-0">
                                     <thead class="table-light sticky-top">
-                                        <tr><th>#</th><th>Round / Board</th><th>Schedule</th><th>Venue</th><th>Side 1</th><th>Side 2</th></tr>
+                                        <tr><th>Game #</th><th>Round / Board</th><th>Schedule</th><th>Venue</th><th>Side 1</th><th>Side 2</th></tr>
                                     </thead>
                                     <tbody>
                                         <?php foreach ($block['fixtures'] as $f): ?>
                                         <tr>
-                                            <td><?= (int) $f['match_order'] ?></td>
+                                            <td><?= !empty($f['game_number']) ? (int) $f['game_number'] : '—' ?></td>
                                             <td><?= sanitize($f['round_label']) ?></td>
                                             <td class="small text-nowrap">
                                                 <?php if (!empty($f['scheduled_at'])): ?>

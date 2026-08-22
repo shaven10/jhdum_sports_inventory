@@ -15,6 +15,9 @@ try {
     $champions = array_slice(array_filter($overall, fn($r) => $r['total'] > 0), 0, 3);
 
     if ($seasonId) {
+        $upcomingWhere = "m.season_id = ? AND m.status IN ('scheduled', 'ongoing') AND m.scheduled_at >= NOW()";
+        $upcomingParams = [$seasonId];
+        appendUnitManagerMatchFilter($upcomingWhere, $upcomingParams);
         $stmt = $db->prepare("
             SELECT m.*, s.name as sport_name, s.category as sport_category,
                    ta.name as team_a_name, ta.color as team_a_color,
@@ -23,10 +26,10 @@ try {
             JOIN intramural_sports s ON m.sport_id = s.id
             JOIN intramural_teams ta ON m.team_a_id = ta.id
             JOIN intramural_teams tb ON m.team_b_id = tb.id
-            WHERE m.season_id = ? AND m.status IN ('scheduled', 'ongoing') AND m.scheduled_at >= NOW()
+            WHERE $upcomingWhere
             ORDER BY m.scheduled_at ASC LIMIT 8
         ");
-        $stmt->execute([$seasonId]);
+        $stmt->execute($upcomingParams);
         $upcoming = $stmt->fetchAll();
     }
 } catch (Throwable $e) {

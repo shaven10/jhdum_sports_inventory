@@ -10,4 +10,4 @@ if (PHP_SAPI !== 'cli') {
 }
 
 ensureMatchDivisionColumn();
-echo "Match division_id column is ready.\n";
+echo "Match table schema is ready (division_id + auto-increment id).\n";

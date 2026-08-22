@@ -24,7 +24,7 @@ if (!$match) {
     redirect(BASE_URL . '/intramurals/matches/index.php');
 }
 
-requireEventViewAccess((int) $match['sport_id']);
+requireMatchViewAccess($match);
 
 maybeCancelUnneededDecidingRubber($db, $id);
 $stmt->execute([$id]);
@@ -66,14 +66,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
             }
             $db->prepare('UPDATE intramural_matches SET score_a=?, score_b=?, status=?, winner_team_id=? WHERE id=?')
                 ->execute([$scoreA, $scoreB, $status, $winner, $id]);
-            auditLog($_SESSION['user_id'], 'score_update', 'intramural_match', $id, null, ['score_a' => $scoreA, 'score_b' => $scoreB, 'status' => $status]);
+            try {
+                auditLog($_SESSION['user_id'], 'score_update', 'intramural_match', $id, null, ['score_a' => $scoreA, 'score_b' => $scoreB, 'status' => $status]);
+            } catch (PDOException $e) {
+                // Score saved; audit logging must not block live scoring.
+            }
 
             if (in_array($status, ['completed', 'forfeit'], true)) {
                 maybeCancelUnneededDecidingRubber($db, $id);
             }
 
             if (in_array($status, ['completed', 'forfeit'], true)) {
-                notifyMatchFinished($id, (string) ($match['status'] ?? ''));
+                try {
+                    notifyMatchFinished($id, (string) ($match['status'] ?? ''));
+                } catch (PDOException $e) {
+                    // Score saved; notifications must not block live scoring.
+                }
             }
 
             $advanceMsg = '';
@@ -100,7 +108,12 @@ echo renderResultsLockAlerts();
 <div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2">
     <div>
         <h1><i class="bi bi-trophy"></i> <?= sanitize($match['sport_name']) ?> <small class="text-muted">(<?= ucfirst($match['sport_category']) ?>)</small></h1>
-        <p class="match-details-meta text-muted mb-0"><?= formatDateTime($match['scheduled_at']) ?> · <?= sanitize($match['venue'] ?: 'TBA') ?></p>
+        <p class="match-details-meta text-muted mb-0">
+            <?php if (!empty($match['game_number'])): ?>
+            <span class="badge bg-dark"><?= formatVenueGameNumber((int) $match['game_number']) ?></span> ·
+            <?php endif; ?>
+            <?= formatDateTime($match['scheduled_at']) ?> · <?= sanitize($match['venue'] ?: 'TBA') ?>
+        </p>
     </div>
     <div class="d-flex gap-2">
         <?php if (canManageEventMatches((int) $match['sport_id'])): ?>
@@ -222,6 +235,8 @@ echo renderResultsLockAlerts();
                     </dd>
                     <dt class="col-5">Scoring</dt><dd class="col-7"><?= ucfirst($match['scoring_method']) ?></dd>
                     <dt class="col-5">Referee</dt><dd class="col-7"><?= sanitize($match['referee_name'] ?: '-') ?></dd>
+                    <dt class="col-5">Venue game #</dt>
+                    <dd class="col-7"><?= !empty($match['game_number']) ? sanitize(formatVenueGameNumber((int) $match['game_number'])) : '—' ?></dd>
                     <dt class="col-5">Venue</dt><dd class="col-7"><?= sanitize($match['venue'] ?: '-') ?></dd>
                     <dt class="col-5">Notes</dt><dd class="col-7"><?= nl2br(sanitize($match['notes'] ?: '-')) ?></dd>
                 </dl>

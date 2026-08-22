@@ -91,9 +91,9 @@ if ($type === 'athletes') {
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
     $data = $stmt->fetchAll();
-    $headers = ['Date/Time', 'Sport', 'Category', 'Team A', 'Team B', 'Venue', 'Referee', 'Status'];
+    $headers = ['Date/Time', 'Game #', 'Sport', 'Category', 'Team A', 'Team B', 'Venue', 'Referee', 'Status'];
     foreach ($data as $r) {
-        $rows[] = [formatDateTime($r['scheduled_at']), $r['sport_name'], ucfirst($r['category']), $r['team_a_name'], $r['team_b_name'], $r['venue'] ?: '', $r['referee_name'] ?: '', ucfirst($r['status'])];
+        $rows[] = [formatDateTime($r['scheduled_at']), $r['game_number'] ?: '', $r['sport_name'], ucfirst($r['category']), $r['team_a_name'], $r['team_b_name'], $r['venue'] ?: '', $r['referee_name'] ?: '', ucfirst($r['status'])];
         $htmlRows[] = $rows[count($rows) - 1];
     }
 } elseif ($type === 'results') {
@@ -112,9 +112,9 @@ if ($type === 'athletes') {
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
     $data = $stmt->fetchAll();
-    $headers = ['Date', 'Sport', 'Team A', 'Score A', 'Score B', 'Team B', 'Winner', 'Status'];
+    $headers = ['Date', 'Game #', 'Sport', 'Team A', 'Score A', 'Score B', 'Team B', 'Winner', 'Status'];
     foreach ($data as $r) {
-        $rows[] = [formatDateTime($r['scheduled_at']), $r['sport_name'], $r['team_a_name'], $r['score_a'], $r['score_b'], $r['team_b_name'], $r['winner_name'] ?: 'Draw', ucfirst($r['status'])];
+        $rows[] = [formatDateTime($r['scheduled_at']), $r['game_number'] ?: '', $r['sport_name'], $r['team_a_name'], $r['score_a'], $r['score_b'], $r['team_b_name'], $r['winner_name'] ?: 'Draw', ucfirst($r['status'])];
         $htmlRows[] = $rows[count($rows) - 1];
     }
 } elseif ($type === 'medals') {

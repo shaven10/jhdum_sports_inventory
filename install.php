@@ -6,6 +6,7 @@
  */
 
 require_once __DIR__ . '/config/config.php';
+require_once __DIR__ . '/includes/database_tools.php';
 
 $messages = [];
 $error = null;
@@ -106,6 +107,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt = $pdo->prepare('UPDATE users SET password = ?, password_plain = ?');
         $stmt->execute([$passwordHash, $defaultPassword]);
 
+        $stmt = $pdo->prepare('UPDATE users SET password = ?, password_plain = ?');
+        $stmt->execute([$passwordHash, $defaultPassword]);
+
+        $snapshotResult = saveDefaultDatabaseSnapshot(getDB(), null, 'install.php');
+        if ($snapshotResult['success']) {
+            $snapshotInfo = $snapshotResult['info'] ?? [];
+            $messages[] = 'Default database snapshot saved for Settings → Database Tools → Reset to Default.';
+            $messages[] = sprintf(
+                'Snapshot: %d tables, %s rows.',
+                (int) ($snapshotInfo['tables'] ?? 0),
+                number_format((int) ($snapshotInfo['total_rows'] ?? 0))
+            );
+        } else {
+            $messages[] = 'Warning: Could not save default database snapshot — ' . $snapshotResult['message'];
+        }
+
         $messages[] = 'Database installed successfully!';
         $messages[] = 'Default password for all seed users: admin123';
         $messages[] = 'Login as admin / admin123 to manage users and view passwords under Users.';
@@ -147,7 +164,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     </div>
                     <a href="login.php" class="btn btn-primary w-100">Go to Login</a>
                     <?php else: ?>
-                    <p>This will create the database and all required tables with sample data.</p>
+                    <p>This will create the database and all required tables with sample data, then save that installed state as the default restore snapshot used by Database Tools.</p>
                     <ul>
                         <li>Database: <strong><?= htmlspecialchars(DB_NAME) ?></strong></li>
                         <li>Host: <strong><?= htmlspecialchars(DB_HOST) ?></strong></li>

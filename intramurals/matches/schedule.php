@@ -86,6 +86,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'scheduled_at' => $scheduledValue,
             'venue' => $venue,
         ]);
+        if (!empty($match['season_id'])) {
+            recalculateVenueGameNumbers((int) $match['season_id']);
+        }
         flash('success', $clearSchedule ? 'Match schedule cleared.' : 'Match date & time saved.');
         redirect($viewUrl);
     }

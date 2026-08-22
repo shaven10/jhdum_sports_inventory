@@ -54,7 +54,7 @@ $adminSections = [
             ['title' => 'Theme Manager', 'desc' => 'Colors and visual presets', 'href' => BASE_URL . '/settings/theme.php', 'icon' => 'bi-palette-fill', 'color' => 'info'],
             ['title' => 'Equipment Categories', 'desc' => 'Inventory category list', 'href' => BASE_URL . '/settings/categories.php', 'icon' => 'bi-tags-fill', 'color' => 'success'],
             ['title' => 'Courses', 'desc' => 'Athlete course / program dropdown list', 'href' => BASE_URL . '/admin/courses/index.php', 'icon' => 'bi-mortarboard-fill', 'color' => 'primary'],
-            ['title' => 'Database Tools', 'desc' => 'Backup and restore utilities', 'href' => BASE_URL . '/settings/database.php', 'icon' => 'bi-database-gear', 'color' => 'warning'],
+            ['title' => 'Database Tools', 'desc' => 'Backup, restore, and reset to default', 'href' => BASE_URL . '/settings/database.php', 'icon' => 'bi-database-gear', 'color' => 'warning'],
             ['title' => 'Audit Logs', 'desc' => 'Login history and activity trail', 'href' => BASE_URL . '/audit/index.php', 'icon' => 'bi-journal-check', 'color' => 'danger'],
         ],
     ],

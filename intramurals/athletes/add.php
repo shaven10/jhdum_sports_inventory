@@ -88,6 +88,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    if ($firstName !== '' && $lastName !== '' && empty($errors)) {
+        $existingByName = findAthleteByStudentIdOrName($db, '', $firstName, $lastName, $teamId);
+        if ($existingByName && (string) ($existingByName['student_id'] ?? '') !== $studentId) {
+            $errors[] = 'An athlete named ' . athleteFullName($existingByName)
+                . ' already exists (Student ID: ' . $existingByName['student_id']
+                . '). Add events on their profile instead of creating a duplicate account.';
+        }
+    }
+
     if ($sportId && !$regTeamId) {
         $errors[] = 'Assign a team when registering for a sport.';
     }

@@ -49,8 +49,94 @@ function generateBarcode(): string
     return 'EQ-' . strtoupper(substr(md5(uniqid()), 0, 8));
 }
 
+/**
+ * Repair legacy tables where id is NOT NULL but missing AUTO_INCREMENT.
+ */
+function ensureTablePrimaryAutoIncrement(PDO $db, string $table): void
+{
+    static $done = [];
+    if (isset($done[$table])) {
+        return;
+    }
+    $done[$table] = true;
+
+    $tableStmt = $db->prepare('SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?');
+    $tableStmt->execute([$table]);
+    if ((int) $tableStmt->fetchColumn() === 0) {
+        return;
+    }
+
+    $safeTable = str_replace('`', '``', $table);
+    $col = $db->query("SHOW COLUMNS FROM `$safeTable` LIKE 'id'")->fetch();
+    if (!$col) {
+        return;
+    }
+    if (str_contains(strtolower((string) ($col['Extra'] ?? '')), 'auto_increment')) {
+        return;
+    }
+
+    $keyStmt = $db->prepare("SELECT COUNT(*) FROM information_schema.STATISTICS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = 'id' AND INDEX_NAME = 'PRIMARY'");
+    $keyStmt->execute([$table]);
+    if ((int) $keyStmt->fetchColumn() === 0) {
+        $db->exec("ALTER TABLE `$safeTable` ADD PRIMARY KEY (id)");
+    }
+
+    $maxId = (int) $db->query("SELECT COALESCE(MAX(id), 0) FROM `$safeTable`")->fetchColumn();
+    $db->exec("DELETE FROM `$safeTable` WHERE id = 0");
+    $db->exec("ALTER TABLE `$safeTable` MODIFY id INT NOT NULL AUTO_INCREMENT");
+    if ($maxId > 0) {
+        $db->exec("ALTER TABLE `$safeTable` AUTO_INCREMENT = " . ($maxId + 1));
+    }
+}
+
+function auditLogColumnExists(PDO $db, string $column): bool
+{
+    static $cache = [];
+    if (array_key_exists($column, $cache)) {
+        return $cache[$column];
+    }
+    $stmt = $db->prepare('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
+    $stmt->execute(['audit_logs', $column]);
+    $cache[$column] = (int) $stmt->fetchColumn() > 0;
+    return $cache[$column];
+}
+
+/** Add missing audit_logs columns on older installs. */
+function ensureAuditLogsSchema(): void
+{
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    $db = getDB();
+    $tableStmt = $db->prepare('SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?');
+    $tableStmt->execute(['audit_logs']);
+    if ((int) $tableStmt->fetchColumn() === 0) {
+        return;
+    }
+
+    if (!auditLogColumnExists($db, 'new_values')) {
+        $db->exec('ALTER TABLE audit_logs ADD COLUMN new_values LONGTEXT DEFAULT NULL AFTER old_values');
+    }
+    if (!auditLogColumnExists($db, 'ip_address')) {
+        $db->exec('ALTER TABLE audit_logs ADD COLUMN ip_address VARCHAR(45) DEFAULT NULL AFTER new_values');
+    }
+    if (!auditLogColumnExists($db, 'user_agent')) {
+        $db->exec('ALTER TABLE audit_logs ADD COLUMN user_agent TEXT DEFAULT NULL AFTER ip_address');
+    }
+    if (!auditLogColumnExists($db, 'created_at')) {
+        $db->exec('ALTER TABLE audit_logs ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
+    }
+
+    ensureTablePrimaryAutoIncrement($db, 'audit_logs');
+}
+
 function auditLog(?int $userId, string $action, ?string $entityType = null, ?int $entityId = null, ?array $oldValues = null, ?array $newValues = null): void
 {
+    ensureAuditLogsSchema();
     $db = getDB();
     $stmt = $db->prepare('INSERT INTO audit_logs (user_id, action, entity_type, entity_id, old_values, new_values, ip_address, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
     $stmt->execute([
@@ -68,6 +154,7 @@ function auditLog(?int $userId, string $action, ?string $entityType = null, ?int
 function createNotification(int $userId, string $title, string $message, string $type = 'info', ?string $link = null): void
 {
     $db = getDB();
+    ensureTablePrimaryAutoIncrement($db, 'notifications');
     $stmt = $db->prepare('INSERT INTO notifications (user_id, title, message, type, link) VALUES (?, ?, ?, ?, ?)');
     $stmt->execute([$userId, $title, $message, $type, $link]);
 }
@@ -124,10 +211,20 @@ function ensureAnnouncementsTable(): void
     }
 
     $col = $db->prepare('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
-    $col->execute(['announcements', 'target_roles']);
-    if ((int) $col->fetchColumn() === 0) {
-        $db->exec('ALTER TABLE announcements ADD COLUMN target_roles JSON DEFAULT NULL AFTER type');
-    }
+    $addColumn = static function (string $column, string $ddl) use ($db, $col): void {
+        $col->execute(['announcements', $column]);
+        if ((int) $col->fetchColumn() === 0) {
+            $db->exec($ddl);
+        }
+    };
+
+    $addColumn('target_roles', 'ALTER TABLE announcements ADD COLUMN target_roles JSON DEFAULT NULL AFTER type');
+    $addColumn('is_active', 'ALTER TABLE announcements ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1 AFTER target_roles');
+    $addColumn('created_by', 'ALTER TABLE announcements ADD COLUMN created_by INT DEFAULT NULL AFTER is_active');
+    $addColumn('created_at', 'ALTER TABLE announcements ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP AFTER created_by');
+    $addColumn('updated_at', 'ALTER TABLE announcements ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at');
+
+    ensureTablePrimaryAutoIncrement($db, 'announcements');
 }
 
 function canViewAnnouncements(): bool
@@ -257,7 +354,8 @@ function publishAnnouncement(string $title, string $message, string $type = 'inf
     if ($title === '' || $message === '') {
         return ['success' => false, 'message' => 'Title and message are required.'];
     }
-    if (mb_strlen($title) > 200) {
+    $titleLen = function_exists('mb_strlen') ? mb_strlen($title) : strlen($title);
+    if ($titleLen > 200) {
         return ['success' => false, 'message' => 'Title must be 200 characters or fewer.'];
     }
 
@@ -269,24 +367,39 @@ function publishAnnouncement(string $title, string $message, string $type = 'inf
     $db = getDB();
     $createdBy = $createdBy ?? ($_SESSION['user_id'] ?? null);
     $rolesJson = json_encode(array_values($roles));
-    $stmt = $db->prepare('INSERT INTO announcements (title, message, type, target_roles, is_active, created_by) VALUES (?, ?, ?, ?, 1, ?)');
-    $stmt->execute([$title, $message, $type, $rolesJson, $createdBy ?: null]);
+    try {
+        $stmt = $db->prepare('INSERT INTO announcements (title, message, type, target_roles, is_active, created_by) VALUES (?, ?, ?, ?, 1, ?)');
+        $stmt->execute([$title, $message, $type, $rolesJson, $createdBy ?: null]);
+    } catch (PDOException $e) {
+        return ['success' => false, 'message' => 'Could not save announcement. Please refresh and try again.'];
+    }
     $id = (int) $db->lastInsertId();
+    if ($id <= 0) {
+        return ['success' => false, 'message' => 'Could not save announcement (invalid record id).'];
+    }
 
     $link = BASE_URL . '/announcements/view.php?id=' . $id;
     $notifTitle = 'Announcement: ' . $title;
     $recipients = getAnnouncementRecipientIds($roles);
     foreach ($recipients as $userId) {
-        createNotification($userId, $notifTitle, $message, $type, $link);
+        try {
+            createNotification($userId, $notifTitle, $message, $type, $link);
+        } catch (Throwable $e) {
+            // Announcement saved; skip failed notification rows.
+        }
     }
 
     if ($createdBy) {
-        auditLog((int) $createdBy, 'create_announcement', 'announcement', $id, null, [
-            'title' => $title,
-            'type' => $type,
-            'roles' => $roles,
-            'recipients' => count($recipients),
-        ]);
+        try {
+            auditLog((int) $createdBy, 'create_announcement', 'announcement', $id, null, [
+                'title' => $title,
+                'type' => $type,
+                'roles' => $roles,
+                'recipients' => count($recipients),
+            ]);
+        } catch (Throwable $e) {
+            // Non-fatal if audit logging fails.
+        }
     }
 
     $roleLabels = getAnnouncementTargetRoleOptions();

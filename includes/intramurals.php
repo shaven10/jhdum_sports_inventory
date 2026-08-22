@@ -403,6 +403,8 @@ function ensureIntramuralDivisionsSchema(): void
             FOREIGN KEY (division_id) REFERENCES intramural_divisions(id) ON DELETE CASCADE,
             FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE
         ) ENGINE=InnoDB");
+    } else {
+        ensureDivisionSportsAutoIncrement($db);
     }
 
     $colStmt->execute(['intramural_teams', 'division_id']);
@@ -607,6 +609,38 @@ function ensureMatchDivisionColumn(): void
             // ignore
         }
     }
+
+    ensureMatchesAutoIncrement($db);
+    ensureMatchGameNumberColumn($db);
+}
+
+/** Per-venue daily game sequence (Game 1, 2, 3… on each date at each venue). */
+function ensureMatchGameNumberColumn(?PDO $db = null): void
+{
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    $db = $db ?? getDB();
+    $colStmt = $db->prepare('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
+    $colStmt->execute(['intramural_matches', 'game_number']);
+    if ((int) $colStmt->fetchColumn() === 0) {
+        $db->exec('ALTER TABLE intramural_matches ADD COLUMN game_number INT DEFAULT NULL AFTER venue');
+    }
+}
+
+/** Repair intramural_matches.id when missing AUTO_INCREMENT (legacy migrations). */
+function ensureMatchesAutoIncrement(PDO $db): void
+{
+    ensureTablePrimaryAutoIncrement($db, 'intramural_matches');
+}
+
+/** Repair intramural_division_sports.id when missing AUTO_INCREMENT (legacy migrations). */
+function ensureDivisionSportsAutoIncrement(PDO $db): void
+{
+    ensureTablePrimaryAutoIncrement($db, 'intramural_division_sports');
 }
 
 /** Ensure per-event team position table (Team 1…N within a division). */
@@ -637,7 +671,15 @@ function ensureEventTeamPositionsTable(): void
             FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE,
             FOREIGN KEY (team_id) REFERENCES intramural_teams(id) ON DELETE CASCADE
         ) ENGINE=InnoDB");
+    } else {
+        ensureEventTeamPositionsAutoIncrement($db);
     }
+}
+
+/** Repair intramural_event_team_positions.id when missing AUTO_INCREMENT (legacy migrations). */
+function ensureEventTeamPositionsAutoIncrement(PDO $db): void
+{
+    ensureTablePrimaryAutoIncrement($db, 'intramural_event_team_positions');
 }
 
 function divisionHasPositioning(int $divisionId): bool
@@ -883,6 +925,98 @@ function groupEligibleTeamsByDivisionForSport(int $sportId, ?array $candidateTea
 
     ksort($groups);
     return $groups;
+}
+
+/**
+ * Build per-division team groups for match generation.
+ * Includes every active division that has this event enabled, using all eligible
+ * division teams (optionally narrowed to roster when enough are registered).
+ *
+ * @param list<int>|null $candidateTeamIds Season roster or other filter; null = all division teams
+ * @return list<array{division_id: ?int, division_name: string, team_ids: list<int>}>
+ */
+function buildSportDivisionGroups(int $sportId, int $seasonId = 0, ?array $candidateTeamIds = null): array
+{
+    ensureIntramuralDivisionsSchema();
+    if ($sportId <= 0) {
+        return [];
+    }
+
+    if ($candidateTeamIds !== null) {
+        $candidateTeamIds = array_values(array_unique(array_filter(
+            array_map('intval', $candidateTeamIds),
+            static fn(int $tid): bool => $tid > 0 && teamCanPlaySport($tid, $sportId)
+        )));
+    }
+
+    $groups = [];
+
+    foreach (getDivisions(true) as $div) {
+        $divId = (int) $div['id'];
+        $allowedSports = getDivisionSportIds($divId);
+        if ($allowedSports === [] || !in_array($sportId, $allowedSports, true)) {
+            continue;
+        }
+
+        $divTeams = getDivisionTeamIdsForSport($sportId, $divId);
+        if ($divTeams === []) {
+            continue;
+        }
+
+        $teamIds = $divTeams;
+        if ($candidateTeamIds !== null) {
+            $rosterInDiv = array_values(array_intersect($candidateTeamIds, $divTeams));
+            if (count($rosterInDiv) >= 2) {
+                $teamIds = $rosterInDiv;
+            }
+        }
+
+        $groups[] = [
+            'division_id' => $divId,
+            'division_name' => $div['name'] ?? ('Division #' . $divId),
+            'team_ids' => $teamIds,
+        ];
+    }
+
+    $unassigned = getDivisionTeamIdsForSport($sportId, null);
+    if ($unassigned !== []) {
+        $teamIds = $unassigned;
+        if ($candidateTeamIds !== null) {
+            $rosterUnassigned = array_values(array_intersect($candidateTeamIds, $unassigned));
+            if (count($rosterUnassigned) >= 2) {
+                $teamIds = $rosterUnassigned;
+            }
+        }
+        $groups[] = [
+            'division_id' => null,
+            'division_name' => 'Unassigned',
+            'team_ids' => $teamIds,
+        ];
+    }
+
+    return $groups;
+}
+
+/**
+ * Resolve team IDs for one division + event (roster when enough registered, else all division teams).
+ *
+ * @return list<int>
+ */
+function resolveDivisionSportTeamIds(int $sportId, ?int $divisionId, int $seasonId = 0, ?array $candidateTeamIds = null): array
+{
+    $divTeams = getDivisionTeamIdsForSport($sportId, $divisionId);
+    if ($divTeams === []) {
+        return [];
+    }
+    if ($candidateTeamIds === null) {
+        return $divTeams;
+    }
+    $candidateTeamIds = array_values(array_unique(array_filter(
+        array_map('intval', $candidateTeamIds),
+        static fn(int $tid): bool => $tid > 0 && teamCanPlaySport($tid, $sportId)
+    )));
+    $rosterInDiv = array_values(array_intersect($candidateTeamIds, $divTeams));
+    return count($rosterInDiv) >= 2 ? $rosterInDiv : $divTeams;
 }
 
 /**
@@ -2406,6 +2540,138 @@ function normalizeVenueKey(?string $venue): string
     return $v !== '' ? $v : '';
 }
 
+/** Effective venue key for a match row (match venue, else sport default). */
+function matchEffectiveVenueKey(array $match, ?array $sport = null): string
+{
+    $venue = trim((string) ($match['venue'] ?? ''));
+    if ($venue === '' && $sport !== null) {
+        $venue = trim((string) ($sport['venue'] ?? ''));
+    }
+    if ($venue === '' && !empty($match['sport_venue'])) {
+        $venue = trim((string) $match['sport_venue']);
+    }
+
+    return normalizeVenueKey($venue);
+}
+
+/**
+ * Assign game_number on in-memory fixtures grouped by play date + venue.
+ *
+ * @param array<int, list<array<string,mixed>>> $fixturesBySport
+ * @param array<int, array> $sportsById
+ */
+function assignVenueGameNumbersToFixtures(array &$fixturesBySport, array $sportsById): void
+{
+    $entries = [];
+    foreach ($fixturesBySport as $sportId => $fixtures) {
+        $sport = $sportsById[(int) $sportId] ?? [];
+        foreach ($fixtures as $idx => $fixture) {
+            if (empty($fixture['scheduled_at'])) {
+                continue;
+            }
+            $entries[] = [
+                'sport_id' => (int) $sportId,
+                'idx' => (int) $idx,
+                'ts' => strtotime((string) $fixture['scheduled_at']),
+                'day' => date('Y-m-d', strtotime((string) $fixture['scheduled_at'])),
+                'venue' => matchEffectiveVenueKey($fixture, $sport),
+            ];
+        }
+    }
+
+    usort($entries, static function (array $a, array $b): int {
+        if ($a['ts'] !== $b['ts']) {
+            return $a['ts'] <=> $b['ts'];
+        }
+
+        return $a['idx'] <=> $b['idx'];
+    });
+
+    $counters = [];
+    foreach ($entries as $entry) {
+        $groupKey = $entry['day'] . '|' . $entry['venue'];
+        $counters[$groupKey] = ($counters[$groupKey] ?? 0) + 1;
+        $fixturesBySport[$entry['sport_id']][$entry['idx']]['game_number'] = $counters[$groupKey];
+    }
+}
+
+/**
+ * Recompute game_number for all scheduled matches in a season (by date + venue, ordered by time).
+ */
+function recalculateVenueGameNumbers(int $seasonId): int
+{
+    if ($seasonId <= 0) {
+        return 0;
+    }
+
+    ensureMatchGameNumberColumn();
+    $db = getDB();
+
+    $db->prepare("UPDATE intramural_matches SET game_number = NULL
+        WHERE season_id = ? AND (scheduled_at IS NULL OR status = 'cancelled')")
+        ->execute([$seasonId]);
+
+    $stmt = $db->prepare("SELECT m.id, m.scheduled_at,
+            COALESCE(NULLIF(TRIM(m.venue), ''), NULLIF(TRIM(s.venue), '')) AS effective_venue
+        FROM intramural_matches m
+        JOIN intramural_sports s ON s.id = m.sport_id
+        WHERE m.season_id = ?
+          AND m.scheduled_at IS NOT NULL
+          AND m.status <> 'cancelled'
+        ORDER BY m.scheduled_at ASC, m.id ASC");
+    $stmt->execute([$seasonId]);
+    $rows = $stmt->fetchAll() ?: [];
+
+    $groups = [];
+    foreach ($rows as $row) {
+        $day = date('Y-m-d', strtotime((string) $row['scheduled_at']));
+        $venueKey = normalizeVenueKey($row['effective_venue'] ?? null);
+        $groups[$day . '|' . $venueKey][] = (int) $row['id'];
+    }
+
+    $update = $db->prepare('UPDATE intramural_matches SET game_number = ? WHERE id = ?');
+    $updated = 0;
+    foreach ($groups as $ids) {
+        $num = 1;
+        foreach ($ids as $matchId) {
+            $update->execute([$num, $matchId]);
+            $num++;
+            $updated++;
+        }
+    }
+
+    return $updated;
+}
+
+/** Backfill game numbers when scheduled matches are missing them. */
+function ensureVenueGameNumbersCurrent(int $seasonId): void
+{
+    static $done = [];
+    if ($seasonId <= 0 || isset($done[$seasonId])) {
+        return;
+    }
+    $done[$seasonId] = true;
+
+    ensureMatchGameNumberColumn();
+    $db = getDB();
+    $stmt = $db->prepare("SELECT 1 FROM intramural_matches
+        WHERE season_id = ? AND scheduled_at IS NOT NULL AND status <> 'cancelled' AND game_number IS NULL
+        LIMIT 1");
+    $stmt->execute([$seasonId]);
+    if ($stmt->fetch()) {
+        recalculateVenueGameNumbers($seasonId);
+    }
+}
+
+function formatVenueGameNumber(?int $gameNumber): string
+{
+    if ($gameNumber === null || $gameNumber <= 0) {
+        return '';
+    }
+
+    return 'Game ' . $gameNumber;
+}
+
 /**
  * Occupied time ranges for a venue in a season (existing scheduled matches).
  *
@@ -2870,24 +3136,18 @@ function generateMatchesForSports(array $sportIds, int $seasonId, ?array $shared
             $teamIds = array_map('intval', $regTeamsStmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
         }
 
-        $ineligible = [];
-        foreach ($teamIds as $tid) {
-            if (!teamCanPlaySport((int) $tid, $sportId)) {
-                $ineligible[] = (int) $tid;
-            }
-        }
-        if ($ineligible) {
-            $errors[] = sportLabel($sport) . ': one or more teams are not in a division that plays this event.';
-            continue;
-        }
+        $teamIds = array_values(array_filter(
+            $teamIds,
+            static fn(int $tid): bool => teamCanPlaySport($tid, $sportId)
+        ));
 
         $groups = [];
         if ($groupByDivision) {
             if ($divisionFilter === 'none') {
-                $ids = array_values(array_intersect($teamIds, getDivisionTeamIdsForSport($sportId, null)));
+                $ids = resolveDivisionSportTeamIds($sportId, null, $seasonId, $teamIds);
                 $groups[] = ['division_id' => null, 'division_name' => 'Unassigned', 'team_ids' => $ids];
             } elseif ($fixedDivisionId > 0) {
-                $ids = array_values(array_intersect($teamIds, getDivisionTeamIdsForSport($sportId, $fixedDivisionId)));
+                $ids = resolveDivisionSportTeamIds($sportId, $fixedDivisionId, $seasonId, $teamIds);
                 $div = getDivisionById($fixedDivisionId);
                 $groups[] = [
                     'division_id' => $fixedDivisionId,
@@ -2895,7 +3155,7 @@ function generateMatchesForSports(array $sportIds, int $seasonId, ?array $shared
                     'team_ids' => $ids,
                 ];
             } else {
-                foreach (groupEligibleTeamsByDivisionForSport($sportId, $teamIds) as $g) {
+                foreach (buildSportDivisionGroups($sportId, $seasonId, $teamIds) as $g) {
                     $groups[] = $g;
                 }
             }
@@ -2915,6 +3175,11 @@ function generateMatchesForSports(array $sportIds, int $seasonId, ?array $shared
                 $divName = 'Unassigned';
             }
             $groups[] = ['division_id' => $divId, 'division_name' => $divName, 'team_ids' => $teamIds];
+        }
+
+        if ($groupByDivision && $groups === []) {
+            $errors[] = sportLabel($sport) . ': this event is not activated for any division (assign it under Admin → Divisions).';
+            continue;
         }
 
         $format = $sport['tournament_format'] ?? 'round_robin';
@@ -3095,6 +3360,10 @@ function generateMatchesForSports(array $sportIds, int $seasonId, ?array $shared
     }
 
     $okSports = count($okSportIds);
+
+    if ($seasonId > 0 && ($total > 0 || $totalScheduled > 0)) {
+        recalculateVenueGameNumbers($seasonId);
+    }
 
     return [
         'created' => $total,
@@ -5344,6 +5613,7 @@ function getIntramuralsStats(?int $seasonId = null): array
 
     $tmScoped = isTournamentManager() && !canManageIntramurals();
     $tmSportIds = $tmScoped ? getTmSportIds() : [];
+    $umTeamId = getUnitManagerTeamScopeId();
 
     try {
         if ($tmScoped) {
@@ -5379,6 +5649,36 @@ function getIntramuralsStats(?int $seasonId = null): array
                     WHERE status = 'ongoing' AND season_id = ? AND sport_id IN ($placeholders)");
                 $stmt->execute($params);
                 $stats['ongoing_games'] = (int) $stmt->fetchColumn();
+            }
+        } elseif ($umTeamId !== null) {
+            $stats['total_teams'] = $umTeamId > 0 ? 1 : 0;
+            if ($umTeamId > 0 && $seasonId) {
+                $stmt = $db->prepare('SELECT COUNT(DISTINCT r.athlete_id)
+                    FROM intramural_registrations r
+                    WHERE r.season_id = ? AND r.team_id = ?');
+                $stmt->execute([$seasonId, $umTeamId]);
+                $stats['registered_athletes'] = (int) $stmt->fetchColumn();
+                $stats['total_athletes'] = $stats['registered_athletes'];
+
+                $stmt = $db->prepare('SELECT COUNT(DISTINCT sport_id)
+                    FROM intramural_registrations
+                    WHERE season_id = ? AND team_id = ?');
+                $stmt->execute([$seasonId, $umTeamId]);
+                $stats['total_sports'] = (int) $stmt->fetchColumn();
+
+                $matchCountSql = static function (string $statusSql) use ($db, $seasonId, $umTeamId): int {
+                    $sql = "SELECT COUNT(*) FROM intramural_matches m
+                        WHERE m.season_id = ? AND ($statusSql)
+                          AND (m.team_a_id = ? OR m.team_b_id = ?)";
+                    $stmt = $db->prepare($sql);
+                    $stmt->execute([$seasonId, $umTeamId, $umTeamId]);
+
+                    return (int) $stmt->fetchColumn();
+                };
+
+                $stats['scheduled_games'] = $matchCountSql("m.status = 'scheduled'");
+                $stats['completed_games'] = $matchCountSql("m.status IN ('completed', 'forfeit')");
+                $stats['ongoing_games'] = $matchCountSql("m.status = 'ongoing'");
             }
         } else {
             $stats['total_athletes'] = (int) $db->query('SELECT COUNT(*) FROM intramural_athletes WHERE is_active = 1')->fetchColumn();
@@ -5435,6 +5735,7 @@ function getDashboardRecentMatchResults(int $limit = 8, ?int $seasonId = null): 
     }
 
     $whereClause = implode(' AND ', $where);
+    appendUnitManagerMatchFilter($whereClause, $params);
     $stmt = $db->prepare("
         SELECT m.*, s.name AS sport_name, s.category AS sport_category,
                ta.name AS team_a_name, ta.color AS team_a_color,
@@ -5479,6 +5780,7 @@ function getDashboardUnfinishedMatches(int $limit = 12, ?int $seasonId = null): 
     }
 
     $whereClause = implode(' AND ', $where);
+    appendUnitManagerMatchFilter($whereClause, $params);
     $stmt = $db->prepare("
         SELECT m.*, s.name AS sport_name, s.category AS sport_category,
                ta.name AS team_a_name, ta.color AS team_a_color,
@@ -5731,6 +6033,74 @@ function eventHasScheduledMatches(int $sportId, int $seasonId, ?int $divisionId 
     }
 
     return (int) $stmt->fetchColumn() > 0;
+}
+
+/**
+ * Finished vs unfinished match counts for one event division.
+ *
+ * @return array{unfinished: int, finished: int}
+ */
+function getEventDivisionMatchCounts(int $sportId, int $seasonId, ?int $divisionId = null): array
+{
+    if ($sportId <= 0 || $seasonId <= 0) {
+        return ['unfinished' => 0, 'finished' => 0];
+    }
+
+    ensureMatchDivisionColumn();
+    $db = getDB();
+    $sql = "SELECT
+            SUM(CASE WHEN status IN ('scheduled', 'ongoing') THEN 1 ELSE 0 END) AS unfinished,
+            SUM(CASE WHEN status IN ('completed', 'forfeit') THEN 1 ELSE 0 END) AS finished
+        FROM intramural_matches
+        WHERE sport_id = ? AND season_id = ? AND status <> 'cancelled'";
+
+    if ($divisionId === null) {
+        $stmt = $db->prepare($sql);
+        $stmt->execute([$sportId, $seasonId]);
+    } else {
+        $divKey = eventRankDivisionKey($divisionId);
+        if ($divKey === 0) {
+            $stmt = $db->prepare($sql . ' AND (division_id IS NULL OR division_id = 0)');
+            $stmt->execute([$sportId, $seasonId]);
+        } else {
+            $stmt = $db->prepare($sql . ' AND division_id = ?');
+            $stmt->execute([$sportId, $seasonId, $divKey]);
+        }
+    }
+
+    $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+    return [
+        'unfinished' => (int) ($row['unfinished'] ?? 0),
+        'finished' => (int) ($row['finished'] ?? 0),
+    ];
+}
+
+/**
+ * Whether an event division is finished (all its matches done, or manual ranks with no open fixtures).
+ */
+function isEventDivisionFinished(int $sportId, int $seasonId, ?int $divisionId = null): bool
+{
+    if ($sportId <= 0 || $seasonId <= 0) {
+        return false;
+    }
+
+    $counts = getEventDivisionMatchCounts($sportId, $seasonId, $divisionId);
+    if ($counts['finished'] > 0 && $counts['unfinished'] === 0) {
+        return true;
+    }
+    if ($counts['unfinished'] > 0) {
+        return false;
+    }
+
+    $ranks = getEventRanks($sportId, $seasonId, $divisionId);
+    foreach ($ranks as $rank) {
+        if ((int) ($rank['place_rank'] ?? 0) > 0) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 /**
@@ -6013,10 +6383,12 @@ function computeSportStandings(?int $sportId = null, ?int $seasonId = null): arr
         $flatRows = [];
         $divisionBlocks = [];
         $anyManual = false;
-        // Medals / placement points (overall + medal tally) only after the event is finished.
         $eventFinished = $seasonId ? isEventFinished($sid, (int) $seasonId) : false;
 
         foreach ($byDivision as $divKey => $divRows) {
+            $divId = $divKey > 0 ? $divKey : null;
+            // Medals / placement points per division once that division's matches are finished.
+            $divFinished = $seasonId ? isEventDivisionFinished($sid, (int) $seasonId, $divId) : false;
             usort($divRows, static function ($x, $y) {
                 if ($x['points'] !== $y['points']) {
                     return $y['points'] <=> $x['points'];
@@ -6048,8 +6420,8 @@ function computeSportStandings(?int $sportId = null, ?int $seasonId = null): arr
                 $row['placement_points'] = 0;
                 $row['placement_label'] = null;
                 $row['manual_rank'] = false;
-                // Provisional W/D/L rank still shown; medals & scheme points wait until all matches are done.
-                if ($row['played'] > 0 && $eventFinished) {
+                // Provisional W/D/L rank still shown; medals & scheme points wait until this division is done.
+                if ($row['played'] > 0 && $divFinished) {
                     applyEventPlacement($row, $row['rank'], $scheme, false);
                 }
             }
@@ -6084,6 +6456,7 @@ function computeSportStandings(?int $sportId = null, ?int $seasonId = null): arr
                 'division_name' => $divisionName,
                 'standings' => $divRows,
                 'manual_ranks' => $divManual !== [],
+                'event_finished' => $divFinished,
             ];
             foreach ($divRows as $row) {
                 $flatRows[] = $row;
@@ -6411,6 +6784,294 @@ function athleteFullNameReport(array $athlete): string
     return athleteFullName($athlete, true);
 }
 
+/** Normalized key for matching athlete names (first|last, uppercase). */
+function athleteNameMatchKey(string $firstName, string $lastName): string
+{
+    return formatAthleteName($firstName) . '|' . formatAthleteName($lastName);
+}
+
+/**
+ * Find an athlete by student ID, or by normalized name when ID is new.
+ * Prefers same team when multiple name matches exist.
+ */
+function findAthleteByStudentIdOrName(PDO $db, string $studentId, string $firstName, string $lastName, ?int $teamId = null): ?array
+{
+    $studentId = trim($studentId);
+    if ($studentId !== '') {
+        $stmt = $db->prepare('SELECT * FROM intramural_athletes WHERE student_id = ? LIMIT 1');
+        $stmt->execute([$studentId]);
+        $row = $stmt->fetch();
+        if ($row) {
+            return $row;
+        }
+    }
+
+    $first = formatAthleteName($firstName);
+    $last = formatAthleteName($lastName);
+    if ($first === '' || $last === '') {
+        return null;
+    }
+
+    if ($teamId !== null && $teamId > 0) {
+        $stmt = $db->prepare('SELECT * FROM intramural_athletes WHERE is_active = 1 AND first_name = ? AND last_name = ? ORDER BY (team_id = ?) DESC, id ASC LIMIT 1');
+        $stmt->execute([$first, $last, $teamId]);
+    } else {
+        $stmt = $db->prepare('SELECT * FROM intramural_athletes WHERE is_active = 1 AND first_name = ? AND last_name = ? ORDER BY id ASC LIMIT 1');
+        $stmt->execute([$first, $last]);
+    }
+
+    $row = $stmt->fetch();
+
+    return $row ?: null;
+}
+
+/**
+ * Active athletes grouped by normalized name when more than one account shares the name.
+ *
+ * @return list<array{name_key: string, display_name: string, athletes: list<array>}>
+ */
+function getDuplicateAthleteNameGroups(?int $seasonId = null, ?int $teamId = null): array
+{
+    $db = getDB();
+    $where = ['a.is_active = 1'];
+    $params = [];
+
+    if ($teamId !== null && $teamId > 0) {
+        $where[] = 'a.team_id = ?';
+        $params[] = $teamId;
+    }
+    if ($seasonId) {
+        $where[] = 'EXISTS (SELECT 1 FROM intramural_registrations r WHERE r.athlete_id = a.id AND r.season_id = ?)';
+        $params[] = $seasonId;
+    }
+
+    $seasonRegClause = $seasonId ? ' AND r.season_id = ' . (int) $seasonId : '';
+    $sql = "SELECT a.*, t.name AS team_name,
+            (SELECT COUNT(DISTINCT r.sport_id) FROM intramural_registrations r WHERE r.athlete_id = a.id{$seasonRegClause}) AS event_count
+        FROM intramural_athletes a
+        LEFT JOIN intramural_teams t ON t.id = a.team_id
+        WHERE " . implode(' AND ', $where) . '
+        ORDER BY a.last_name, a.first_name, a.id';
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll() ?: [];
+
+    $eventSql = $seasonId
+        ? 'SELECT s.name, s.category FROM intramural_registrations r JOIN intramural_sports s ON s.id = r.sport_id WHERE r.athlete_id = ? AND r.season_id = ? ORDER BY s.name, s.category'
+        : 'SELECT s.name, s.category FROM intramural_registrations r JOIN intramural_sports s ON s.id = r.sport_id WHERE r.athlete_id = ? ORDER BY s.name, s.category';
+    $eventStmt = $db->prepare($eventSql);
+
+    $byName = [];
+    foreach ($rows as $row) {
+        $key = athleteNameMatchKey((string) $row['first_name'], (string) $row['last_name']);
+        if ($seasonId) {
+            $eventStmt->execute([(int) $row['id'], $seasonId]);
+        } else {
+            $eventStmt->execute([(int) $row['id']]);
+        }
+        $events = [];
+        foreach ($eventStmt->fetchAll() ?: [] as $ev) {
+            $events[] = sportLabel($ev);
+        }
+        $row['events'] = $events;
+        $byName[$key][] = $row;
+    }
+
+    $groups = [];
+    foreach ($byName as $key => $athletes) {
+        if (count($athletes) < 2) {
+            continue;
+        }
+        $groups[] = [
+            'name_key' => $key,
+            'display_name' => athleteFullName($athletes[0]),
+            'athletes' => $athletes,
+        ];
+    }
+
+    usort($groups, static function (array $a, array $b): int {
+        return strcasecmp($a['display_name'], $b['display_name']);
+    });
+
+    return $groups;
+}
+
+/**
+ * Filter duplicate name groups by search (name or student ID).
+ *
+ * @param list<array> $groups
+ * @return list<array>
+ */
+function filterDuplicateAthleteGroupsBySearch(array $groups, ?string $search): array
+{
+    $search = trim((string) $search);
+    if ($search === '') {
+        return $groups;
+    }
+
+    $needle = strtolower($search);
+    return array_values(array_filter($groups, static function (array $group) use ($needle): bool {
+        if (str_contains(strtolower($group['display_name']), $needle)) {
+            return true;
+        }
+        foreach ($group['athletes'] as $athlete) {
+            if (str_contains(strtolower((string) ($athlete['student_id'] ?? '')), $needle)) {
+                return true;
+            }
+            if (str_contains(strtolower((string) ($athlete['team_name'] ?? '')), $needle)) {
+                return true;
+            }
+        }
+
+        return false;
+    }));
+}
+
+/** Pick the account with the most event registrations to keep when merging. */
+function pickDefaultAthleteAccountToKeep(array $athletes): array
+{
+    $defaultKeep = $athletes[0];
+    foreach ($athletes as $athlete) {
+        if ((int) ($athlete['event_count'] ?? 0) > (int) ($defaultKeep['event_count'] ?? 0)) {
+            $defaultKeep = $athlete;
+        }
+    }
+
+    return $defaultKeep;
+}
+
+/**
+ * Merge all duplicate accounts in one name group into the keeper profile.
+ *
+ * @return array{merged: int, errors: list<string>}
+ */
+function mergeDuplicateAthleteGroup(array $group, int $keepId, ?int $scopedTeamId = null): array
+{
+    $merged = 0;
+    $errors = [];
+
+    foreach ($group['athletes'] as $athlete) {
+        $mergeId = (int) $athlete['id'];
+        if ($mergeId === $keepId) {
+            continue;
+        }
+        if ($scopedTeamId && (int) ($athlete['team_id'] ?? 0) !== $scopedTeamId) {
+            continue;
+        }
+
+        $result = mergeAthleteAccounts($keepId, $mergeId);
+        if ($result['ok']) {
+            $merged++;
+        } else {
+            $errors[] = athleteFullName($athlete) . ' (' . $athlete['student_id'] . '): ' . $result['message'];
+        }
+    }
+
+    return ['merged' => $merged, 'errors' => $errors];
+}
+
+/**
+ * Merge duplicate athlete accounts: move registrations to keeper, then remove duplicate.
+ *
+ * @return array{ok: bool, message: string, moved_registrations?: int, dropped_registrations?: int}
+ */
+function mergeAthleteAccounts(int $keepId, int $mergeId): array
+{
+    if ($keepId <= 0 || $mergeId <= 0 || $keepId === $mergeId) {
+        return ['ok' => false, 'message' => 'Invalid athlete selection.'];
+    }
+
+    $db = getDB();
+    $keepStmt = $db->prepare('SELECT * FROM intramural_athletes WHERE id = ? LIMIT 1');
+    $keepStmt->execute([$keepId]);
+    $keep = $keepStmt->fetch();
+    $mergeStmt = $db->prepare('SELECT * FROM intramural_athletes WHERE id = ? LIMIT 1');
+    $mergeStmt->execute([$mergeId]);
+    $merge = $mergeStmt->fetch();
+
+    if (!$keep || !$merge) {
+        return ['ok' => false, 'message' => 'One or both athletes were not found.'];
+    }
+    if (empty($keep['is_active'])) {
+        return ['ok' => false, 'message' => 'The keeper athlete is not active.'];
+    }
+
+    try {
+        $db->beginTransaction();
+
+        $movedRegs = 0;
+        $droppedRegs = 0;
+        $regsStmt = $db->prepare('SELECT * FROM intramural_registrations WHERE athlete_id = ?');
+        $regsStmt->execute([$mergeId]);
+        $regs = $regsStmt->fetchAll() ?: [];
+
+        $findDupReg = $db->prepare('SELECT id FROM intramural_registrations WHERE athlete_id = ? AND sport_id = ? AND season_id = ? LIMIT 1');
+        $moveReg = $db->prepare('UPDATE intramural_registrations SET athlete_id = ? WHERE id = ?');
+        $deleteReg = $db->prepare('DELETE FROM intramural_registrations WHERE id = ?');
+
+        foreach ($regs as $reg) {
+            $findDupReg->execute([$keepId, (int) $reg['sport_id'], (int) $reg['season_id']]);
+            if ($findDupReg->fetch()) {
+                $deleteReg->execute([(int) $reg['id']]);
+                $droppedRegs++;
+            } else {
+                $moveReg->execute([$keepId, (int) $reg['id']]);
+                $movedRegs++;
+            }
+        }
+
+        $mergedPhoto = !empty($keep['photo']) ? $keep['photo'] : ($merge['photo'] ?? null);
+        $db->prepare('UPDATE intramural_athletes SET
+                photo = COALESCE(NULLIF(?, ""), photo),
+                email = COALESCE(NULLIF(?, ""), email),
+                phone = COALESCE(NULLIF(?, ""), phone),
+                birthdate = COALESCE(?, birthdate),
+                department = COALESCE(NULLIF(?, ""), department),
+                year_level = COALESCE(NULLIF(?, ""), year_level)
+            WHERE id = ?')->execute([
+            $mergedPhoto,
+            trim((string) ($keep['email'] ?? '')) ?: trim((string) ($merge['email'] ?? '')),
+            trim((string) ($keep['phone'] ?? '')) ?: trim((string) ($merge['phone'] ?? '')),
+            $keep['birthdate'] ?: ($merge['birthdate'] ?? null),
+            trim((string) ($keep['department'] ?? '')) ?: trim((string) ($merge['department'] ?? '')),
+            trim((string) ($keep['year_level'] ?? '')) ?: trim((string) ($merge['year_level'] ?? '')),
+            $keepId,
+        ]);
+
+        $mergePhoto = $merge['photo'] ?? null;
+        $db->prepare('DELETE FROM intramural_athletes WHERE id = ?')->execute([$mergeId]);
+
+        $db->commit();
+
+        if ($mergePhoto && $mergePhoto !== ($keep['photo'] ?? null) && $mergePhoto !== $mergedPhoto && function_exists('deleteUploadedFile')) {
+            deleteUploadedFile((string) $mergePhoto, UPLOAD_PATH_ATHLETES);
+        }
+
+        if (!empty($_SESSION['user_id'])) {
+            auditLog((int) $_SESSION['user_id'], 'merge', 'intramural_athlete', $keepId, [
+                'merged_id' => $mergeId,
+                'merged_student_id' => $merge['student_id'],
+                'keep_student_id' => $keep['student_id'],
+                'moved_registrations' => $movedRegs,
+                'dropped_duplicate_registrations' => $droppedRegs,
+            ]);
+        }
+
+        return [
+            'ok' => true,
+            'message' => 'Athlete accounts merged. All events are now on one profile.',
+            'moved_registrations' => $movedRegs,
+            'dropped_registrations' => $droppedRegs,
+        ];
+    } catch (Throwable $e) {
+        if ($db->inTransaction()) {
+            $db->rollBack();
+        }
+
+        return ['ok' => false, 'message' => 'Could not merge athletes. Try again.'];
+    }
+}
+
 /** Default JHCSC course / program names (seeded into athlete_courses when empty). */
 function athleteCourseDefaultNames(): array
 {
@@ -6579,32 +7240,26 @@ function isEventFinished(int $sportId, ?int $seasonId = null): bool
         return false;
     }
 
+    ensureMatchDivisionColumn();
     $db = getDB();
-    $stmt = $db->prepare("SELECT
-            SUM(CASE WHEN status IN ('scheduled', 'ongoing') THEN 1 ELSE 0 END) AS unfinished,
-            SUM(CASE WHEN status IN ('completed', 'forfeit') THEN 1 ELSE 0 END) AS finished
+    $stmt = $db->prepare("SELECT DISTINCT COALESCE(NULLIF(division_id, 0), 0) AS div_key
         FROM intramural_matches
         WHERE sport_id = ? AND season_id = ? AND status <> 'cancelled'");
     $stmt->execute([$sportId, $seasonId]);
-    $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
-    $unfinished = (int) ($row['unfinished'] ?? 0);
-    $finished = (int) ($row['finished'] ?? 0);
-    if ($finished > 0 && $unfinished === 0) {
+    $divKeys = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+
+    if ($divKeys !== []) {
+        foreach ($divKeys as $divKey) {
+            $divId = $divKey > 0 ? $divKey : null;
+            if (!isEventDivisionFinished($sportId, (int) $seasonId, $divId)) {
+                return false;
+            }
+        }
+
         return true;
     }
 
-    if ($unfinished > 0) {
-        return false;
-    }
-
-    $ranks = getEventRanks($sportId, (int) $seasonId);
-    foreach ($ranks as $rank) {
-        if ((int) ($rank['place_rank'] ?? 0) > 0) {
-            return true;
-        }
-    }
-
-    return false;
+    return isEventDivisionFinished($sportId, (int) $seasonId, null);
 }
 
 /**
@@ -6759,9 +7414,81 @@ function groupMatchesBySportSchedule(array $matches): array
     return $groups;
 }
 
+/** SQL ORDER BY for match schedule listings. */
+function matchScheduleSqlOrderClause(string $sort): string
+{
+    if ($sort === 'game_number') {
+        return '(m.scheduled_at IS NULL) ASC,
+            DATE(m.scheduled_at) ASC,
+            COALESCE(NULLIF(TRIM(m.venue), \'\'), NULLIF(TRIM(s.venue), \'\')) ASC,
+            (m.game_number IS NULL) ASC,
+            m.game_number ASC,
+            m.scheduled_at ASC,
+            m.id ASC';
+    }
+
+    return 's.name ASC, s.category ASC, (m.scheduled_at IS NULL) ASC, m.scheduled_at ASC, m.match_order ASC, m.id ASC';
+}
+
 /**
- * Expected headers for athlete roster Excel/CSV import.
+ * Group matches by play date + venue (for game-number sort views).
+ *
+ * @param list<array> $matches
+ * @return list<array{group_key:string,day:?string,venue_label:string,matches:list<array>}>
  */
+function groupMatchesByVenueDaySchedule(array $matches): array
+{
+    $groups = [];
+    $order = [];
+    foreach ($matches as $m) {
+        if (empty($m['scheduled_at'])) {
+            $key = 'unscheduled';
+            if (!isset($groups[$key])) {
+                $groups[$key] = [
+                    'group_key' => $key,
+                    'day' => null,
+                    'venue_label' => 'Unscheduled',
+                    'matches' => [],
+                ];
+                $order[] = $key;
+            }
+            $groups[$key]['matches'][] = $m;
+            continue;
+        }
+
+        $day = date('Y-m-d', strtotime((string) $m['scheduled_at']));
+        $venue = trim((string) ($m['effective_venue'] ?? $m['venue'] ?? ''));
+        $venueKey = normalizeVenueKey($venue);
+        $key = $day . '|' . $venueKey;
+        if (!isset($groups[$key])) {
+            $groups[$key] = [
+                'group_key' => $key,
+                'day' => $day,
+                'venue_label' => $venue !== '' ? $venue : 'Venue TBD',
+                'matches' => [],
+            ];
+            $order[] = $key;
+        }
+        $groups[$key]['matches'][] = $m;
+    }
+
+    $result = [];
+    $unscheduled = null;
+    foreach ($order as $key) {
+        if ($key === 'unscheduled') {
+            $unscheduled = $groups[$key];
+            continue;
+        }
+        $result[] = $groups[$key];
+    }
+    if ($unscheduled !== null) {
+        $result[] = $unscheduled;
+    }
+
+    return $result;
+}
+
+/**
 function rosterImportHeaders(): array
 {
     return [

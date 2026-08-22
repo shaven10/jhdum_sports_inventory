@@ -10,4 +10,5 @@ if (PHP_SAPI !== 'cli') {
 }
 
 ensureIntramuralDivisionsSchema();
+ensureDivisionSportsAutoIncrement(getDB());
 echo "Intramural divisions schema is ready.\n";

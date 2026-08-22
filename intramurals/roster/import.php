@@ -72,6 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $created = 0;
             $registered = 0;
             $updated = 0;
+            $linked = 0;
             $skipped = 0;
             $rowErrors = [];
 
@@ -139,7 +140,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $errors[] = 'Import stopped. Reduce athletes per event in the file to match players per event, then try again.';
             } else {
 
-            $findAthlete = $db->prepare('SELECT * FROM intramural_athletes WHERE student_id = ? LIMIT 1');
             $insertAthlete = $db->prepare('INSERT INTO intramural_athletes (athlete_code, student_id, first_name, last_name, gender, birthdate, department, year_level, team_id, email, phone) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
             $updateAthlete = $db->prepare('UPDATE intramural_athletes SET first_name=?, last_name=?, gender=?, birthdate=COALESCE(?, birthdate), department=COALESCE(NULLIF(?, ""), department), year_level=COALESCE(NULLIF(?, ""), year_level), team_id=?, email=COALESCE(NULLIF(?, ""), email), phone=COALESCE(NULLIF(?, ""), phone), is_active=1 WHERE id=?');
             $findReg = $db->prepare('SELECT id, team_id FROM intramural_registrations WHERE athlete_id = ? AND sport_id = ? AND season_id = ? LIMIT 1');
@@ -222,8 +222,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 try {
-                    $findAthlete->execute([$studentId]);
-                    $athlete = $findAthlete->fetch();
+                    $athlete = findAthleteByStudentIdOrName($db, $studentId, $firstName, $lastName, $teamId);
 
                     if (!$athlete) {
                         $code = generateAthleteCode();
@@ -248,6 +247,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         ]);
                     } else {
                         $athleteId = (int) $athlete['id'];
+                        if ((string) ($athlete['student_id'] ?? '') !== $studentId) {
+                            $linked++;
+                        }
                         // Scoped users cannot reassign another team's athlete
                         if ($scoped && $userTeamId && !empty($athlete['team_id']) && (int) $athlete['team_id'] !== $userTeamId) {
                             $rowErrors[] = "Row $line: student ID $studentId belongs to another team.";
@@ -329,6 +331,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             auditLog($_SESSION['user_id'], 'import_roster', 'intramural_registration', null, null, [
                 'season_id' => $seasonId,
                 'created' => $created,
+                'linked' => $linked,
                 'registered' => $registered,
                 'updated' => $updated,
                 'skipped' => $skipped,
@@ -336,6 +339,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $results = [
                 'created' => $created,
+                'linked' => $linked,
                 'registered' => $registered,
                 'updated' => $updated,
                 'skipped' => $skipped,
@@ -343,8 +347,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'total' => count($parsed['rows']),
             ];
 
-            if ($created || $registered || $updated) {
-                flash('success', "Import finished: $created new athletes, $registered sport registrations, $updated profiles refreshed.");
+            if ($created || $registered || $updated || $linked) {
+                $msg = "Import finished: $created new athletes";
+                if ($linked) {
+                    $msg .= ", $linked linked to existing profiles by name";
+                }
+                $msg .= ", $registered sport registrations, $updated profiles refreshed.";
+                flash('success', $msg);
             } elseif ($skipped) {
                 flash('error', 'Import finished with no successful rows. Check the error list below.');
             }
@@ -386,8 +395,9 @@ require __DIR__ . '/../_season_bar.php';
     <div class="card-header bg-primary text-white">Import Summary</div>
     <div class="card-body">
         <div class="row g-3 text-center">
-            <div class="col-6 col-md-3"><div class="fw-bold fs-4"><?= (int) $results['total'] ?></div><div class="text-muted small">Rows processed</div></div>
-            <div class="col-6 col-md-3"><div class="fw-bold fs-4 text-success"><?= (int) $results['created'] ?></div><div class="text-muted small">New athletes</div></div>
+            <div class="col-6 col-md-2"><div class="fw-bold fs-4"><?= (int) $results['total'] ?></div><div class="text-muted small">Rows processed</div></div>
+            <div class="col-6 col-md-2"><div class="fw-bold fs-4 text-success"><?= (int) $results['created'] ?></div><div class="text-muted small">New athletes</div></div>
+            <div class="col-6 col-md-2"><div class="fw-bold fs-4 text-info"><?= (int) ($results['linked'] ?? 0) ?></div><div class="text-muted small">Linked by name</div></div>
             <div class="col-6 col-md-3"><div class="fw-bold fs-4 text-primary"><?= (int) $results['registered'] ?></div><div class="text-muted small">New sport entries</div></div>
             <div class="col-6 col-md-3"><div class="fw-bold fs-4 text-warning"><?= (int) $results['skipped'] ?></div><div class="text-muted small">Skipped / errors</div></div>
         </div>
@@ -422,7 +432,7 @@ require __DIR__ . '/../_season_bar.php';
                 </div>
                 <p class="text-muted small mt-3 mb-0">
                     Required columns: <code>student_id</code>, <code>first_name</code>, <code>last_name</code>, <code>team</code>, <code>sport</code>.
-                    Existing Student IDs will be updated and registered for the sport in the active season.
+                    Existing Student IDs are updated; matching names reuse the same account so multiple events stay on one profile.
                 </p>
             </div>
         </div>

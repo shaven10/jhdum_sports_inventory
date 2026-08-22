@@ -7,6 +7,7 @@ $seasonId = getCurrentSeasonId();
 $search = get('search');
 $teamId = get('team');
 $sportId = get('sport');
+$multiEvent = get('multi_event');
 $page = max(1, (int) get('page', '1'));
 $perPage = 15;
 $userTeamId = getUserTeamId();
@@ -62,6 +63,15 @@ if ($sportId !== '') {
     }
 }
 
+$eventCountSql = $seasonId
+    ? '(SELECT COUNT(DISTINCT r.sport_id) FROM intramural_registrations r WHERE r.athlete_id = a.id AND r.season_id = ' . (int) $seasonId . ')'
+    : '(SELECT COUNT(DISTINCT r.sport_id) FROM intramural_registrations r WHERE r.athlete_id = a.id)';
+if ($multiEvent === 'multi') {
+    $where[] = "$eventCountSql >= 2";
+} elseif ($multiEvent === 'single') {
+    $where[] = "$eventCountSql = 1";
+}
+
 $whereClause = implode(' AND ', $where);
 $countStmt = $db->prepare("SELECT COUNT(*) FROM intramural_athletes a WHERE $whereClause");
 $countStmt->execute($params);
@@ -89,7 +99,8 @@ $sportCategoriesSql = $seasonId
 
 $sql = "SELECT a.*, t.name as team_name, t.color as team_color,
         $sportNamesSql as sport_names,
-        $sportCategoriesSql as sport_categories
+        $sportCategoriesSql as sport_categories,
+        $eventCountSql as event_count
         FROM intramural_athletes a
         LEFT JOIN intramural_teams t ON a.team_id = t.id
         WHERE $whereClause
@@ -107,6 +118,13 @@ unset($athleteRow);
 
 $teams = filterTeamsForCoach($db->query('SELECT id, name FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll());
 $sports = filterSportsForCoach($db->query('SELECT id, name, category FROM intramural_sports ORDER BY name, category')->fetchAll());
+
+$filterQuery = http_build_query(array_filter([
+    'search' => $search,
+    'team' => $teamId !== '' ? $teamId : null,
+    'sport' => $sportId !== '' ? $sportId : null,
+    'multi_event' => in_array($multiEvent, ['multi', 'single'], true) ? $multiEvent : null,
+], static fn($v) => $v !== null && $v !== ''));
 
 $pageTitle = 'Athlete Management';
 require_once __DIR__ . '/../../includes/header.php';
@@ -139,7 +157,7 @@ require __DIR__ . '/../_season_bar.php';
             <label class="form-label">Search</label>
             <input type="text" name="search" class="form-control" value="<?= sanitize($search) ?>" placeholder="Name, student ID...">
         </div>
-        <div class="col-md-3">
+        <div class="col-md-2">
             <label class="form-label">Team / House</label>
             <select name="team" class="form-select" <?= !empty($lockTeamFilter) ? 'disabled' : '' ?>>
                 <?php if (empty($lockTeamFilter)): ?>
@@ -154,13 +172,21 @@ require __DIR__ . '/../_season_bar.php';
             <input type="hidden" name="team" value="<?= (int) $userTeamId ?>">
             <?php endif; ?>
         </div>
-        <div class="col-md-3">
+        <div class="col-md-2">
             <label class="form-label">Event</label>
             <select name="sport" class="form-select">
                 <option value="">All Events</option>
                 <?php foreach ($sports as $s): ?>
                 <option value="<?= $s['id'] ?>" <?= $sportId === (string) $s['id'] ? 'selected' : '' ?>><?= sanitize(sportLabel($s)) ?></option>
                 <?php endforeach; ?>
+            </select>
+        </div>
+        <div class="col-md-2">
+            <label class="form-label">Events</label>
+            <select name="multi_event" class="form-select">
+                <option value="">All athletes</option>
+                <option value="multi" <?= $multiEvent === 'multi' ? 'selected' : '' ?>>Multiple events</option>
+                <option value="single" <?= $multiEvent === 'single' ? 'selected' : '' ?>>Single event</option>
             </select>
         </div>
         <div class="col-md-2"><button class="btn btn-primary w-100">Filter</button></div>
@@ -210,7 +236,10 @@ require __DIR__ . '/../_season_bar.php';
                         <td><?= sanitize($a['year_level'] ?: '—') ?></td>
                         <td>
                             <?php if (!empty($a['sport_name_list'])): ?>
-                            <div class="d-flex flex-wrap gap-1">
+                            <div class="d-flex flex-wrap gap-1 align-items-center">
+                                <?php if ((int) ($a['event_count'] ?? 0) >= 2): ?>
+                                <span class="badge bg-info text-dark" title="Registered in multiple events"><?= (int) $a['event_count'] ?> events</span>
+                                <?php endif; ?>
                                 <?php foreach ($a['sport_name_list'] as $sportName): ?>
                                 <span class="badge bg-primary-subtle text-primary-emphasis border"><?= sanitize($sportName) ?></span>
                                 <?php endforeach; ?>
@@ -253,6 +282,6 @@ require __DIR__ . '/../_season_bar.php';
     </div>
 </div>
 
-<div class="mt-3"><?= paginationLinks($pagination, BASE_URL . '/intramurals/athletes/index.php?search=' . urlencode($search) . '&team=' . urlencode($teamId) . '&sport=' . urlencode($sportId)) ?></div>
+<div class="mt-3"><?= paginationLinks($pagination, BASE_URL . '/intramurals/athletes/index.php' . ($filterQuery !== '' ? '?' . $filterQuery : '')) ?></div>
 
 <?php require_once __DIR__ . '/../../includes/footer.php'; ?>
