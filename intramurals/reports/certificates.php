@@ -279,7 +279,7 @@ require __DIR__ . '/../_season_bar.php';
     <?= $teamId ? ' · filtered team' : '' ?>.
 </div>
 
-<div class="cert-print-root">
+<div class="cert-print-root" data-report-capture>
 <?php
 $total = count($athletes);
 $index = 0;

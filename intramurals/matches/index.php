@@ -13,9 +13,13 @@ $search = get('search');
 $sportId = get('sport');
 $status = get('status');
 $unscheduled = get('unscheduled');
-$sort = get('sort', 'schedule');
+$defaultSort = defaultMatchScheduleSort();
+$sort = get('sort', $defaultSort);
+if ($sort === '') {
+    $sort = $defaultSort;
+}
 if (!in_array($sort, ['schedule', 'game_number'], true)) {
-    $sort = 'schedule';
+    $sort = $defaultSort;
 }
 $page = max(1, (int) get('page', '1'));
 $perPage = 20;

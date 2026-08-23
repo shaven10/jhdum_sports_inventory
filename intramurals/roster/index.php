@@ -222,7 +222,7 @@ require __DIR__ . '/../_season_bar.php';
 </div>
 <?php endif; ?>
 
-<div class="roster-print-doc">
+<div class="roster-print-doc" data-report-capture>
     <?php
     $rosterMetaParts = [];
     $rosterMetaParts[] = 'Season: ' . $seasonLabel;

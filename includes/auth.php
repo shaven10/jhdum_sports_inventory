@@ -922,6 +922,16 @@ function canViewMatchResults(): bool
     return false;
 }
 
+/** Default sort for match schedule / results listings. */
+function defaultMatchScheduleSort(): string
+{
+    if (!canManageIntramurals() && (hasRole('unit_manager') || isTournamentManager())) {
+        return 'game_number';
+    }
+
+    return 'schedule';
+}
+
 /** View all intramurals reports (schedules, results, standings, rosters, etc.). */
 function canViewIntramuralsReports(): bool
 {
@@ -980,7 +990,7 @@ function filterSportsForUser(array $sports): array
 /** Report types available to tournament managers. */
 function getTabulatorReportTypes(): array
 {
-    return ['schedules', 'results', 'standings', 'medals', 'overall'];
+    return ['schedules', 'results', 'standings', 'medals'];
 }
 
 /** Restrict match queries to tabulator-assigned events. */

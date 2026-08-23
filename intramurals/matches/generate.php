@@ -144,6 +144,7 @@ $scheduleWindow = buildScheduleWindow(
     $scheduleEndDate ?: null,
     $scheduleHours
 );
+$scheduleGenerationCursor = getScheduleGenerationCursor($scheduleWindow);
 $scheduleResumeCursor = getScheduleResumeCursor($seasonId ?: 0, $scheduleWindow);
 $scheduleSpansMultipleDays = $scheduleStartDate && $scheduleEndDate && $scheduleStartDate !== $scheduleEndDate;
 
@@ -422,12 +423,12 @@ foreach ($selectedSportIds as $sid) {
 }
 
 if ($fixturesBySportPreview && scheduleWindowIsValid($scheduleWindow)) {
-    $previewCursor = $scheduleResumeCursor ? clone $scheduleResumeCursor : createScheduleCursor($scheduleWindow);
+    $previewCursor = $scheduleGenerationCursor ? clone $scheduleGenerationCursor : createScheduleCursor($scheduleWindow);
     if ($smartVenue && $previewCursor) {
         applySmartVenueSchedule($fixturesBySportPreview, $sportsByIdPreview, $scheduleWindow, (int) ($seasonId ?: 0), $previewCursor);
     } elseif ($previewCursor) {
         foreach ($fixturesBySportPreview as $sid => &$fx) {
-            applyDurationScheduleToFixtures($fx, $sportsByIdPreview[$sid] ?? [], $scheduleWindow, $previewCursor);
+            applyDurationScheduleToFixtures($fx, $sportsByIdPreview[$sid] ?? [], $scheduleWindow, $previewCursor, (int) ($seasonId ?: 0));
         }
         unset($fx);
     }
@@ -597,8 +598,12 @@ $renderSlotSelects = static function (string $namePrefix, array $slotMap, array 
     <i class="bi bi-calendar-range"></i>
     Auto-schedule window: <strong><?= sanitize(formatScheduleWindowSummary($scheduleWindow)) ?></strong>.
     Match times are spaced using each event's <strong>estimated game duration</strong> (set under Sports).
-    <?php if ($scheduleResumeCursor): ?>
-    Resuming after existing matches from <strong><?= formatDateTime($scheduleResumeCursor->format('Y-m-d H:i:s')) ?></strong>.
+    Generated matches may use up to <strong>1 extra hour</strong> past each day's end hour (e.g. 5:00 PM end → games until 6:00 PM).
+    <?php if ($scheduleGenerationCursor): ?>
+    New matches fill from <strong><?= formatDateTime($scheduleGenerationCursor->format('Y-m-d H:i:s')) ?></strong>
+    <?php if ($scheduleResumeCursor && $scheduleResumeCursor > $scheduleGenerationCursor): ?>
+    (skipping occupied times; latest existing match in this window ends <strong><?= formatDateTime($scheduleResumeCursor->format('Y-m-d H:i:s')) ?></strong>)
+    <?php endif; ?>.
     <?php endif; ?>
     You can change this window below, and edit any match date/time later — it does not have to stay within the season dates.
 </div>

@@ -2121,6 +2121,18 @@ function scheduleDayBounds(string $dateYmd, array $window): array
     return [(int) $window['daily_start_hour'], (int) $window['daily_end_hour']];
 }
 
+/** Extra hours past the configured end hour when auto-scheduling generated matches. */
+const SCHEDULE_GENERATION_END_HOUR_ALLOWANCE = 1;
+
+function scheduleEffectiveEndHour(int $configuredEndHour, int $endHourAllowance = 0): int
+{
+    if ($endHourAllowance <= 0) {
+        return $configuredEndHour;
+    }
+
+    return min(24, $configuredEndHour + $endHourAllowance);
+}
+
 function formatScheduleHour(int $hour): string
 {
     return sprintf('%02d:00', max(0, min(23, $hour)));
@@ -2189,7 +2201,7 @@ function scheduleWindowStartDateTime(array $window): ?DateTime
 }
 
 /** Latest allowed end datetime inside the schedule window. */
-function scheduleWindowEndDateTime(array $window): ?DateTime
+function scheduleWindowEndDateTime(array $window, int $endHourAllowance = 0): ?DateTime
 {
     if (!scheduleWindowIsValid($window)) {
         return null;
@@ -2198,6 +2210,7 @@ function scheduleWindowEndDateTime(array $window): ?DateTime
     try {
         $cursor = new DateTime((string) $window['end_date']);
         [, $endHour] = scheduleDayBounds($cursor->format('Y-m-d'), $window);
+        $endHour = scheduleEffectiveEndHour($endHour, $endHourAllowance);
         $cursor->setTime($endHour, 0, 0);
 
         return $cursor;
@@ -2225,7 +2238,7 @@ function createScheduleCursor(array $window, ?DateTime $resume = null): ?DateTim
 }
 
 /** Move cursor into the daily window; return false if past the schedule end date. */
-function normalizeScheduleCursor(DateTime &$cursor, array $window): bool
+function normalizeScheduleCursor(DateTime &$cursor, array $window, int $endHourAllowance = 0): bool
 {
     try {
         $startDate = new DateTime((string) $window['start_date']);
@@ -2250,6 +2263,7 @@ function normalizeScheduleCursor(DateTime &$cursor, array $window): bool
         }
 
         [$dayStartHour, $dayEndHour] = scheduleDayBounds($cursor->format('Y-m-d'), $window);
+        $dayEndHour = scheduleEffectiveEndHour($dayEndHour, $endHourAllowance);
         $timeMinutes = ((int) $cursor->format('G')) * 60 + (int) $cursor->format('i');
         $startMinutes = $dayStartHour * 60;
         $endMinutes = $dayEndHour * 60;
@@ -2273,10 +2287,10 @@ function normalizeScheduleCursor(DateTime &$cursor, array $window): bool
     }
 }
 
-function matchFitsScheduleWindow(DateTime $start, int $durationMinutes, array $window): bool
+function matchFitsScheduleWindow(DateTime $start, int $durationMinutes, array $window, int $endHourAllowance = 0): bool
 {
     $windowStart = scheduleWindowStartDateTime($window);
-    $lastDay = scheduleWindowEndDateTime($window);
+    $lastDay = scheduleWindowEndDateTime($window, $endHourAllowance);
     if (!$windowStart || !$lastDay) {
         return false;
     }
@@ -2286,6 +2300,7 @@ function matchFitsScheduleWindow(DateTime $start, int $durationMinutes, array $w
     }
 
     [, $dayEndHour] = scheduleDayBounds($start->format('Y-m-d'), $window);
+    $dayEndHour = scheduleEffectiveEndHour($dayEndHour, $endHourAllowance);
     $end = clone $start;
     $end->modify('+' . $durationMinutes . ' minutes');
     $dayEnd = clone $start;
@@ -2294,11 +2309,11 @@ function matchFitsScheduleWindow(DateTime $start, int $durationMinutes, array $w
     return $end <= $dayEnd && $end <= $lastDay;
 }
 
-function advanceScheduleCursor(DateTime &$cursor, int $durationMinutes, array $window): bool
+function advanceScheduleCursor(DateTime &$cursor, int $durationMinutes, array $window, int $endHourAllowance = 0): bool
 {
     $cursor->modify('+' . $durationMinutes . ' minutes');
 
-    return normalizeScheduleCursor($cursor, $window);
+    return normalizeScheduleCursor($cursor, $window, $endHourAllowance);
 }
 
 /**
@@ -2320,17 +2335,17 @@ function matchOverlapsRanges(DateTime $start, int $durationMinutes, array $range
 /**
  * @param list<array{0:int,1:int}> $ranges
  */
-function bumpCursorPastRanges(DateTime &$cursor, int $durationMinutes, array $ranges, array $window): bool
+function bumpCursorPastRanges(DateTime &$cursor, int $durationMinutes, array $ranges, array $window, int $endHourAllowance = 0): bool
 {
     for ($attempt = 0; $attempt < 10000; $attempt++) {
-        if (!normalizeScheduleCursor($cursor, $window)) {
+        if (!normalizeScheduleCursor($cursor, $window, $endHourAllowance)) {
             return false;
         }
         if (matchOverlapsRanges($cursor, $durationMinutes, $ranges)) {
             $cursor->modify('+15 minutes');
             continue;
         }
-        if (matchFitsScheduleWindow($cursor, $durationMinutes, $window)) {
+        if (matchFitsScheduleWindow($cursor, $durationMinutes, $window, $endHourAllowance)) {
             return true;
         }
         $cursor->modify('+1 day');
@@ -2341,28 +2356,42 @@ function bumpCursorPastRanges(DateTime &$cursor, int $durationMinutes, array $ra
     return false;
 }
 
-/** Resume scheduling after the latest existing match end time in the season. */
+/** Resume scheduling after the latest existing match end time within the schedule window. */
 function getScheduleResumeCursor(int $seasonId, array $window): ?DateTime
 {
     if (!scheduleWindowIsValid($window)) {
         return null;
     }
 
-    if ($seasonId <= 0) {
-        return createScheduleCursor($window);
+    $windowStart = scheduleWindowStartDateTime($window);
+    $windowEnd = scheduleWindowEndDateTime($window);
+    if (!$windowStart || !$windowEnd) {
+        return null;
     }
+
+    if ($seasonId <= 0) {
+        return clone $windowStart;
+    }
+
+    $windowStartTs = (int) $windowStart->format('U');
+    $windowEndTs = (int) $windowEnd->format('U');
 
     ensureSportGameDurationColumn();
     $db = getDB();
     $stmt = $db->prepare('SELECT m.scheduled_at, s.game_duration_minutes
         FROM intramural_matches m
         JOIN intramural_sports s ON m.sport_id = s.id
-        WHERE m.season_id = ? AND m.scheduled_at IS NOT NULL AND m.status NOT IN (\'cancelled\')');
-    $stmt->execute([$seasonId]);
+        WHERE m.season_id = ? AND m.scheduled_at IS NOT NULL AND m.status NOT IN (\'cancelled\')
+          AND m.scheduled_at >= ? AND m.scheduled_at <= ?');
+    $stmt->execute([
+        $seasonId,
+        $windowStart->format('Y-m-d H:i:s'),
+        $windowEnd->format('Y-m-d H:i:s'),
+    ]);
     $maxEnd = null;
     foreach ($stmt->fetchAll() as $row) {
         $startTs = strtotime((string) $row['scheduled_at']);
-        if ($startTs === false) {
+        if ($startTs === false || $startTs < $windowStartTs || $startTs > $windowEndTs) {
             continue;
         }
         $duration = normalizeGameDurationMinutes($row['game_duration_minutes'] ?? null);
@@ -2373,28 +2402,32 @@ function getScheduleResumeCursor(int $seasonId, array $window): ?DateTime
     }
 
     if ($maxEnd === null) {
-        return createScheduleCursor($window);
+        return clone $windowStart;
     }
 
     $cursor = DateTime::createFromFormat('U', (string) $maxEnd);
     if (!$cursor) {
-        return createScheduleCursor($window);
-    }
-
-    $windowStart = scheduleWindowStartDateTime($window);
-    $windowEnd = scheduleWindowEndDateTime($window);
-    if ($windowStart && $cursor < $windowStart) {
         return clone $windowStart;
     }
-    if ($windowEnd && $cursor > $windowEnd) {
+
+    if ($cursor < $windowStart) {
+        return clone $windowStart;
+    }
+    if ($cursor > $windowEnd) {
         return clone $windowStart;
     }
 
     if (!normalizeScheduleCursor($cursor, $window)) {
-        return $windowStart ? clone $windowStart : null;
+        return clone $windowStart;
     }
 
     return $cursor;
+}
+
+/** Start cursor for newly generated fixtures: fill from the beginning of the schedule window. */
+function getScheduleGenerationCursor(array $window): ?DateTime
+{
+    return createScheduleCursor($window);
 }
 
 /**
@@ -2403,17 +2436,20 @@ function getScheduleResumeCursor(int $seasonId, array $window): ?DateTime
  * @param list<array<string, mixed>> $fixtures
  * @return int Number of fixtures scheduled
  */
-function applyDurationScheduleToFixtures(array &$fixtures, array $sport, array $window, DateTime &$cursor): int
+function applyDurationScheduleToFixtures(array &$fixtures, array $sport, array $window, DateTime &$cursor, int $seasonId = 0): int
 {
     $duration = getSportGameDurationMinutes($sport);
+    $venueKey = normalizeVenueKey($sport['venue'] ?? null);
+    $occupied = ($seasonId > 0 && $venueKey !== '') ? getOccupiedVenueRanges($seasonId, $venueKey) : [];
+    $endHourAllowance = SCHEDULE_GENERATION_END_HOUR_ALLOWANCE;
     $scheduled = 0;
     foreach ($fixtures as &$fixture) {
-        if (!bumpCursorPastRanges($cursor, $duration, [], $window)) {
+        if (!bumpCursorPastRanges($cursor, $duration, $occupied, $window, $endHourAllowance)) {
             break;
         }
         $fixture['scheduled_at'] = $cursor->format('Y-m-d H:i:s');
         $scheduled++;
-        if (!advanceScheduleCursor($cursor, $duration, $window)) {
+        if (!advanceScheduleCursor($cursor, $duration, $window, $endHourAllowance)) {
             break;
         }
     }
@@ -2740,7 +2776,7 @@ function applySmartVenueSchedule(array &$fixturesBySport, array $sportsById, arr
         return 0;
     }
 
-    $defaultCursor = $sharedCursor ?? getScheduleResumeCursor($seasonId, $window) ?? createScheduleCursor($window);
+    $defaultCursor = $sharedCursor ?? getScheduleGenerationCursor($window) ?? createScheduleCursor($window);
     if (!$defaultCursor) {
         return 0;
     }
@@ -2760,6 +2796,7 @@ function applySmartVenueSchedule(array &$fixturesBySport, array $sportsById, arr
     }
 
     $scheduled = 0;
+    $endHourAllowance = SCHEDULE_GENERATION_END_HOUR_ALLOWANCE;
 
     foreach ($venueGroups as $venueKey => $groupSportIds) {
         // No venue set: schedule each sport independently (no cross-sport blocking)
@@ -2770,7 +2807,8 @@ function applySmartVenueSchedule(array &$fixturesBySport, array $sportsById, arr
                     $fixturesBySport[$sportId],
                     $sportsById[$sportId] ?? [],
                     $window,
-                    $cursor
+                    $cursor,
+                    $seasonId
                 );
             }
             continue;
@@ -2793,7 +2831,7 @@ function applySmartVenueSchedule(array &$fixturesBySport, array $sportsById, arr
                 $active = true;
                 $sport = $sportsById[$sportId] ?? [];
                 $duration = getSportGameDurationMinutes($sport);
-                if (!bumpCursorPastRanges($cursor, $duration, $occupied, $window)) {
+                if (!bumpCursorPastRanges($cursor, $duration, $occupied, $window, $endHourAllowance)) {
                     break 2;
                 }
 
@@ -2804,7 +2842,7 @@ function applySmartVenueSchedule(array &$fixturesBySport, array $sportsById, arr
                 $fixturesBySport[$sportId][$idx]['venue'] = $sport['venue'] ?? null;
                 $occupied[] = [$startTs, $startTs + ($duration * 60)];
                 $scheduled++;
-                if (!advanceScheduleCursor($cursor, $duration, $window)) {
+                if (!advanceScheduleCursor($cursor, $duration, $window, $endHourAllowance)) {
                     break 2;
                 }
             }
@@ -2886,7 +2924,7 @@ function generateMatchesForSport(int $sportId, int $seasonId, array $teamIds, ?i
         }
         if ($scheduleWindow !== null && $scheduleCursor !== null && scheduleWindowIsValid($scheduleWindow)) {
             $cursor = clone $scheduleCursor;
-            applyDurationScheduleToFixtures($fixtures, $sport, $scheduleWindow, $cursor);
+            applyDurationScheduleToFixtures($fixtures, $sport, $scheduleWindow, $cursor, $seasonId);
         }
     }
 
@@ -3111,7 +3149,7 @@ function generateMatchesForSports(array $sportIds, int $seasonId, ?array $shared
     $divisionFilter = (string) ($scheduleOptions['division_filter'] ?? '');
     $fixedDivisionId = isset($scheduleOptions['division_id']) ? (int) $scheduleOptions['division_id'] : 0;
     $scheduleWindow = buildScheduleWindow($startDate, $endDate, $scheduleOptions ?? []);
-    $scheduleCursor = getScheduleResumeCursor($seasonId, $scheduleWindow);
+    $scheduleCursor = getScheduleGenerationCursor($scheduleWindow);
 
     $regTeamsStmt = $db->prepare('SELECT DISTINCT team_id FROM intramural_registrations WHERE sport_id = ? AND season_id = ?');
     $sportsById = [];
@@ -3278,7 +3316,8 @@ function generateMatchesForSports(array $sportIds, int $seasonId, ?array $shared
                     $fixtures,
                     $sportsById[$sportId] ?? [],
                     $scheduleWindow,
-                    $scheduleCursor
+                    $scheduleCursor,
+                    $seasonId
                 );
             }
             unset($fixtures);

@@ -49,8 +49,10 @@ function buildAppNavigation(): array
     if (canViewCompetitionDashboard() && !isPublication()) {
         $items = [
             ['label' => 'Match Results', 'href' => BASE_URL . '/intramurals/matches/index.php', 'icon' => 'bi-list-check'],
-            ['label' => 'Overall Standing', 'href' => BASE_URL . '/intramurals/standings/overall.php', 'icon' => 'bi-award'],
         ];
+        if (!(isTournamentManager() && !canManageIntramurals())) {
+            $items[] = ['label' => 'Overall Standing', 'href' => BASE_URL . '/intramurals/standings/overall.php', 'icon' => 'bi-award'];
+        }
         if (canManageIntramurals()) {
             $items[] = ['label' => 'Per-Sport Standings', 'href' => BASE_URL . '/intramurals/standings/index.php', 'icon' => 'bi-bar-chart-steps'];
         }
@@ -62,7 +64,6 @@ function buildAppNavigation(): array
             $items[] = ['label' => 'Match Results Report', 'href' => BASE_URL . '/intramurals/reports/index.php?type=results', 'icon' => 'bi-file-earmark-text'];
             $items[] = ['label' => 'Team Standings Report', 'href' => BASE_URL . '/intramurals/reports/index.php?type=standings', 'icon' => 'bi-file-earmark-bar-graph'];
             $items[] = ['label' => 'Medal Tally Report', 'href' => BASE_URL . '/intramurals/reports/index.php?type=medals', 'icon' => 'bi-trophy'];
-            $items[] = ['label' => 'Overall Standing Report', 'href' => BASE_URL . '/intramurals/reports/index.php?type=overall', 'icon' => 'bi-award'];
         }
         $nav[] = ['type' => 'group', 'label' => 'Results', 'icon' => 'bi-trophy', 'items' => $items];
     }

@@ -1044,6 +1044,40 @@ function renderReportFooter(?string $extra = null): string
 HTML;
 }
 
+/**
+ * Print / PDF and download-image export buttons for reports.
+ *
+ * @param array{
+ *   class?:string,
+ *   size?:string,
+ *   filename?:string,
+ *   disabled?:bool,
+ *   print_label?:string,
+ *   image_label?:string
+ * } $options
+ */
+function renderReportExportButtons(array $options = []): string
+{
+    if (!empty($options['disabled'])) {
+        return '';
+    }
+
+    $class = trim(sanitize($options['class'] ?? 'btn btn-outline-secondary'));
+    $size = trim(sanitize($options['size'] ?? ''));
+    $printLabel = sanitize($options['print_label'] ?? 'Print / PDF');
+    $imageLabel = sanitize($options['image_label'] ?? 'Download Image');
+    $filename = trim((string) ($options['filename'] ?? ''));
+    $filenameAttr = $filename !== '' ? ' data-report-filename="' . sanitize($filename) . '"' : '';
+    $sizeClass = $size !== '' ? ' ' . $size : '';
+
+    return <<<HTML
+<div class="btn-group report-export-actions" role="group" aria-label="Report export">
+    <button type="button" class="{$class}{$sizeClass}" onclick="printReport()"><i class="bi bi-printer"></i> {$printLabel}</button>
+    <button type="button" class="{$class}{$sizeClass}" onclick="downloadReportImage(this)"{$filenameAttr}><i class="bi bi-image"></i> {$imageLabel}</button>
+</div>
+HTML;
+}
+
 /** Banner shown to non-student accounts when the active season roster is locked. */
 function renderRosterLockNotice(?int $seasonId = null): string
 {

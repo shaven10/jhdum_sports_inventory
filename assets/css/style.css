@@ -1400,6 +1400,60 @@ a.stat-card-link:focus-visible .stat-card {
     }
 }
 
+.report-export-actions .btn {
+    white-space: nowrap;
+}
+
+.report-image-capture-root {
+    position: fixed;
+    left: -100000px;
+    top: 0;
+    z-index: -1;
+    background: #fff;
+    padding: 12px;
+}
+
+.report-image-capture-inner {
+    width: 1100px;
+    max-width: 1100px;
+    background: #fff;
+    color: #000;
+}
+
+.report-image-capture-inner .report-brand-header,
+.report-image-capture-inner .report-brand-footer,
+.report-image-capture-inner .d-print-block {
+    display: block !important;
+}
+
+.report-image-capture-inner .table-responsive,
+.report-image-capture-inner .table-responsive-mobile,
+.report-image-capture-inner .standings-scroll-wrap {
+    overflow: visible !important;
+    max-height: none !important;
+}
+
+.report-image-capture-inner table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.report-image-capture-inner .card {
+    box-shadow: none;
+    border: 1px solid #dee2e6;
+}
+
+@media (max-width: 767.98px) {
+    .report-export-actions {
+        display: flex;
+        flex-wrap: wrap;
+    }
+
+    .report-export-actions .btn {
+        flex: 1 1 auto;
+    }
+}
+
 @media print {
     .navbar, .footer, .no-print, .btn, .filter-bar, .season-bar, .modal, .alert-dismissible {
         display: none !important;
