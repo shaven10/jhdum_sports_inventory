@@ -103,6 +103,13 @@ require __DIR__ . '/../_season_bar.php';
     <strong><?= sanitize(sportLabel($block['sport'])) ?></strong>
     · Scheme: <?= sanitize($scheme['name'] ?? 'Default') ?> (<?= sanitize(formatSchemePoints($scheme)) ?>)
     · Match W/D/L <?= (int) $block['sport']['win_points'] ?>/<?= (int) $block['sport']['draw_points'] ?>/<?= (int) $block['sport']['loss_points'] ?>
+    <?php
+    $standingsFormat = (string) ($block['sport']['tournament_format'] ?? '');
+    $useBracketNote = in_array($standingsFormat, ['team_play_sds_consolation', 'single_elimination_consolation', 'team_play_sds'], true);
+    ?>
+    <?php if ($useBracketNote): ?>
+    · Ranking follows Single Elimination with Consolation placement: Final winner = Champion, Final loser = 1st Runner Up; 3rd-place winner = 3rd, loser = last
+    <?php endif; ?>
 </div>
 
 <?php foreach ($divisionBlocks as $divBlock): ?>

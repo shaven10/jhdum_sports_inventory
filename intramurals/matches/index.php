@@ -8,11 +8,31 @@ $seasonId = getCurrentSeasonId();
 $season = getCurrentSeason();
 if ($seasonId) {
     ensureVenueGameNumbersCurrent($seasonId);
+    restoreNeededDecidingRubbersForSeason($seasonId);
 }
 $search = get('search');
-$sportId = get('sport');
 $status = get('status');
 $unscheduled = get('unscheduled');
+$dateFromRaw = get('date_from');
+$dateToRaw = get('date_to');
+$normalizeFilterDate = static function (string $value): string {
+    $value = trim($value);
+    if ($value === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) {
+        return '';
+    }
+    $dt = DateTime::createFromFormat('Y-m-d', $value);
+    if (!$dt || $dt->format('Y-m-d') !== $value) {
+        return '';
+    }
+
+    return $value;
+};
+$dateFrom = $normalizeFilterDate($dateFromRaw);
+$dateTo = $normalizeFilterDate($dateToRaw);
+if ($dateFrom !== '' && $dateTo !== '' && $dateFrom > $dateTo) {
+    [$dateFrom, $dateTo] = [$dateTo, $dateFrom];
+}
+$datesFilterActive = $dateFrom !== '' || $dateTo !== '';
 $defaultSort = defaultMatchScheduleSort();
 $sort = get('sort', $defaultSort);
 if ($sort === '') {
@@ -24,6 +44,31 @@ if (!in_array($sort, ['schedule', 'game_number'], true)) {
 $page = max(1, (int) get('page', '1'));
 $perPage = 20;
 
+$sports = filterSportsForUser($db->query('SELECT id, name, category, tournament_format FROM intramural_sports ORDER BY name')->fetchAll());
+$validSportIds = [];
+foreach ($sports as $s) {
+    $validSportIds[(int) $s['id']] = true;
+}
+
+// Multi-select sports filter (sports[]). Legacy single ?sport= still supported.
+$selectedSportIds = [];
+if (isset($_GET['sports']) && is_array($_GET['sports'])) {
+    foreach ($_GET['sports'] as $rawId) {
+        $id = (int) $rawId;
+        if ($id > 0 && isset($validSportIds[$id])) {
+            $selectedSportIds[$id] = $id;
+        }
+    }
+} elseif (get('sport') !== '') {
+    $id = (int) get('sport');
+    if ($id > 0 && isset($validSportIds[$id])) {
+        $selectedSportIds[$id] = $id;
+    }
+}
+$selectedSportIds = array_values($selectedSportIds);
+$sportId = count($selectedSportIds) === 1 ? (string) $selectedSportIds[0] : '';
+$sportsFilterActive = $selectedSportIds !== [];
+
 $where = ['1=1'];
 $params = [];
 if ($seasonId) {
@@ -34,16 +79,30 @@ if ($search) {
     $where[] = '(ta.name LIKE ? OR tb.name LIKE ? OR m.venue LIKE ? OR m.referee_name LIKE ? OR m.round_label LIKE ?)';
     $params = array_merge($params, ["%$search%", "%$search%", "%$search%", "%$search%", "%$search%"]);
 }
-if ($sportId !== '') {
-    $where[] = 'm.sport_id = ?';
-    $params[] = (int) $sportId;
+if ($sportsFilterActive) {
+    $placeholders = implode(',', array_fill(0, count($selectedSportIds), '?'));
+    $where[] = "m.sport_id IN ($placeholders)";
+    $params = array_merge($params, $selectedSportIds);
 }
 if ($status !== '') {
     $where[] = 'm.status = ?';
     $params[] = $status;
 }
-if ($unscheduled === '1') {
+if ($unscheduled === '1' && !$datesFilterActive) {
     $where[] = 'm.scheduled_at IS NULL';
+}
+if ($datesFilterActive) {
+    if ($dateFrom !== '' && $dateTo !== '') {
+        $where[] = 'm.scheduled_at IS NOT NULL AND DATE(m.scheduled_at) BETWEEN ? AND ?';
+        $params[] = $dateFrom;
+        $params[] = $dateTo;
+    } elseif ($dateFrom !== '') {
+        $where[] = 'm.scheduled_at IS NOT NULL AND DATE(m.scheduled_at) >= ?';
+        $params[] = $dateFrom;
+    } else {
+        $where[] = 'm.scheduled_at IS NOT NULL AND DATE(m.scheduled_at) <= ?';
+        $params[] = $dateTo;
+    }
 }
 if (isTournamentManager() && !canManageIntramurals()) {
     $tmSportIds = getTmSportIds();
@@ -58,11 +117,9 @@ if (isTournamentManager() && !canManageIntramurals()) {
 $whereClause = implode(' AND ', $where);
 appendUnitManagerMatchFilter($whereClause, $params);
 
-$sports = filterSportsForUser($db->query('SELECT id, name, category, tournament_format FROM intramural_sports ORDER BY name')->fetchAll());
-
 if ($seasonId && canManageMatches()) {
-    $sportIdsToAdvance = $sportId !== ''
-        ? [(int) $sportId]
+    $sportIdsToAdvance = $sportsFilterActive
+        ? $selectedSportIds
         : array_values(array_filter(array_map(static fn($s) => (int) $s['id'], $sports)));
     foreach ($sportIdsToAdvance as $advanceSportId) {
         if ($advanceSportId > 0 && !isResultsLocked(null, $advanceSportId)) {
@@ -129,7 +186,7 @@ if ($seasonId) {
     $p->execute($pendingParams);
     $pendingCount = (int) $p->fetchColumn();
     if (canDeleteAllMatches()) {
-        $sportFilter = $sportId !== '' ? (int) $sportId : null;
+        $sportFilter = $sportsFilterActive ? $selectedSportIds : null;
         $generatedCount = countGeneratedMatches($seasonId, $sportFilter, true);
         $generatedUnplayedCount = countGeneratedMatches($seasonId, $sportFilter, false);
         $totalMatchCount = countSeasonMatches($seasonId, $sportFilter);
@@ -141,36 +198,56 @@ require_once __DIR__ . '/../../includes/header.php';
 require __DIR__ . '/../_season_bar.php';
 echo '<div class="no-print">' . renderResultsLockAlerts() . '</div>';
 
-$queryBase = BASE_URL . '/intramurals/matches/index.php?search=' . urlencode($search) . '&sport=' . urlencode($sportId) . '&status=' . urlencode($status) . '&unscheduled=' . urlencode($unscheduled) . '&sort=' . urlencode($sort);
+$sportsQuery = '';
+foreach ($selectedSportIds as $sid) {
+    $sportsQuery .= '&sports[]=' . (int) $sid;
+}
+$queryBase = BASE_URL . '/intramurals/matches/index.php?search=' . urlencode($search) . $sportsQuery
+    . '&status=' . urlencode($status)
+    . '&unscheduled=' . urlencode($unscheduled)
+    . '&date_from=' . urlencode($dateFrom)
+    . '&date_to=' . urlencode($dateTo)
+    . '&sort=' . urlencode($sort);
 
-$filterSportLabel = 'All events';
-if ($sportId !== '') {
-    foreach ($sports as $s) {
-        if ((string) $s['id'] === $sportId) {
-            $filterSportLabel = sportLabel($s);
-            break;
-        }
+$selectedSportLabels = [];
+$selectedSportIdSet = array_flip($selectedSportIds);
+foreach ($sports as $s) {
+    if (isset($selectedSportIdSet[(int) $s['id']])) {
+        $selectedSportLabels[] = sportLabel($s);
     }
 }
+if ($selectedSportLabels === []) {
+    $filterSportLabel = 'All events';
+} elseif (count($selectedSportLabels) === 1) {
+    $filterSportLabel = $selectedSportLabels[0];
+} elseif (count($selectedSportLabels) <= 3) {
+    $filterSportLabel = implode(', ', $selectedSportLabels);
+} else {
+    $filterSportLabel = count($selectedSportLabels) . ' selected events';
+}
 
-$filtersActive = $search !== '' || $sportId !== '' || $status !== '' || $unscheduled === '1';
+$filtersActive = $search !== '' || $sportsFilterActive || $status !== '' || $unscheduled === '1' || $datesFilterActive;
 $filterSummary = [];
 if ($search !== '') {
     $filterSummary[] = 'Search: “' . $search . '”';
 }
-if ($sportId !== '') {
-    foreach ($sports as $s) {
-        if ((string) $s['id'] === (string) $sportId) {
-            $filterSummary[] = 'Sport: ' . sportLabel($s);
-            break;
-        }
-    }
+if ($sportsFilterActive) {
+    $filterSummary[] = 'Sports: ' . $filterSportLabel;
 }
 if ($status !== '') {
     $filterSummary[] = 'Status: ' . ucfirst($status);
 }
 if ($unscheduled === '1') {
     $filterSummary[] = 'Needs date/time';
+}
+if ($datesFilterActive) {
+    if ($dateFrom !== '' && $dateTo !== '') {
+        $filterSummary[] = 'Dates: ' . formatDate($dateFrom) . ' – ' . formatDate($dateTo);
+    } elseif ($dateFrom !== '') {
+        $filterSummary[] = 'From: ' . formatDate($dateFrom);
+    } else {
+        $filterSummary[] = 'Until: ' . formatDate($dateTo);
+    }
 }
 if ($sort === 'game_number') {
     $filterSummary[] = 'Sorted by game #';
@@ -191,7 +268,7 @@ $reportMeta = implode(' · ', $reportMetaParts);
 <div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2 no-print">
     <div>
         <h1><i class="bi bi-calendar3"></i> Match Scheduling</h1>
-        <p class="text-muted mb-0">Generate fixtures by tournament style, auto-schedule, then edit any date/time as needed. Matches are grouped <?= $sort === 'game_number' ? 'by play date and venue, sorted by game #' : 'by sport and sorted by date/time' ?>. Click a team name to view that match’s official players.<?php if (hasRole('unit_manager') && !canManageIntramurals() && getUserTeamId()): ?> Showing only matches involving your assigned team.<?php endif; ?></p>
+        <p class="text-muted mb-0">Generate fixtures by tournament style, auto-schedule, then edit any date/time as needed. Matches are grouped <?= $sort === 'game_number' ? 'by venue and date, sorted by game #' : 'by sport and sorted by date/time' ?>. Click a team name to view that match’s official players.<?php if (hasRole('unit_manager') && !canManageIntramurals() && getUserTeamId()): ?> Showing only matches involving your assigned team.<?php endif; ?></p>
     </div>
     <?php if ($printMatchTotal > 0): ?>
     <div class="d-flex gap-2 flex-wrap">
@@ -203,7 +280,7 @@ $reportMeta = implode(' · ', $reportMetaParts);
 </div>
 
 <?= renderReportHeader('Match Schedule', [
-    'subtitle' => $sort === 'game_number' ? 'Intramural matches grouped by date and venue' : 'Intramural match fixtures grouped by sport',
+    'subtitle' => $sort === 'game_number' ? 'Intramural matches grouped by venue and date' : 'Intramural match fixtures grouped by sport',
     'meta' => $reportMeta,
 ]) ?>
 
@@ -226,7 +303,7 @@ $reportMeta = implode(' · ', $reportMetaParts);
 </div>
 <?php endif; ?>
 
-<div class="filter-bar no-print">
+<div class="filter-bar no-print" id="matchFilterBar">
     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
         <div class="d-flex gap-2 flex-wrap align-items-center">
             <?php if (canGenerateMatches()): ?>
@@ -257,24 +334,15 @@ $reportMeta = implode(' · ', $reportMetaParts);
             <?php if ($filtersActive || $sort === 'game_number'): ?>
             <span class="text-muted small"><?= sanitize(implode(' · ', $filterSummary)) ?></span>
             <?php endif; ?>
-            <button type="button" class="btn btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#matchFilters" aria-expanded="<?= ($filtersActive || $sort === 'game_number') ? 'true' : 'false' ?>" aria-controls="matchFilters">
+            <button type="button" class="btn btn-outline-secondary" id="matchFiltersToggle" data-bs-toggle="collapse" data-bs-target="#matchFilters" aria-expanded="false" aria-controls="matchFilters">
                 <i class="bi bi-funnel"></i> Filters
                 <i class="bi bi-chevron-down ms-1 filter-toggle-icon"></i>
             </button>
         </div>
     </div>
-    <div id="matchFilters" class="collapse<?= ($filtersActive || $sort === 'game_number') ? ' show' : '' ?>">
-        <form method="GET" class="row g-2 align-items-end mt-2">
+    <div id="matchFilters" class="collapse">
+        <form method="GET" class="row g-2 align-items-end mt-2" id="matchFilterForm">
             <div class="col-md-3"><label class="form-label">Search</label><input type="text" name="search" class="form-control" value="<?= sanitize($search) ?>"></div>
-            <div class="col-md-3">
-                <label class="form-label">Sport</label>
-                <select name="sport" class="form-select">
-                    <option value="">All</option>
-                    <?php foreach ($sports as $s): ?>
-                    <option value="<?= $s['id'] ?>" <?= $sportId === (string) $s['id'] ? 'selected' : '' ?>><?= sanitize(sportLabel($s)) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
             <div class="col-md-2">
                 <label class="form-label">Status</label>
                 <select name="status" class="form-select">
@@ -291,14 +359,106 @@ $reportMeta = implode(' · ', $reportMetaParts);
                     <option value="1" <?= $unscheduled === '1' ? 'selected' : '' ?> >Needs date/time</option>
                 </select>
             </div>
-            <div class="col-md-2">
+            <div class="col-md-3">
                 <label class="form-label">Sort by</label>
                 <select name="sort" class="form-select">
                     <option value="schedule" <?= $sort === 'schedule' ? 'selected' : '' ?>>Date/time (by sport)</option>
-                    <option value="game_number" <?= $sort === 'game_number' ? 'selected' : '' ?>>Game # (by date &amp; venue)</option>
+                    <option value="game_number" <?= $sort === 'game_number' ? 'selected' : '' ?>>Game # (by venue &amp; date)</option>
                 </select>
             </div>
-            <div class="col-md-12 col-lg-auto"><button class="btn btn-primary w-100">Apply</button></div>
+            <div class="col-md-2"><button class="btn btn-primary w-100">Apply</button></div>
+
+            <div class="col-md-6 col-lg-4">
+                <label class="form-label">Dates <span class="text-muted fw-normal">(inclusive)</span></label>
+                <div class="input-group">
+                    <input type="date" name="date_from" id="matchDateFrom" class="form-control" value="<?= sanitize($dateFrom) ?>" aria-label="From date">
+                    <span class="input-group-text">to</span>
+                    <input type="date" name="date_to" id="matchDateTo" class="form-control" value="<?= sanitize($dateTo) ?>" aria-label="To date">
+                </div>
+                <div class="form-text">Show matches scheduled on these calendar days (both dates included). Leave blank for all dates.</div>
+            </div>
+            <div class="col-md-6 col-lg-auto align-self-end">
+                <button type="button" class="btn btn-outline-secondary" id="matchDatesClear" title="Clear date range">Clear dates</button>
+            </div>
+
+            <div class="col-12">
+                <div class="sport-display-picker" id="matchSportsPicker">
+                    <div class="sport-display-picker__header">
+                        <div>
+                            <label class="form-label mb-0" for="matchSportsSearch">Sports to display</label>
+                            <div class="form-text mt-0" id="matchSportsSummary">
+                                <?php if (!$sportsFilterActive): ?>
+                                Showing all sports
+                                <?php elseif (count($selectedSportIds) === 1): ?>
+                                1 sport selected
+                                <?php else: ?>
+                                <?= count($selectedSportIds) ?> sports selected
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                        <div class="btn-group btn-group-sm">
+                            <button type="button" class="btn btn-outline-secondary" id="matchSportsSelectAll">Select all</button>
+                            <button type="button" class="btn btn-outline-secondary" id="matchSportsClear">Show all</button>
+                        </div>
+                    </div>
+
+                    <div class="sport-display-picker__chips<?= $sportsFilterActive ? '' : ' d-none' ?>" id="matchSportsChips" aria-live="polite">
+                        <?php foreach ($sports as $s): ?>
+                            <?php if (!isset($selectedSportIdSet[(int) $s['id']])) {
+                                continue;
+                            } ?>
+                            <button type="button"
+                                    class="sport-display-chip"
+                                    data-sport-id="<?= (int) $s['id'] ?>"
+                                    title="Remove <?= sanitize(sportLabel($s)) ?>">
+                                <span><?= sanitize(sportLabel($s)) ?></span>
+                                <i class="bi bi-x-lg" aria-hidden="true"></i>
+                            </button>
+                        <?php endforeach; ?>
+                    </div>
+
+                    <div class="sport-display-picker__search">
+                        <i class="bi bi-search" aria-hidden="true"></i>
+                        <input type="search"
+                               id="matchSportsSearch"
+                               class="form-control form-control-sm"
+                               placeholder="Search sports…"
+                               autocomplete="off"
+                               aria-controls="matchSportsList">
+                    </div>
+
+                    <div class="sport-display-picker__list" id="matchSportsList" role="group" aria-label="Sports to display">
+                        <?php if (empty($sports)): ?>
+                        <div class="text-muted small p-2">No sports available.</div>
+                        <?php else: ?>
+                            <?php foreach ($sports as $s): ?>
+                                <?php
+                                $sid = (int) $s['id'];
+                                $label = sportLabel($s);
+                                $checked = isset($selectedSportIdSet[$sid]);
+                                $dataSportLabel = function_exists('mb_strtolower')
+                                    ? mb_strtolower($label)
+                                    : strtolower($label);
+                                ?>
+                                <label class="sport-display-option<?= $checked ? ' is-checked' : '' ?>" data-sport-label="<?= sanitize($dataSportLabel) ?>">
+                                    <input class="form-check-input match-sport-check"
+                                           type="checkbox"
+                                           name="sports[]"
+                                           value="<?= $sid ?>"
+                                           <?= $checked ? 'checked' : '' ?>>
+                                    <span class="sport-display-option__body">
+                                        <span class="sport-display-option__name"><?= sanitize($label) ?></span>
+                                        <?php if (!empty($s['category'])): ?>
+                                        <span class="badge bg-secondary"><?= sanitize(ucfirst((string) $s['category'])) ?></span>
+                                        <?php endif; ?>
+                                    </span>
+                                </label>
+                            <?php endforeach; ?>
+                            <div class="sport-display-picker__empty text-muted small p-2 d-none" id="matchSportsEmpty">No sports match your search.</div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
         </form>
     </div>
 </div>
@@ -337,7 +497,13 @@ $reportMeta = implode(' · ', $reportMetaParts);
             <form method="POST" action="<?= BASE_URL ?>/intramurals/matches/delete_generated.php" id="deleteMatchesForm">
                 <?= csrfField() ?>
                 <input type="hidden" name="action" value="bulk">
-                <input type="hidden" name="sport_id" value="<?= sanitize($sportId) ?>">
+                <?php if ($sportsFilterActive): ?>
+                    <?php foreach ($selectedSportIds as $sid): ?>
+                    <input type="hidden" name="sport_ids[]" value="<?= (int) $sid ?>">
+                    <?php endforeach; ?>
+                <?php else: ?>
+                <input type="hidden" name="sport_id" value="">
+                <?php endif; ?>
                 <input type="hidden" name="return" value="<?= sanitize($queryBase . '&page=' . $page) ?>">
                 <div class="modal-header">
                     <h5 class="modal-title" id="deleteMatchesModalLabel"><i class="bi bi-trash"></i> Delete Matches</h5>
@@ -419,6 +585,195 @@ function toggleDeleteScope() {
 toggleDeleteScope();
 </script>
 <?php endif; ?>
+
+<script>
+(function () {
+    const picker = document.getElementById('matchSportsPicker');
+    if (!picker) return;
+
+    const checks = Array.prototype.slice.call(picker.querySelectorAll('.match-sport-check'));
+    const summary = document.getElementById('matchSportsSummary');
+    const chipsWrap = document.getElementById('matchSportsChips');
+    const searchInput = document.getElementById('matchSportsSearch');
+    const emptyMsg = document.getElementById('matchSportsEmpty');
+    const selectAll = document.getElementById('matchSportsSelectAll');
+    const clearBtn = document.getElementById('matchSportsClear');
+
+    function selectedChecks() {
+        return checks.filter(function (cb) { return cb.checked; });
+    }
+
+    function updateSummary() {
+        const selected = selectedChecks();
+        const count = selected.length;
+        if (!summary) return;
+        if (count === 0) {
+            summary.textContent = 'Showing all sports';
+        } else if (count === 1) {
+            summary.textContent = '1 sport selected';
+        } else {
+            summary.textContent = count + ' sports selected';
+        }
+    }
+
+    function rebuildChips() {
+        if (!chipsWrap) return;
+        chipsWrap.innerHTML = '';
+        const selected = selectedChecks();
+        if (selected.length === 0) {
+            chipsWrap.classList.add('d-none');
+            return;
+        }
+        chipsWrap.classList.remove('d-none');
+        selected.forEach(function (cb) {
+            const label = cb.closest('.sport-display-option');
+            const nameEl = label ? label.querySelector('.sport-display-option__name') : null;
+            const name = nameEl ? nameEl.textContent.trim() : ('Sport #' + cb.value);
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'sport-display-chip';
+            btn.dataset.sportId = cb.value;
+            btn.title = 'Remove ' + name;
+            btn.innerHTML = '<span></span><i class="bi bi-x-lg" aria-hidden="true"></i>';
+            btn.querySelector('span').textContent = name;
+            chipsWrap.appendChild(btn);
+        });
+    }
+
+    function syncOptionStyles() {
+        checks.forEach(function (cb) {
+            const option = cb.closest('.sport-display-option');
+            if (!option) return;
+            option.classList.toggle('is-checked', cb.checked);
+        });
+    }
+
+    function refresh() {
+        syncOptionStyles();
+        updateSummary();
+        rebuildChips();
+    }
+
+    checks.forEach(function (cb) {
+        cb.addEventListener('change', refresh);
+    });
+
+    if (chipsWrap) {
+        chipsWrap.addEventListener('click', function (e) {
+            const chip = e.target.closest('.sport-display-chip');
+            if (!chip) return;
+            const id = chip.dataset.sportId;
+            const match = checks.find(function (cb) { return String(cb.value) === String(id); });
+            if (match) {
+                match.checked = false;
+                refresh();
+            }
+        });
+    }
+
+    if (selectAll) {
+        selectAll.addEventListener('click', function () {
+            checks.forEach(function (cb) {
+                const option = cb.closest('.sport-display-option');
+                if (option && option.classList.contains('d-none')) return;
+                cb.checked = true;
+            });
+            refresh();
+        });
+    }
+
+    if (clearBtn) {
+        clearBtn.addEventListener('click', function () {
+            checks.forEach(function (cb) { cb.checked = false; });
+            if (searchInput) {
+                searchInput.value = '';
+                filterList('');
+            }
+            refresh();
+        });
+    }
+
+    function filterList(query) {
+        const q = (query || '').trim().toLowerCase();
+        let visible = 0;
+        picker.querySelectorAll('.sport-display-option').forEach(function (option) {
+            const label = option.getAttribute('data-sport-label') || '';
+            const show = !q || label.indexOf(q) !== -1;
+            option.classList.toggle('d-none', !show);
+            if (show) visible++;
+        });
+        if (emptyMsg) {
+            emptyMsg.classList.toggle('d-none', visible > 0 || checks.length === 0);
+        }
+    }
+
+    if (searchInput) {
+        searchInput.addEventListener('input', function () {
+            filterList(searchInput.value);
+        });
+    }
+
+    refresh();
+})();
+
+(function () {
+    const clearDates = document.getElementById('matchDatesClear');
+    const from = document.getElementById('matchDateFrom');
+    const to = document.getElementById('matchDateTo');
+    if (!clearDates || !from || !to) return;
+    clearDates.addEventListener('click', function () {
+        from.value = '';
+        to.value = '';
+    });
+})();
+
+(function () {
+    const bar = document.getElementById('matchFilterBar');
+    const panel = document.getElementById('matchFilters');
+    const toggle = document.getElementById('matchFiltersToggle');
+    if (!bar || !panel || !toggle || typeof bootstrap === 'undefined' || !bootstrap.Collapse) return;
+
+    const canHover = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+    if (!canHover) return;
+
+    const collapse = bootstrap.Collapse.getOrCreateInstance(panel, { toggle: false });
+    let hideTimer = null;
+
+    function stillInside() {
+        return toggle.matches(':hover')
+            || panel.matches(':hover')
+            || panel.contains(document.activeElement)
+            || toggle.contains(document.activeElement);
+    }
+
+    function cancelHide() {
+        if (hideTimer) {
+            clearTimeout(hideTimer);
+            hideTimer = null;
+        }
+    }
+
+    function scheduleHide() {
+        cancelHide();
+        hideTimer = setTimeout(function () {
+            hideTimer = null;
+            if (stillInside()) return;
+            collapse.hide();
+        }, 280);
+    }
+
+    [toggle, panel].forEach(function (el) {
+        el.addEventListener('mouseenter', cancelHide);
+        el.addEventListener('mouseleave', scheduleHide);
+        el.addEventListener('focusin', cancelHide);
+        el.addEventListener('focusout', function () {
+            setTimeout(function () {
+                if (!stillInside()) scheduleHide();
+            }, 0);
+        });
+    });
+})();
+</script>
 
 <?php require __DIR__ . '/_roster_dialog.php'; ?>
 <?php require_once __DIR__ . '/../../includes/footer.php'; ?>
