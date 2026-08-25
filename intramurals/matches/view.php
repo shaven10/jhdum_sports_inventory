@@ -72,9 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
                 // Score saved; audit logging must not block live scoring.
             }
 
-            if (in_array($status, ['completed', 'forfeit'], true)) {
-                maybeCancelUnneededDecidingRubber($db, $id);
-            }
+            maybeCancelUnneededDecidingRubber($db, $id);
 
             if (in_array($status, ['completed', 'forfeit'], true)) {
                 try {

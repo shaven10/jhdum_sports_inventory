@@ -54,6 +54,18 @@ if ($action === 'single') {
 }
 
 $sportId = post('sport_id') !== '' ? (int) post('sport_id') : null;
+$sportIdsRaw = $_POST['sport_ids'] ?? null;
+$sportFilter = null;
+if (is_array($sportIdsRaw)) {
+    $sportFilter = array_values(array_unique(array_filter(array_map('intval', $sportIdsRaw))));
+    if ($sportFilter === []) {
+        $sportFilter = null;
+    } elseif (count($sportFilter) === 1) {
+        $sportFilter = $sportFilter[0];
+    }
+} elseif ($sportId) {
+    $sportFilter = $sportId;
+}
 $deleteScope = post('delete_scope', 'generated');
 $includeCompleted = post('include_completed') === '1';
 $confirm = post('confirm_delete') === '1';
@@ -69,56 +81,82 @@ if ($deleteScope === 'all') {
         redirect($return);
     }
 
-    $toDelete = countSeasonMatches($seasonId, $sportId);
+    $toDelete = countSeasonMatches($seasonId, $sportFilter);
     if ($toDelete === 0) {
         flash('error', 'No matches matched your selection.');
         redirect($return);
     }
 
-    $result = deleteAllMatches($seasonId, $sportId);
+    $result = deleteAllMatches($seasonId, $sportFilter);
 
     auditLog((int) $_SESSION['user_id'], 'delete_all_matches', 'intramural_match', null, null, [
         'season_id' => $seasonId,
-        'sport_id' => $sportId,
+        'sport_id' => is_array($sportFilter) ? null : $sportFilter,
+        'sport_ids' => is_array($sportFilter) ? $sportFilter : ($sportFilter ? [$sportFilter] : null),
         'deleted' => $result['deleted'],
         'scope' => $result['scope'],
     ]);
 
-    $sportLabel = resolveSportScopeLabel($sportId);
+    $sportLabel = resolveSportScopeLabel($sportFilter);
     flash('success', $result['deleted'] . ' match' . ($result['deleted'] === 1 ? '' : 'es') . ' deleted (all matches) for ' . $sportLabel . '.');
     redirect($return);
 }
 
-$toDelete = countGeneratedMatches($seasonId, $sportId, $includeCompleted);
+$toDelete = countGeneratedMatches($seasonId, $sportFilter, $includeCompleted);
 if ($toDelete === 0) {
     flash('error', 'No generated matches matched your selection.');
     redirect($return);
 }
 
-$result = deleteGeneratedMatches($seasonId, $sportId, $includeCompleted);
+$result = deleteGeneratedMatches($seasonId, $sportFilter, $includeCompleted);
 
 auditLog((int) $_SESSION['user_id'], 'delete_generated_matches', 'intramural_match', null, null, [
     'season_id' => $seasonId,
-    'sport_id' => $sportId,
+    'sport_id' => is_array($sportFilter) ? null : $sportFilter,
+    'sport_ids' => is_array($sportFilter) ? $sportFilter : ($sportFilter ? [$sportFilter] : null),
     'include_completed' => $includeCompleted,
     'deleted' => $result['deleted'],
     'scope' => $result['scope'],
 ]);
 
-$sportLabel = resolveSportScopeLabel($sportId);
+$sportLabel = resolveSportScopeLabel($sportFilter);
 $scopeLabel = $includeCompleted ? 'all generated' : 'unplayed generated';
 flash('success', $result['deleted'] . ' ' . $scopeLabel . ' match' . ($result['deleted'] === 1 ? '' : 'es') . ' deleted for ' . $sportLabel . '.');
 redirect($return);
 
-function resolveSportScopeLabel(?int $sportId): string
+/**
+ * @param int|list<int>|null $sportFilter
+ */
+function resolveSportScopeLabel($sportFilter): string
 {
-    if (!$sportId) {
+    if ($sportFilter === null || $sportFilter === '' || $sportFilter === []) {
         return 'all events';
     }
 
-    $sportStmt = getDB()->prepare('SELECT name, category FROM intramural_sports WHERE id = ?');
-    $sportStmt->execute([$sportId]);
-    $sportRow = $sportStmt->fetch();
+    $ids = is_array($sportFilter)
+        ? array_values(array_unique(array_filter(array_map('intval', $sportFilter))))
+        : [(int) $sportFilter];
+    $ids = array_values(array_filter($ids, static fn(int $id): bool => $id > 0));
+    if ($ids === []) {
+        return 'all events';
+    }
 
-    return $sportRow ? sportLabel($sportRow) : 'event #' . $sportId;
+    $db = getDB();
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+    $sportStmt = $db->prepare("SELECT name, category FROM intramural_sports WHERE id IN ($placeholders) ORDER BY name, category");
+    $sportStmt->execute($ids);
+    $rows = $sportStmt->fetchAll();
+    if (!$rows) {
+        return count($ids) === 1 ? ('event #' . $ids[0]) : (count($ids) . ' selected events');
+    }
+    if (count($rows) === 1) {
+        return sportLabel($rows[0]);
+    }
+
+    $labels = array_map(static fn($row) => sportLabel($row), $rows);
+    if (count($labels) <= 3) {
+        return implode(', ', $labels);
+    }
+
+    return count($labels) . ' selected events';
 }

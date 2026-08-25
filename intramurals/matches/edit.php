@@ -113,9 +113,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             recalculateVenueGameNumbers((int) $match['season_id']);
         }
 
-        if (in_array($status, ['completed', 'forfeit'], true)) {
-            maybeCancelUnneededDecidingRubber($db, $id);
-        }
+        maybeCancelUnneededDecidingRubber($db, $id);
 
         if (in_array($status, ['completed', 'forfeit'], true)) {
             notifyMatchFinished($id, (string) ($match['status'] ?? ''));

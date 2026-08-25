@@ -3056,18 +3056,46 @@ function generateMatchesForSport(int $sportId, int $seasonId, array $teamIds, ?i
 }
 
 /**
- * Count generated matches for the active season (optionally one event).
+ * Append sport_id / sport_id IN (...) filter for match queries.
+ *
+ * @param int|list<int>|null $sportFilter
  */
-function countGeneratedMatches(int $seasonId, ?int $sportId = null, bool $includeCompleted = false): int
+function appendMatchSportFilter(string &$sql, array &$params, $sportFilter): void
+{
+    if ($sportFilter === null || $sportFilter === '') {
+        return;
+    }
+
+    $ids = is_array($sportFilter)
+        ? array_values(array_unique(array_filter(array_map('intval', $sportFilter))))
+        : [(int) $sportFilter];
+    $ids = array_values(array_filter($ids, static fn(int $id): bool => $id > 0));
+    if ($ids === []) {
+        return;
+    }
+
+    if (count($ids) === 1) {
+        $sql .= ' AND sport_id = ?';
+        $params[] = $ids[0];
+        return;
+    }
+
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+    $sql .= " AND sport_id IN ($placeholders)";
+    $params = array_merge($params, $ids);
+}
+
+/**
+ * Count generated matches for the active season (optionally one or more events).
+ *
+ * @param int|list<int>|null $sportId
+ */
+function countGeneratedMatches(int $seasonId, $sportId = null, bool $includeCompleted = false): int
 {
     $db = getDB();
     $sql = 'SELECT COUNT(*) FROM intramural_matches WHERE season_id = ? AND is_generated = 1';
     $params = [$seasonId];
-
-    if ($sportId) {
-        $sql .= ' AND sport_id = ?';
-        $params[] = $sportId;
-    }
+    appendMatchSportFilter($sql, $params, $sportId);
 
     if (!$includeCompleted) {
         $sql .= " AND status IN ('scheduled', 'cancelled') AND score_a IS NULL AND score_b IS NULL";
@@ -3081,18 +3109,15 @@ function countGeneratedMatches(int $seasonId, ?int $sportId = null, bool $includ
 /**
  * Delete generated fixtures (admin). Manual matches (is_generated = 0) are never removed.
  *
+ * @param int|list<int>|null $sportId
  * @return array{deleted: int, scope: string}
  */
-function deleteGeneratedMatches(int $seasonId, ?int $sportId = null, bool $includeCompleted = false): array
+function deleteGeneratedMatches(int $seasonId, $sportId = null, bool $includeCompleted = false): array
 {
     $db = getDB();
     $sql = 'DELETE FROM intramural_matches WHERE season_id = ? AND is_generated = 1';
     $params = [$seasonId];
-
-    if ($sportId) {
-        $sql .= ' AND sport_id = ?';
-        $params[] = $sportId;
-    }
+    appendMatchSportFilter($sql, $params, $sportId);
 
     if (!$includeCompleted) {
         $sql .= " AND status IN ('scheduled', 'cancelled') AND score_a IS NULL AND score_b IS NULL";
@@ -3116,17 +3141,17 @@ function deleteGeneratedMatchById(int $matchId): bool
     return $stmt->rowCount() > 0;
 }
 
-/** Count all matches for a season (optionally one event). */
-function countSeasonMatches(int $seasonId, ?int $sportId = null): int
+/**
+ * Count all matches for a season (optionally one or more events).
+ *
+ * @param int|list<int>|null $sportId
+ */
+function countSeasonMatches(int $seasonId, $sportId = null): int
 {
     $db = getDB();
     $sql = 'SELECT COUNT(*) FROM intramural_matches WHERE season_id = ?';
     $params = [$seasonId];
-
-    if ($sportId) {
-        $sql .= ' AND sport_id = ?';
-        $params[] = $sportId;
-    }
+    appendMatchSportFilter($sql, $params, $sportId);
 
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
@@ -3136,18 +3161,15 @@ function countSeasonMatches(int $seasonId, ?int $sportId = null): int
 /**
  * Delete all matches for a season (generated and manual).
  *
+ * @param int|list<int>|null $sportId
  * @return array{deleted: int, scope: string}
  */
-function deleteAllMatches(int $seasonId, ?int $sportId = null): array
+function deleteAllMatches(int $seasonId, $sportId = null): array
 {
     $db = getDB();
     $sql = 'DELETE FROM intramural_matches WHERE season_id = ?';
     $params = [$seasonId];
-
-    if ($sportId) {
-        $sql .= ' AND sport_id = ?';
-        $params[] = $sportId;
-    }
+    appendMatchSportFilter($sql, $params, $sportId);
 
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
@@ -4302,9 +4324,27 @@ function isConsolationMatch(array $match): bool
 
 function isChampionshipFinalMatch(array $match): bool
 {
-    $label = strtolower(trim((string) ($match['round_label'] ?? '')));
-    $base = trim(preg_replace('/\s*—\s*SDS.*$/i', '', $label) ?? $label);
-    return ($base === 'final' || str_starts_with($label, 'final')) && !isConsolationMatch($match);
+    if (isConsolationMatch($match)) {
+        return false;
+    }
+
+    $base = strtolower(sdsRubberBaseLabel($match));
+    if ($base === '') {
+        $base = strtolower(trim((string) ($match['round_label'] ?? '')));
+    }
+    $parts = preg_split('/\s*—\s*/u', $base) ?: [$base];
+    $tail = trim((string) end($parts));
+
+    return $tail === 'final' || $tail === 'championship final';
+}
+
+function isThirdPlaceMatch(array $match): bool
+{
+    $label = strtolower((string) ($match['round_label'] ?? ''));
+
+    return str_contains($label, '3rd')
+        || str_contains($label, 'third place')
+        || str_contains($label, '3rd place');
 }
 
 /**
@@ -4420,40 +4460,30 @@ function fillNextRoundFromWinners(PDO $db, array $sourceMatches, array &$targetM
  */
 function collapseSdsTies(array $matches): array
 {
-    $ties = [];
-    $buffer = [];
+    $buckets = [];
+    foreach ($matches as $m) {
+        $label = (string) ($m['round_label'] ?? '');
+        if (stripos($label, 'SDS') === false) {
+            continue;
+        }
+        $teamA = (int) ($m['team_a_id'] ?? 0);
+        $teamB = (int) ($m['team_b_id'] ?? 0);
+        $base = sdsRubberBaseLabel($m);
+        if ($teamA <= 0 || $teamB <= 0 || $base === '') {
+            continue;
+        }
+        $pair = $teamA < $teamB ? $teamA . ':' . $teamB : $teamB . ':' . $teamA;
+        $key = $base . '|' . $pair;
+        $buckets[$key][] = $m;
+    }
 
-    $flush = static function () use (&$ties, &$buffer): void {
-        $result = sdsTieIsDecided($buffer);
+    $ties = [];
+    foreach ($buckets as $group) {
+        $result = sdsTieIsDecided($group);
         if ($result) {
             $ties[] = $result;
         }
-        $buffer = [];
-    };
-
-    $baseLabel = static function (array $m): string {
-        return preg_replace('/\s*—\s*SDS\s+.*$/i', '', (string) ($m['round_label'] ?? '')) ?? '';
-    };
-
-    foreach ($matches as $m) {
-        $label = (string) ($m['round_label'] ?? '');
-        if (!str_contains($label, 'SDS')) {
-            $flush();
-            continue;
-        }
-        if ($buffer && (
-            (int) ($buffer[0]['team_a_id'] ?? 0) !== (int) ($m['team_a_id'] ?? 0)
-            || (int) ($buffer[0]['team_b_id'] ?? 0) !== (int) ($m['team_b_id'] ?? 0)
-            || $baseLabel($buffer[0]) !== $baseLabel($m)
-        )) {
-            $flush();
-        }
-        $buffer[] = $m;
-        if (sdsTieIsDecided($buffer) || count($buffer) >= 3) {
-            $flush();
-        }
     }
-    $flush();
 
     return $ties;
 }
@@ -5434,9 +5464,6 @@ function isSepakTakrawThirdReguDisabled(PDO $db, array $match): bool
     if (!isSepakTakrawThirdReguMatch($match, $db)) {
         return false;
     }
-    if ((string) ($match['status'] ?? '') === 'cancelled') {
-        return true;
-    }
 
     $siblings = getSepakTakrawReguSiblings($db, $match);
 
@@ -5628,13 +5655,121 @@ function isSdsSingles2Disabled(PDO $db, array $match): bool
     if (!isSdsSingles2RubberMatch($match, $db)) {
         return false;
     }
-    if ((string) ($match['status'] ?? '') === 'cancelled') {
-        return true;
-    }
 
     $siblings = getSdsRubberSiblings($db, $match);
 
     return sdsTieDecidedTwoNil($siblings);
+}
+
+function stripAutoCancelledDecidingNote(?string $notes, string $needle): ?string
+{
+    $text = trim((string) $notes);
+    if ($text === '') {
+        return null;
+    }
+    $pattern = '/(?:^|\.\s*)' . preg_quote($needle, '/') . '\.?/iu';
+    $text = trim(preg_replace($pattern, '', $text) ?? $text);
+    $text = trim($text, " \t\n\r\0\x0B.");
+
+    return $text !== '' ? $text : null;
+}
+
+/**
+ * Re-open SDS Singles 2 when Singles 1 / Doubles no longer make the tie 2–0
+ * (e.g. Singles 1 winner was corrected).
+ */
+function maybeRestoreNeededSdsSingles2(PDO $db, int $matchId): int
+{
+    $stmt = $db->prepare('SELECT m.*, s.name AS sport_name, s.tournament_format
+        FROM intramural_matches m
+        JOIN intramural_sports s ON s.id = m.sport_id
+        WHERE m.id = ?');
+    $stmt->execute([$matchId]);
+    $match = $stmt->fetch();
+    if (!$match) {
+        return 0;
+    }
+    $match = enrichMatchWithSport($db, $match);
+    if (!isSdsRubberMatch($match, $db)) {
+        return 0;
+    }
+
+    $siblings = getSdsRubberSiblings($db, $match);
+    $deciding = null;
+    foreach ($siblings as $rubber) {
+        if (isSdsSingles2RubberMatch($rubber, $db)) {
+            $deciding = $rubber;
+            break;
+        }
+    }
+    if (!$deciding || (string) ($deciding['status'] ?? '') !== 'cancelled') {
+        return 0;
+    }
+    if (sdsTieDecidedTwoNil($siblings)) {
+        return 0;
+    }
+    if (in_array((string) ($deciding['status'] ?? ''), ['completed', 'forfeit', 'ongoing'], true)) {
+        return 0;
+    }
+
+    $notes = stripAutoCancelledDecidingNote(
+        $deciding['notes'] ?? null,
+        'Not required — tie decided 2–0 in SDS Singles 1 and Doubles'
+    );
+    $restore = $db->prepare("UPDATE intramural_matches
+        SET status = 'scheduled', score_a = NULL, score_b = NULL, winner_team_id = NULL, forfeit_team_id = NULL, notes = ?
+        WHERE id = ? AND status = 'cancelled'");
+    $restore->execute([$notes, (int) $deciding['id']]);
+    $updated = $restore->rowCount();
+    if ($updated > 0 && !empty($deciding['season_id'])) {
+        recalculateVenueGameNumbers((int) $deciding['season_id']);
+    }
+
+    return $updated;
+}
+
+/**
+ * Re-open 3rd Regu when 1st/2nd Regu no longer make the tie 2–0.
+ */
+function maybeRestoreNeededSepakTakrawRegu(PDO $db, int $matchId): int
+{
+    $stmt = $db->prepare('SELECT m.*, s.name AS sport_name, s.tournament_format
+        FROM intramural_matches m
+        JOIN intramural_sports s ON s.id = m.sport_id
+        WHERE m.id = ?');
+    $stmt->execute([$matchId]);
+    $match = $stmt->fetch();
+    if (!$match) {
+        return 0;
+    }
+    $match = enrichMatchWithSport($db, $match);
+    if (!isSepakTakrawReguMatch($match, $db)) {
+        return 0;
+    }
+
+    $siblings = getSepakTakrawReguSiblings($db, $match);
+    $third = $siblings[2] ?? null;
+    if (!$third || (string) ($third['status'] ?? '') !== 'cancelled') {
+        return 0;
+    }
+    if (reguTieDecidedTwoNil($siblings)) {
+        return 0;
+    }
+
+    $notes = stripAutoCancelledDecidingNote(
+        $third['notes'] ?? null,
+        'Not required — tie decided 2–0 in 1st and 2nd Regu'
+    );
+    $restore = $db->prepare("UPDATE intramural_matches
+        SET status = 'scheduled', score_a = NULL, score_b = NULL, winner_team_id = NULL, forfeit_team_id = NULL, notes = ?
+        WHERE id = ? AND status = 'cancelled'");
+    $restore->execute([$notes, (int) $third['id']]);
+    $updated = $restore->rowCount();
+    if ($updated > 0 && !empty($third['season_id'])) {
+        recalculateVenueGameNumbers((int) $third['season_id']);
+    }
+
+    return $updated;
 }
 
 /** Cancel SDS Singles 2 when Singles 1 and Doubles were both won by the same team. */
@@ -5673,11 +5808,47 @@ function maybeCancelUnneededSdsSingles2(PDO $db, int $matchId): int
     return $cancel->rowCount();
 }
 
-/** Cancel deciding rubbers (Sepak Takraw 3rd Regu / SDS Singles 2) when tie is already 2–0. */
+/** Cancel or restore deciding rubbers (SDS Singles 2 / Sepak 3rd Regu) from current 2–0 state. */
 function maybeCancelUnneededDecidingRubber(PDO $db, int $matchId): int
 {
-    return maybeCancelUnneededSepakTakrawRegu($db, $matchId)
+    return maybeRestoreNeededSdsSingles2($db, $matchId)
+        + maybeRestoreNeededSepakTakrawRegu($db, $matchId)
+        + maybeCancelUnneededSepakTakrawRegu($db, $matchId)
         + maybeCancelUnneededSdsSingles2($db, $matchId);
+}
+
+/**
+ * Re-activate auto-cancelled SDS Singles 2 (and Sepak 3rd Regu) when 2–0 no longer holds.
+ */
+function restoreNeededDecidingRubbersForSeason(int $seasonId, ?int $sportId = null): int
+{
+    if ($seasonId <= 0) {
+        return 0;
+    }
+    $db = getDB();
+    $sql = "SELECT m.id
+        FROM intramural_matches m
+        JOIN intramural_sports s ON s.id = m.sport_id
+        WHERE m.season_id = ?
+          AND m.status = 'cancelled'
+          AND (
+            m.round_label LIKE '%SDS Singles 2%'
+            OR m.round_label LIKE '%3rd Regu%'
+          )";
+    $params = [$seasonId];
+    if ($sportId && $sportId > 0) {
+        $sql .= ' AND m.sport_id = ?';
+        $params[] = $sportId;
+    }
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
+    $updated = 0;
+    foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) ?: [] as $id) {
+        $updated += maybeRestoreNeededSdsSingles2($db, (int) $id);
+        $updated += maybeRestoreNeededSepakTakrawRegu($db, (int) $id);
+    }
+
+    return $updated;
 }
 
 function isDecidingRubberDisabled(PDO $db, array $match): bool
@@ -6352,9 +6523,197 @@ function applyEventPlacement(array &$row, int $rank, array $scheme, bool $manual
 }
 
 /**
+ * SDS / single-elim consolation places from decided team ties (bracket finish).
+ *
+ * Final winner = Champion, Final loser = 1st runner-up.
+ * 3rd-place winner = 3rd, 3rd-place loser = last of that pair (4th in a 4-team draw).
+ *
+ * @param list<array> $matches Completed/forfeit matches for one division
+ * @return array<int, int> team_id => place (1 = champion)
+ */
+function computeSdsConsolationPlaces(array $matches): array
+{
+    $places = [];
+    $assign = static function (int $teamId, int $place) use (&$places): void {
+        if ($teamId > 0 && !isset($places[$teamId])) {
+            $places[$teamId] = $place;
+        }
+    };
+
+    $assignFromOutcome = static function (?array $out, int $winPlace, int $losePlace) use ($assign): void {
+        if (!$out) {
+            return;
+        }
+        $assign((int) $out['winner'], $winPlace);
+        $assign((int) $out['loser'], $losePlace);
+    };
+
+    $hasSds = false;
+    foreach ($matches as $m) {
+        if (stripos((string) ($m['round_label'] ?? ''), 'SDS') !== false) {
+            $hasSds = true;
+            break;
+        }
+    }
+
+    $championship = [];
+    $consolation = [];
+    foreach ($matches as $m) {
+        if (isConsolationMatch($m) || isThirdPlaceMatch($m)) {
+            $consolation[] = $m;
+        } else {
+            $championship[] = $m;
+        }
+    }
+
+    $finalMatches = [];
+    foreach ($championship as $m) {
+        if (isChampionshipFinalMatch($m)) {
+            $finalMatches[] = $m;
+        }
+    }
+    if ($hasSds) {
+        foreach (collapseSdsTies($finalMatches) as $tie) {
+            $assignFromOutcome($tie, 1, 2);
+        }
+    } else {
+        foreach ($finalMatches as $m) {
+            $assignFromOutcome(getMatchOutcome($m), 1, 2);
+        }
+    }
+
+    $thirdMatches = [];
+    $consolationPlain = [];
+    foreach ($consolation as $cm) {
+        if (isThirdPlaceMatch($cm)) {
+            $thirdMatches[] = $cm;
+        } else {
+            $consolationPlain[] = $cm;
+        }
+    }
+    if ($hasSds) {
+        foreach (collapseSdsTies($thirdMatches) as $tie) {
+            $assignFromOutcome($tie, 3, 4);
+        }
+    } else {
+        foreach ($thirdMatches as $m) {
+            $assignFromOutcome(getMatchOutcome($m), 3, 4);
+        }
+    }
+
+    $consolRounds = [];
+    foreach ($consolationPlain as $cm) {
+        $base = sdsRubberBaseLabel($cm);
+        if ($base === '') {
+            $base = trim((string) ($cm['round_label'] ?? 'Consolation'));
+        }
+        $consolRounds[$base][] = $cm;
+    }
+    $roundMeta = [];
+    foreach ($consolRounds as $roundMatches) {
+        $rn = 0;
+        foreach ($roundMatches as $m) {
+            $rn = max($rn, (int) ($m['round_number'] ?? 0));
+        }
+        $roundMeta[] = ['matches' => $roundMatches, 'round_number' => $rn];
+    }
+    usort($roundMeta, static fn(array $a, array $b): int => $b['round_number'] <=> $a['round_number']);
+
+    $nextPlace = 5;
+    foreach ($roundMeta as $round) {
+        $ties = $hasSds ? collapseSdsTies($round['matches']) : [];
+        if (!$hasSds) {
+            foreach ($round['matches'] as $m) {
+                $out = getMatchOutcome($m);
+                if ($out) {
+                    $ties[] = $out;
+                }
+            }
+        }
+        foreach ($ties as $tie) {
+            $winner = (int) ($tie['winner'] ?? 0);
+            $loser = (int) ($tie['loser'] ?? 0);
+            if ($winner > 0 && !isset($places[$winner])) {
+                $assign($winner, $nextPlace++);
+            }
+            if ($loser > 0 && !isset($places[$loser])) {
+                $assign($loser, $nextPlace++);
+            }
+        }
+    }
+
+    return $places;
+}
+
+function matchesHaveConsolationBracketPlaces(array $matches): bool
+{
+    $hasFinal = false;
+    $hasThird = false;
+    foreach ($matches as $m) {
+        if (isChampionshipFinalMatch($m)) {
+            $hasFinal = true;
+        }
+        if (isThirdPlaceMatch($m)) {
+            $hasThird = true;
+        }
+    }
+
+    return $hasFinal && $hasThird;
+}
+
+function usesConsolationBracketRanking(string $format, array $matches): bool
+{
+    if (in_array($format, [
+        'team_play_sds_consolation',
+        'single_elimination_consolation',
+    ], true)) {
+        return true;
+    }
+
+    return matchesHaveConsolationBracketPlaces($matches);
+}
+
+/**
+ * Completed matches that belong to a standings division bucket.
+ *
+ * @param list<array> $matches
+ * @return list<array>
+ */
+function filterMatchesForStandingsDivision(array $matches, int $divKey): array
+{
+    $out = [];
+    foreach ($matches as $m) {
+        $matchDiv = eventRankDivisionKey(
+            isset($m['division_id']) && $m['division_id'] !== '' && $m['division_id'] !== null
+                ? (int) $m['division_id']
+                : null
+        );
+        if ($matchDiv === $divKey) {
+            $out[] = $m;
+            continue;
+        }
+        if ($matchDiv !== 0 || $divKey <= 0) {
+            continue;
+        }
+        $teamA = (int) ($m['team_a_id'] ?? 0);
+        $teamB = (int) ($m['team_b_id'] ?? 0);
+        if (
+            ($teamA > 0 && eventRankDivisionKey(getTeamDivisionId($teamA)) === $divKey)
+            || ($teamB > 0 && eventRankDivisionKey(getTeamDivisionId($teamB)) === $divKey)
+        ) {
+            $out[] = $m;
+        }
+    }
+
+    return $out;
+}
+
+/**
  * Compute standings for a sport (or all sports if sportId is null).
  * Match W/D/L points determine event ranking; placement points come from the sport's point scheme.
  * Tie-breakers: match points → wins → point differential → points for.
+ * Team Play SDS / Single Elimination with Consolation uses bracket finish
+ * (Final → Champion & 1st Runner Up; 3rd-place game → 3rd & last), not score differential.
  */
 function computeSportStandings(?int $sportId = null, ?int $seasonId = null): array
 {
@@ -6503,18 +6862,35 @@ function computeSportStandings(?int $sportId = null, ?int $seasonId = null): arr
             $divId = $divKey > 0 ? $divKey : null;
             // Medals / placement points per division once that division's matches are finished.
             $divFinished = $seasonId ? isEventDivisionFinished($sid, (int) $seasonId, $divId) : false;
-            usort($divRows, static function ($x, $y) {
-                if ($x['points'] !== $y['points']) {
-                    return $y['points'] <=> $x['points'];
-                }
-                if ($x['wins'] !== $y['wins']) {
-                    return $y['wins'] <=> $x['wins'];
-                }
-                if ($x['diff'] !== $y['diff']) {
-                    return $y['diff'] <=> $x['diff'];
-                }
-                return $y['score_for'] <=> $x['score_for'];
-            });
+            $format = (string) ($sport['tournament_format'] ?? '');
+            $divMatches = filterMatchesForStandingsDivision($matches, (int) $divKey);
+            $placeByTeam = [];
+            if (usesConsolationBracketRanking($format, $divMatches)) {
+                $placeByTeam = computeSdsConsolationPlaces($divMatches);
+            }
+            if ($placeByTeam !== []) {
+                usort($divRows, static function ($x, $y) use ($placeByTeam) {
+                    $px = $placeByTeam[(int) $x['team_id']] ?? 1000;
+                    $py = $placeByTeam[(int) $y['team_id']] ?? 1000;
+                    if ($px !== $py) {
+                        return $px <=> $py;
+                    }
+                    return strcasecmp((string) $x['team_name'], (string) $y['team_name']);
+                });
+            } else {
+                usort($divRows, static function ($x, $y) {
+                    if ($x['points'] !== $y['points']) {
+                        return $y['points'] <=> $x['points'];
+                    }
+                    if ($x['wins'] !== $y['wins']) {
+                        return $y['wins'] <=> $x['wins'];
+                    }
+                    if ($x['diff'] !== $y['diff']) {
+                        return $y['diff'] <=> $x['diff'];
+                    }
+                    return $y['score_for'] <=> $x['score_for'];
+                });
+            }
 
             $divManual = [];
             foreach ($divRows as $row) {
@@ -6529,14 +6905,16 @@ function computeSportStandings(?int $sportId = null, ?int $seasonId = null): arr
 
             $rank = 1;
             foreach ($divRows as &$row) {
-                $row['rank'] = $rank++;
+                $tid = (int) $row['team_id'];
+                $bracketPlace = $placeByTeam[$tid] ?? null;
+                $row['rank'] = $bracketPlace ?? $rank;
+                $rank++;
                 $row['medal'] = null;
                 $row['placement_points'] = 0;
                 $row['placement_label'] = null;
                 $row['manual_rank'] = false;
-                // Provisional W/D/L rank still shown; medals & scheme points wait until this division is done.
                 if ($row['played'] > 0 && $divFinished) {
-                    applyEventPlacement($row, $row['rank'], $scheme, false);
+                    applyEventPlacement($row, (int) $row['rank'], $scheme, false);
                 }
             }
             unset($row);
@@ -7533,8 +7911,8 @@ function matchScheduleSqlOrderClause(string $sort): string
 {
     if ($sort === 'game_number') {
         return '(m.scheduled_at IS NULL) ASC,
+            COALESCE(NULLIF(TRIM(m.venue), \'\'), NULLIF(TRIM(s.venue), \'\'), \'zzz\') ASC,
             DATE(m.scheduled_at) ASC,
-            COALESCE(NULLIF(TRIM(m.venue), \'\'), NULLIF(TRIM(s.venue), \'\')) ASC,
             (m.game_number IS NULL) ASC,
             m.game_number ASC,
             m.scheduled_at ASC,
@@ -7573,7 +7951,7 @@ function groupMatchesByVenueDaySchedule(array $matches): array
         $day = date('Y-m-d', strtotime((string) $m['scheduled_at']));
         $venue = trim((string) ($m['effective_venue'] ?? $m['venue'] ?? ''));
         $venueKey = normalizeVenueKey($venue);
-        $key = $day . '|' . $venueKey;
+        $key = $venueKey . '|' . $day;
         if (!isset($groups[$key])) {
             $groups[$key] = [
                 'group_key' => $key,
@@ -7593,8 +7971,44 @@ function groupMatchesByVenueDaySchedule(array $matches): array
             $unscheduled = $groups[$key];
             continue;
         }
-        $result[] = $groups[$key];
+        $g = $groups[$key];
+        usort($g['matches'], static function (array $a, array $b): int {
+            $ga = (int) ($a['game_number'] ?? 0);
+            $gb = (int) ($b['game_number'] ?? 0);
+            if ($ga !== $gb) {
+                if ($ga === 0) {
+                    return 1;
+                }
+                if ($gb === 0) {
+                    return -1;
+                }
+                return $ga <=> $gb;
+            }
+            $ta = (string) ($a['scheduled_at'] ?? '');
+            $tb = (string) ($b['scheduled_at'] ?? '');
+            if ($ta !== $tb) {
+                return $ta <=> $tb;
+            }
+            return ((int) ($a['id'] ?? 0)) <=> ((int) ($b['id'] ?? 0));
+        });
+        $result[] = $g;
     }
+
+    usort($result, static function (array $a, array $b): int {
+        $va = strtolower((string) ($a['venue_label'] ?? ''));
+        $vb = strtolower((string) ($b['venue_label'] ?? ''));
+        if ($va === 'venue tbd') {
+            $va = 'zzz';
+        }
+        if ($vb === 'venue tbd') {
+            $vb = 'zzz';
+        }
+        if ($va !== $vb) {
+            return $va <=> $vb;
+        }
+        return strcmp((string) ($a['day'] ?? ''), (string) ($b['day'] ?? ''));
+    });
+
     if ($unscheduled !== null) {
         $result[] = $unscheduled;
     }
