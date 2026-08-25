@@ -47,8 +47,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $venue = post('venue');
     $referee = post('referee_name');
     $notes = post('notes', $match['notes'] ?? '');
-    $teamA = (int) post('team_a_id') ?: null;
-    $teamB = (int) post('team_b_id') ?: null;
+    $teamA = isset($_POST['team_a_id']) ? ((int) post('team_a_id') ?: null) : ((int) ($match['team_a_id'] ?? 0) ?: null);
+    $teamB = isset($_POST['team_b_id']) ? ((int) post('team_b_id') ?: null) : ((int) ($match['team_b_id'] ?? 0) ?: null);
     $clearSchedule = post('clear_schedule') === '1';
 
     if (!$clearSchedule && $scheduledAt === '') {
@@ -60,14 +60,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = 'Teams must be different.';
     }
 
-    // Keep existing teams if tabulator doesn't change TBD slots
-    if ($isTabulator) {
-        if ($match['team_a_id']) {
-            $teamA = (int) $match['team_a_id'];
-        }
-        if ($match['team_b_id']) {
-            $teamB = (int) $match['team_b_id'];
-        }
+    // Reschedule only posts team fields when a side is still TBD. Admin (and
+    // anyone else) must not wipe houses that are already assigned.
+    if (!empty($match['team_a_id'])) {
+        $teamA = (int) $match['team_a_id'];
+    }
+    if (!empty($match['team_b_id'])) {
+        $teamB = (int) $match['team_b_id'];
     }
 
     if (empty($errors)) {
@@ -139,6 +138,10 @@ require __DIR__ . '/../_season_bar.php';
 
     <form method="POST">
         <?= csrfField() ?>
+        <?php if (!empty($match['team_a_id']) && !empty($match['team_b_id'])): ?>
+        <input type="hidden" name="team_a_id" value="<?= (int) $match['team_a_id'] ?>">
+        <input type="hidden" name="team_b_id" value="<?= (int) $match['team_b_id'] ?>">
+        <?php endif; ?>
         <div class="row g-3">
             <div class="col-md-6">
                 <label class="form-label">Date &amp; Time *</label>

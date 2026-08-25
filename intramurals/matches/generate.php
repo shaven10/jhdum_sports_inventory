@@ -329,15 +329,8 @@ foreach ($selectedSportIds as $sid) {
             $slotMap[$letter] = $baseTeamIds[$i] ?? null;
         }
     } elseif ($teamMode === 'division') {
-        // Prefer roster teams when available; otherwise all eligible division teams
-        $baseTeamIds = [];
-        if ($seasonId) {
-            $regTeamsStmt->execute([$sid, $seasonId]);
-            $baseTeamIds = array_map('intval', $regTeamsStmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
-        }
-        if (count($baseTeamIds) < 2) {
-            $baseTeamIds = getTeamIdsEligibleForSport($sid);
-        }
+        // All houses that may play this event — do not shrink to a partial roster.
+        $baseTeamIds = getTeamIdsEligibleForSport($sid);
         if ($fixedDivisionId > 0) {
             $baseTeamIds = array_values(array_intersect($baseTeamIds, getTeamIdsInDivision($fixedDivisionId)));
         } elseif ($divisionFilter === 'none') {
@@ -349,13 +342,13 @@ foreach ($selectedSportIds as $sid) {
     }
 
     $groups = [];
-    $shouldSplitDivisions = ($divisionFilter === 'all' && !empty($divisions));
+    $shouldSplitDivisions = in_array($teamMode, ['division', 'roster'], true)
+        && $divisionFilter === 'all'
+        && !empty($divisions);
     $rosterCandidateIds = null;
-    if ($teamMode === 'division' || $teamMode === 'roster') {
-        if ($seasonId) {
-            $regTeamsStmt->execute([$sid, $seasonId]);
-            $rosterCandidateIds = array_map('intval', $regTeamsStmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
-        }
+    if ($teamMode === 'roster' && $seasonId) {
+        $regTeamsStmt->execute([$sid, $seasonId]);
+        $rosterCandidateIds = array_map('intval', $regTeamsStmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
     }
     if ($shouldSplitDivisions) {
         $groups = buildSportDivisionGroups($sid, (int) ($seasonId ?: 0), $rosterCandidateIds);
@@ -508,9 +501,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && post('action') === 'generate') {
             'daily_end_hour' => $scheduleHours['daily_end_hour'],
             'smart_venue' => post('smart_venue') === '1',
             'boards_by_sport' => $chessBoardsBySport,
-            'group_by_division' => $divisionFilter === 'all' && !empty($divisions),
+            'group_by_division' => in_array($teamMode, ['division', 'roster'], true)
+                && $divisionFilter === 'all'
+                && !empty($divisions),
             'division_filter' => $divisionFilter,
             'division_id' => $fixedDivisionId > 0 ? $fixedDivisionId : null,
+            'use_roster_teams' => $teamMode === 'roster',
+            'team_mode' => $teamMode,
         ];
         $result = generateMatchesForSports($selectedSportIds, $seasonId, $shared, (int) $_SESSION['user_id'], $replace, $perSport, $scheduleOptions);
 
@@ -691,7 +688,7 @@ $renderSlotSelects = static function (string $namePrefix, array $slotMap, array 
                         <?php if (!empty($divisions)): ?>
                         <div class="form-check">
                             <input class="form-check-input" type="radio" name="team_mode" id="modeDivision" value="division" <?= $teamMode === 'division' ? 'checked' : '' ?> onchange="toggleTeamMode()">
-                            <label class="form-check-label" for="modeDivision"><strong>Teams by division (recommended)</strong> — auto-build separate brackets per division</label>
+                            <label class="form-check-label" for="modeDivision"><strong>Teams by division (recommended)</strong> — every house in the division, in Team 1…N order (not limited to who already has a roster)</label>
                         </div>
                         <?php endif; ?>
                         <div class="form-check">
@@ -711,7 +708,7 @@ $renderSlotSelects = static function (string $namePrefix, array $slotMap, array 
                     <div class="mb-3" id="divisionTeamsHint" style="display:none">
                         <div class="alert alert-info py-2 mb-0">
                             <i class="bi bi-diagram-3"></i>
-                            Fixtures will use each division’s teams in the <strong>Team 1…N order</strong> set under Admin → Team Positions (N = teams in that division). Round labels include the division name.
+                            Fixtures use <strong>every house</strong> assigned to the division for this event, in the <strong>Team 1…N order</strong> from Admin → Team Positions. A partial baseball (or other) roster no longer drops houses from the bracket. Round labels include the division name.
                         </div>
                     </div>
 

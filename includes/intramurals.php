@@ -929,8 +929,10 @@ function groupEligibleTeamsByDivisionForSport(int $sportId, ?array $candidateTea
 
 /**
  * Build per-division team groups for match generation.
- * Includes every active division that has this event enabled, using all eligible
- * division teams (optionally narrowed to roster when enough are registered).
+ * Includes every active division that has this event enabled.
+ * Pass null $candidateTeamIds to use every eligible house in the division.
+ * Pass roster IDs only when generating from the season roster (narrows a
+ * division when at least 2 of those teams belong to it).
  *
  * @param list<int>|null $candidateTeamIds Season roster or other filter; null = all division teams
  * @return list<array{division_id: ?int, division_name: string, team_ids: list<int>}>
@@ -998,7 +1000,9 @@ function buildSportDivisionGroups(int $sportId, int $seasonId = 0, ?array $candi
 }
 
 /**
- * Resolve team IDs for one division + event (roster when enough registered, else all division teams).
+ * Resolve team IDs for one division + event.
+ * Null candidates → every eligible house in the division. Roster IDs are used
+ * only when at least two of them belong to the division; otherwise all division teams.
  *
  * @return list<int>
  */
@@ -1321,27 +1325,82 @@ function buildTournamentFixtures(string $format, array $teamIds): array
 }
 
 /**
+ * Circle-method round robin: each team plays once per round, and round 1 is
+ * Team 1 vs Team 2, Team 3 vs Team 4, … (saved event-position order).
+ *
+ * The old nested loop dumped every pairing as Round 1 (1v2, 1v3, 1v4…), so the
+ * same house could be scheduled for several games in a row — unusable for long
+ * events such as baseball.
+ *
  * @param list<int> $teamIds
  * @return list<array<string, mixed>>
  */
 function buildRoundRobinFixtures(array $teamIds, string $roundLabel = 'Round Robin'): array
 {
+    $teams = array_values($teamIds);
+    $n = count($teams);
+    if ($n < 2) {
+        return [];
+    }
+    if ($n === 2) {
+        return [[
+            'team_a_id' => $teams[0],
+            'team_b_id' => $teams[1],
+            'round_number' => 1,
+            'round_label' => $roundLabel . ' — Round 1',
+            'match_order' => 1,
+            'notes' => null,
+        ]];
+    }
+
+    $rotation = $teams;
+    if ($n % 2 === 1) {
+        $rotation[] = null;
+    }
+    $size = count($rotation);
+
+    // Place Team 1 vs Team 2, Team 3 vs Team 4, … in round 1.
+    $odds = [];
+    $evens = [];
+    for ($i = 0; $i < $size; $i++) {
+        if ($i % 2 === 0) {
+            $odds[] = $rotation[$i];
+        } else {
+            $evens[] = $rotation[$i];
+        }
+    }
+    $rotation = array_merge($odds, array_reverse($evens));
+
+    $rounds = $size - 1;
+    $half = (int) ($size / 2);
     $fixtures = [];
-    $n = count($teamIds);
     $order = 0;
-    for ($i = 0; $i < $n; $i++) {
-        for ($j = $i + 1; $j < $n; $j++) {
+
+    for ($round = 1; $round <= $rounds; $round++) {
+        for ($i = 0; $i < $half; $i++) {
+            $a = $rotation[$i];
+            $b = $rotation[$size - 1 - $i];
+            if ($a === null || $b === null) {
+                continue;
+            }
             $order++;
             $fixtures[] = [
-                'team_a_id' => $teamIds[$i],
-                'team_b_id' => $teamIds[$j],
-                'round_number' => 1,
-                'round_label' => $roundLabel,
+                'team_a_id' => $a,
+                'team_b_id' => $b,
+                'round_number' => $round,
+                'round_label' => $roundLabel . ' — Round ' . $round,
                 'match_order' => $order,
                 'notes' => null,
             ];
         }
+
+        $fixed = $rotation[0];
+        $rest = array_slice($rotation, 1);
+        $last = array_pop($rest);
+        array_unshift($rest, $last);
+        $rotation = array_merge([$fixed], $rest);
     }
+
     return $fixtures;
 }
 
@@ -3148,6 +3207,7 @@ function generateMatchesForSports(array $sportIds, int $seasonId, ?array $shared
     $groupByDivision = !empty($scheduleOptions['group_by_division']);
     $divisionFilter = (string) ($scheduleOptions['division_filter'] ?? '');
     $fixedDivisionId = isset($scheduleOptions['division_id']) ? (int) $scheduleOptions['division_id'] : 0;
+    $useRosterTeams = !empty($scheduleOptions['use_roster_teams']);
     $scheduleWindow = buildScheduleWindow($startDate, $endDate, $scheduleOptions ?? []);
     $scheduleCursor = getScheduleGenerationCursor($scheduleWindow);
 
@@ -3165,13 +3225,18 @@ function generateMatchesForSports(array $sportIds, int $seasonId, ?array $shared
         }
         $sportsById[$sportId] = $sport;
 
+        $explicitTeams = false;
         if ($teamsBySport !== null && isset($teamsBySport[$sportId])) {
             $teamIds = array_values(array_unique(array_map('intval', $teamsBySport[$sportId])));
+            $explicitTeams = true;
         } elseif ($sharedTeamIds !== null) {
             $teamIds = array_values(array_unique(array_map('intval', $sharedTeamIds)));
-        } else {
+            $explicitTeams = true;
+        } elseif ($useRosterTeams) {
             $regTeamsStmt->execute([$sportId, $seasonId]);
             $teamIds = array_map('intval', $regTeamsStmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
+        } else {
+            $teamIds = getTeamIdsEligibleForSport($sportId);
         }
 
         $teamIds = array_values(array_filter(
@@ -3179,13 +3244,17 @@ function generateMatchesForSports(array $sportIds, int $seasonId, ?array $shared
             static fn(int $tid): bool => teamCanPlaySport($tid, $sportId)
         ));
 
+        // Division mode: null candidates → every house in the division.
+        // Roster / explicit slots: pass those IDs so groups can narrow.
+        $groupCandidates = ($useRosterTeams || $explicitTeams) ? $teamIds : null;
+
         $groups = [];
         if ($groupByDivision) {
             if ($divisionFilter === 'none') {
-                $ids = resolveDivisionSportTeamIds($sportId, null, $seasonId, $teamIds);
+                $ids = resolveDivisionSportTeamIds($sportId, null, $seasonId, $groupCandidates);
                 $groups[] = ['division_id' => null, 'division_name' => 'Unassigned', 'team_ids' => $ids];
             } elseif ($fixedDivisionId > 0) {
-                $ids = resolveDivisionSportTeamIds($sportId, $fixedDivisionId, $seasonId, $teamIds);
+                $ids = resolveDivisionSportTeamIds($sportId, $fixedDivisionId, $seasonId, $groupCandidates);
                 $div = getDivisionById($fixedDivisionId);
                 $groups[] = [
                     'division_id' => $fixedDivisionId,
@@ -3193,15 +3262,21 @@ function generateMatchesForSports(array $sportIds, int $seasonId, ?array $shared
                     'team_ids' => $ids,
                 ];
             } else {
-                foreach (buildSportDivisionGroups($sportId, $seasonId, $teamIds) as $g) {
+                foreach (buildSportDivisionGroups($sportId, $seasonId, $groupCandidates) as $g) {
                     $groups[] = $g;
                 }
             }
         } else {
-            if ($divisionFilter === 'none') {
-                $teamIds = array_values(array_intersect($teamIds, getTeamIdsInDivision(null)));
+            if ($explicitTeams) {
+                if ($divisionFilter === 'none') {
+                    $teamIds = array_values(array_intersect($teamIds, getTeamIdsInDivision(null)));
+                } elseif ($fixedDivisionId > 0) {
+                    $teamIds = array_values(array_intersect($teamIds, getTeamIdsInDivision($fixedDivisionId)));
+                }
+            } elseif ($divisionFilter === 'none') {
+                $teamIds = resolveDivisionSportTeamIds($sportId, null, $seasonId, $groupCandidates);
             } elseif ($fixedDivisionId > 0) {
-                $teamIds = array_values(array_intersect($teamIds, getTeamIdsInDivision($fixedDivisionId)));
+                $teamIds = resolveDivisionSportTeamIds($sportId, $fixedDivisionId, $seasonId, $groupCandidates);
             }
             $divName = '';
             $divId = null;
