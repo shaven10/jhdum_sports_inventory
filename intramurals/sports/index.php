@@ -461,6 +461,11 @@ require __DIR__ . '/../_season_bar.php';
                                 first-round-loser and 3rd-place SDS ties (championship Final last).
                                 Recommended for Badminton, Table Tennis, and Lawn Tennis.
                             </div>
+                            <div class="form-text" id="sepakFormatHint" style="display:none">
+                                <strong>Sepak Takraw</strong> — use Single Elimination with Consolation.
+                                Each team tie is 1st, 2nd, and 3rd Regu (best of 3).
+                                Final winner = Champion, Final loser = 1st Runner Up; consolation winner = 3rd, loser = 4th.
+                            </div>
                             <div class="form-text" id="modifiedConsolationHint" style="display:none">
                                 <strong>Modified Single Elimination w Consolation</strong> — 4 teams only.
                                 Game 1: Team 1 vs Team 2. Game 2: Team 3 vs Team 4.
@@ -496,6 +501,7 @@ require __DIR__ . '/../_season_bar.php';
     const nameInput = document.getElementById('sportNameInput');
     const formatSelect = document.getElementById('tournamentFormatSelect');
     const sdsHint = document.getElementById('sdsFormatHint');
+    const sepakHint = document.getElementById('sepakFormatHint');
     const modifiedConsolationHint = document.getElementById('modifiedConsolationHint');
     const copyNotice = document.getElementById('sportCopyNotice');
     const guidelinesInput = document.getElementById('sportGuidelines');
@@ -558,12 +564,21 @@ require __DIR__ . '/../_season_bar.php';
         const name = (nameInput.value || '').trim();
         const isRacket = racketSports.some(function (s) { return s.toLowerCase() === name.toLowerCase(); });
         const isSds = formatSelect.value === 'team_play_sds' || formatSelect.value === 'team_play_sds_consolation';
+        const isSepak = /sepak/i.test(name);
         const isModifiedConsolation = formatSelect.value === 'modified_single_elimination_consolation';
         if (sdsHint) sdsHint.style.display = isSds ? '' : 'none';
+        if (sepakHint) sepakHint.style.display = isSepak ? '' : 'none';
         if (modifiedConsolationHint) modifiedConsolationHint.style.display = isModifiedConsolation ? '' : 'none';
         if (allowAutoSds && isRacket && formatSelect.value === 'round_robin') {
             formatSelect.value = 'team_play_sds';
             if (sdsHint) sdsHint.style.display = '';
+            if (sepakHint) sepakHint.style.display = 'none';
+            if (modifiedConsolationHint) modifiedConsolationHint.style.display = 'none';
+        }
+        if (allowAutoSds && isSepak && formatSelect.value === 'round_robin') {
+            formatSelect.value = 'single_elimination_consolation';
+            if (sepakHint) sepakHint.style.display = '';
+            if (sdsHint) sdsHint.style.display = 'none';
             if (modifiedConsolationHint) modifiedConsolationHint.style.display = 'none';
         }
     }

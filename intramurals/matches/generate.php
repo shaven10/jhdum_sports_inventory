@@ -588,6 +588,7 @@ $renderSlotSelects = static function (string $namePrefix, array $slotMap, array 
     SDS with consolation generates championship ties first, then consolation / 3rd-place SDS ties, with the championship Final last.
     Each SDS tie is Singles 1, Doubles, then Singles 2 (best of 3). Singles 2 is disabled automatically if one team wins Singles 1 and Doubles; it is played only if the first two rubbers split 1–1.
     Sepak Takraw elimination events expand each team tie into 1st, 2nd, and 3rd Regu (best of 3; the 3rd Regu is disabled automatically if one team wins the first two).
+    For Sepak consolation ranking, the Final winner is Champion, the Final loser is 1st Runner Up, the consolation winner is 3rd, and the consolation loser is 4th.
 </div>
 
 <?php if ($scheduleStartDate && $scheduleEndDate): ?>

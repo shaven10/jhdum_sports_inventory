@@ -1184,7 +1184,7 @@ function intramuralSportDefinitions(): array
         ['name' => 'Basketball 5x5', 'description' => '5-on-5 basketball', 'scoring_method' => 'points', 'scheme' => 'Major Team Sports', 'win_points' => 3, 'players_per_event' => 12, 'tournament_format' => 'round_robin', 'format_notes' => null],
         ['name' => 'Basketball 3x3', 'description' => '3-on-3 basketball', 'scoring_method' => 'points', 'scheme' => 'Major Team Sports', 'win_points' => 3, 'players_per_event' => 4, 'tournament_format' => 'round_robin', 'format_notes' => null],
         ['name' => 'Volleyball', 'description' => 'Indoor volleyball', 'scoring_method' => 'sets', 'scheme' => 'Major Team Sports', 'win_points' => 3, 'players_per_event' => 12, 'tournament_format' => 'round_robin', 'format_notes' => null],
-        ['name' => 'Sepak Takraw', 'description' => 'Sepak takraw tournament', 'scoring_method' => 'sets', 'scheme' => 'Major Team Sports', 'win_points' => 3, 'players_per_event' => 6, 'tournament_format' => 'round_robin', 'format_notes' => null],
+        ['name' => 'Sepak Takraw', 'description' => 'Sepak takraw tournament', 'scoring_method' => 'sets', 'scheme' => 'Major Team Sports', 'win_points' => 3, 'players_per_event' => 6, 'tournament_format' => 'single_elimination_consolation', 'format_notes' => 'Single elimination with consolation. Each team tie is 1st, 2nd, and 3rd Regu (best of 3). Final winner = Champion, Final loser = 1st Runner Up; consolation winner = 3rd, loser = 4th.'],
         ['name' => 'MLBB/CODM', 'description' => 'Mobile Legends / Call of Duty Mobile', 'scoring_method' => 'games', 'scheme' => 'Major Team Sports', 'win_points' => 3, 'players_per_event' => 5, 'tournament_format' => 'round_robin', 'format_notes' => null],
         ['name' => 'Badminton', 'description' => 'Badminton singles/doubles', 'scoring_method' => 'games', 'scheme' => 'Racket & Dance Sports', 'win_points' => 3, 'players_per_event' => 6, 'tournament_format' => 'team_play_sds', 'format_notes' => $sdsNotes],
         ['name' => 'Table Tennis', 'description' => 'Table tennis', 'scoring_method' => 'games', 'scheme' => 'Racket & Dance Sports', 'win_points' => 3, 'players_per_event' => 4, 'tournament_format' => 'team_play_sds', 'format_notes' => $sdsNotes],
@@ -4322,13 +4322,21 @@ function isConsolationMatch(array $match): bool
     return str_contains($label, 'consolation');
 }
 
+/** Strip SDS rubber or Sepak regu suffix so championship / consolation rounds compare as team ties. */
+function bracketTieBaseLabel(array $match): string
+{
+    return sepakTakrawReguBaseLabel([
+        'round_label' => sdsRubberBaseLabel($match),
+    ]);
+}
+
 function isChampionshipFinalMatch(array $match): bool
 {
     if (isConsolationMatch($match)) {
         return false;
     }
 
-    $base = strtolower(sdsRubberBaseLabel($match));
+    $base = strtolower(bracketTieBaseLabel($match));
     if ($base === '') {
         $base = strtolower(trim((string) ($match['round_label'] ?? '')));
     }
@@ -4340,11 +4348,14 @@ function isChampionshipFinalMatch(array $match): bool
 
 function isThirdPlaceMatch(array $match): bool
 {
-    $label = strtolower((string) ($match['round_label'] ?? ''));
+    $base = strtolower(bracketTieBaseLabel($match));
+    if ($base === '') {
+        $base = strtolower(trim((string) ($match['round_label'] ?? '')));
+    }
 
-    return str_contains($label, '3rd')
-        || str_contains($label, 'third place')
-        || str_contains($label, '3rd place');
+    return str_contains($base, '3rd place')
+        || str_contains($base, 'third place')
+        || str_contains($base, 'consolation final');
 }
 
 /**
@@ -4979,40 +4990,37 @@ function reguTieIsDecided(array $reguMatches): ?array
  */
 function collapseReguTies(array $matches): array
 {
-    $ties = [];
-    $buffer = [];
-
-    $flush = static function () use (&$ties, &$buffer): void {
-        $result = reguTieIsDecided($buffer);
-        if ($result) {
-            $ties[] = $result;
-        }
-        $buffer = [];
-    };
-
-    $baseLabel = static function (array $m): string {
-        return preg_replace('/\s*—\s*\d+(?:st|nd|rd)\s+Regu.*$/i', '', (string) ($m['round_label'] ?? '')) ?? '';
-    };
-
+    $buckets = [];
     foreach ($matches as $m) {
         $label = (string) ($m['round_label'] ?? '');
         if (!preg_match('/\bRegu\b/i', $label)) {
-            $flush();
             continue;
         }
-        if ($buffer && (
-            (int) ($buffer[0]['team_a_id'] ?? 0) !== (int) ($m['team_a_id'] ?? 0)
-            || (int) ($buffer[0]['team_b_id'] ?? 0) !== (int) ($m['team_b_id'] ?? 0)
-            || $baseLabel($buffer[0]) !== $baseLabel($m)
-        )) {
-            $flush();
+        $teamA = (int) ($m['team_a_id'] ?? 0);
+        $teamB = (int) ($m['team_b_id'] ?? 0);
+        $base = sepakTakrawReguBaseLabel($m);
+        if ($teamA <= 0 || $teamB <= 0 || $base === '') {
+            continue;
         }
-        $buffer[] = $m;
-        if (reguTieIsDecided($buffer) || count($buffer) >= 3) {
-            $flush();
+        $pair = $teamA < $teamB ? $teamA . ':' . $teamB : $teamB . ':' . $teamA;
+        $key = $base . '|' . $pair;
+        $buckets[$key][] = $m;
+    }
+
+    $ties = [];
+    foreach ($buckets as $group) {
+        usort($group, static fn(array $a, array $b): int => ((int) ($a['match_order'] ?? 0)) <=> ((int) ($b['match_order'] ?? 0)));
+        $result = reguTieIsDecided($group);
+        if ($result) {
+            $result['_order'] = (int) ($group[0]['match_order'] ?? 0);
+            $ties[] = $result;
         }
     }
-    $flush();
+    usort($ties, static fn(array $a, array $b): int => ((int) ($a['_order'] ?? 0)) <=> ((int) ($b['_order'] ?? 0)));
+    foreach ($ties as &$tie) {
+        unset($tie['_order']);
+    }
+    unset($tie);
 
     return $ties;
 }
@@ -6165,6 +6173,17 @@ function getPlacementLabel(int $rank): string
     return placementLabels()[$rank] ?? ('Rank ' . $rank);
 }
 
+function sepakConsolationPlacementLabel(int $rank): string
+{
+    return match ($rank) {
+        1 => 'Champion',
+        2 => '1st Runner Up',
+        3 => '3rd Place',
+        4 => '4th Place',
+        default => getPlacementLabel($rank),
+    };
+}
+
 function formatSchemePoints(array $scheme): string
 {
     return implode('/', [
@@ -6549,12 +6568,34 @@ function computeSdsConsolationPlaces(array $matches): array
     };
 
     $hasSds = false;
+    $hasRegu = false;
     foreach ($matches as $m) {
-        if (stripos((string) ($m['round_label'] ?? ''), 'SDS') !== false) {
+        $label = (string) ($m['round_label'] ?? '');
+        if (stripos($label, 'SDS') !== false) {
             $hasSds = true;
-            break;
+        }
+        if (preg_match('/\bRegu\b/i', $label)) {
+            $hasRegu = true;
         }
     }
+
+    $collapseTies = static function (array $group) use ($hasSds, $hasRegu): array {
+        if ($hasSds) {
+            return collapseSdsTies($group);
+        }
+        if ($hasRegu) {
+            return collapseReguTies($group);
+        }
+        $ties = [];
+        foreach ($group as $m) {
+            $out = getMatchOutcome($m);
+            if ($out) {
+                $ties[] = $out;
+            }
+        }
+
+        return $ties;
+    };
 
     $championship = [];
     $consolation = [];
@@ -6572,14 +6613,8 @@ function computeSdsConsolationPlaces(array $matches): array
             $finalMatches[] = $m;
         }
     }
-    if ($hasSds) {
-        foreach (collapseSdsTies($finalMatches) as $tie) {
-            $assignFromOutcome($tie, 1, 2);
-        }
-    } else {
-        foreach ($finalMatches as $m) {
-            $assignFromOutcome(getMatchOutcome($m), 1, 2);
-        }
+    foreach ($collapseTies($finalMatches) as $tie) {
+        $assignFromOutcome($tie, 1, 2);
     }
 
     $thirdMatches = [];
@@ -6591,19 +6626,13 @@ function computeSdsConsolationPlaces(array $matches): array
             $consolationPlain[] = $cm;
         }
     }
-    if ($hasSds) {
-        foreach (collapseSdsTies($thirdMatches) as $tie) {
-            $assignFromOutcome($tie, 3, 4);
-        }
-    } else {
-        foreach ($thirdMatches as $m) {
-            $assignFromOutcome(getMatchOutcome($m), 3, 4);
-        }
+    foreach ($collapseTies($thirdMatches) as $tie) {
+        $assignFromOutcome($tie, 3, 4);
     }
 
     $consolRounds = [];
     foreach ($consolationPlain as $cm) {
-        $base = sdsRubberBaseLabel($cm);
+        $base = bracketTieBaseLabel($cm);
         if ($base === '') {
             $base = trim((string) ($cm['round_label'] ?? 'Consolation'));
         }
@@ -6621,16 +6650,7 @@ function computeSdsConsolationPlaces(array $matches): array
 
     $nextPlace = 5;
     foreach ($roundMeta as $round) {
-        $ties = $hasSds ? collapseSdsTies($round['matches']) : [];
-        if (!$hasSds) {
-            foreach ($round['matches'] as $m) {
-                $out = getMatchOutcome($m);
-                if ($out) {
-                    $ties[] = $out;
-                }
-            }
-        }
-        foreach ($ties as $tie) {
+        foreach ($collapseTies($round['matches']) as $tie) {
             $winner = (int) ($tie['winner'] ?? 0);
             $loser = (int) ($tie['loser'] ?? 0);
             if ($winner > 0 && !isset($places[$winner])) {
@@ -6915,6 +6935,9 @@ function computeSportStandings(?int $sportId = null, ?int $seasonId = null): arr
                 $row['manual_rank'] = false;
                 if ($row['played'] > 0 && $divFinished) {
                     applyEventPlacement($row, (int) $row['rank'], $scheme, false);
+                    if (isSepakTakrawSport((string) ($sport['name'] ?? '')) && $placeByTeam !== []) {
+                        $row['placement_label'] = sepakConsolationPlacementLabel((int) $row['rank']);
+                    }
                 }
             }
             unset($row);

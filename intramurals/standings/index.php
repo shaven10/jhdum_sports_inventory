@@ -106,9 +106,10 @@ require __DIR__ . '/../_season_bar.php';
     <?php
     $standingsFormat = (string) ($block['sport']['tournament_format'] ?? '');
     $useBracketNote = in_array($standingsFormat, ['team_play_sds_consolation', 'single_elimination_consolation', 'team_play_sds'], true);
+    $isSepakStandings = isSepakTakrawSport((string) ($block['sport']['name'] ?? ''));
     ?>
-    <?php if ($useBracketNote): ?>
-    · Ranking follows Single Elimination with Consolation placement: Final winner = Champion, Final loser = 1st Runner Up; 3rd-place winner = 3rd, loser = last
+    <?php if ($isSepakStandings || $useBracketNote): ?>
+    · Ranking: Final winner = Champion, Final loser = 1st Runner Up; consolation winner = 3rd, consolation loser = 4th. 3-regu / SDS ties count as one team result.
     <?php endif; ?>
 </div>
 
