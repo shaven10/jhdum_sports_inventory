@@ -5,52 +5,79 @@ requireStandingsAccess();
 
 $db = getDB();
 $seasonId = getCurrentSeasonId();
-$sportId = (int) get('sport');
+$sportParam = get('sport');
+$sportId = ($sportParam !== '' && $sportParam !== null) ? (int) $sportParam : 0;
+$showAllSports = $sportId === 0;
 $export = get('export');
 $sports = filterSportsForUser($db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll());
 
-if (!$sportId && $sports) {
-    $sportId = (int) $sports[0]['id'];
-} elseif ($sportId && !canViewEvent($sportId)) {
+if ($sportId && !canViewEvent($sportId)) {
     flash('error', 'You do not have permission to view standings for this event.');
     redirect(BASE_URL . '/intramurals/standings/index.php');
 }
 
-$blocks = $sportId ? computeSportStandings($sportId) : [];
-$block = $blocks[$sportId] ?? null;
-$divisionBlocks = $block['divisions'] ?? [];
-if ($block && $divisionBlocks === [] && !empty($block['standings'])) {
-    $divisionBlocks = [[
-        'division_id' => null,
-        'division_key' => 0,
-        'division_name' => 'All teams',
-        'standings' => $block['standings'],
-        'manual_ranks' => !empty($block['manual_ranks']),
-    ]];
+$normalizeDivisionBlocks = static function (array $block): array {
+    $divisionBlocks = $block['divisions'] ?? [];
+    if ($divisionBlocks === [] && !empty($block['standings'])) {
+        return [[
+            'division_id' => null,
+            'division_key' => 0,
+            'division_name' => 'All teams',
+            'standings' => $block['standings'],
+            'manual_ranks' => !empty($block['manual_ranks']),
+        ]];
+    }
+    return $divisionBlocks;
+};
+
+$sportBlocks = [];
+if ($showAllSports) {
+    $computed = computeSportStandings(null);
+    $allowedIds = array_flip(array_map('intval', array_column($sports, 'id')));
+    $computed = array_intersect_key($computed, $allowedIds);
+    foreach ($sports as $s) {
+        $sid = (int) $s['id'];
+        if (!isset($computed[$sid])) {
+            continue;
+        }
+        $block = $computed[$sid];
+        $block['divisions'] = $normalizeDivisionBlocks($block);
+        $sportBlocks[$sid] = $block;
+    }
+} elseif ($sportId) {
+    $computed = computeSportStandings($sportId);
+    $block = $computed[$sportId] ?? null;
+    if ($block) {
+        $block['divisions'] = $normalizeDivisionBlocks($block);
+        $sportBlocks[$sportId] = $block;
+    }
 }
 
-if ($export === 'excel' && $block) {
-    $headers = ['Division', 'Rank', 'Placement', 'Team', 'Played', 'Wins', 'Losses', 'Draws', 'Match Pts', 'Event Pts', 'Diff', 'Medal'];
+if ($export === 'excel' && $sportBlocks) {
+    $headers = ['Event', 'Division', 'Rank', 'Placement', 'Team', 'Played', 'Wins', 'Losses', 'Draws', 'Match Pts', 'Event Pts', 'Diff', 'Medal'];
     $rows = [];
-    foreach ($divisionBlocks as $divBlock) {
-        foreach ($divBlock['standings'] as $r) {
-            if ($r['played'] === 0 && empty($r['manual_rank'])) {
-                continue;
+    foreach ($sportBlocks as $block) {
+        foreach ($block['divisions'] as $divBlock) {
+            foreach ($divBlock['standings'] as $r) {
+                if ($r['played'] === 0 && empty($r['manual_rank'])) {
+                    continue;
+                }
+                $rows[] = [
+                    sportLabel($block['sport']),
+                    $divBlock['division_name'],
+                    $r['rank'] >= 1000 ? '' : $r['rank'],
+                    $r['placement_label'] ?: '',
+                    $r['team_name'],
+                    $r['played'],
+                    $r['wins'],
+                    $r['losses'],
+                    $r['draws'],
+                    $r['points'],
+                    $r['placement_points'],
+                    $r['diff'],
+                    $r['medal'] ?: '',
+                ];
             }
-            $rows[] = [
-                $divBlock['division_name'],
-                $r['rank'] >= 1000 ? '' : $r['rank'],
-                $r['placement_label'] ?: '',
-                $r['team_name'],
-                $r['played'],
-                $r['wins'],
-                $r['losses'],
-                $r['draws'],
-                $r['points'],
-                $r['placement_points'],
-                $r['diff'],
-                $r['medal'] ?: '',
-            ];
         }
     }
     exportCsv('standings-' . date('Ymd') . '.csv', $headers, $rows);
@@ -71,15 +98,17 @@ require __DIR__ . '/../_season_bar.php';
         <a href="<?= BASE_URL ?>/intramurals/rankings/index.php?sport=<?= (int) $sportId ?>" class="btn btn-outline-warning"><i class="bi bi-list-ol"></i> Manual Entry of Ranks</a>
         <?php endif; ?>
         <a href="<?= BASE_URL ?>/intramurals/standings/overall.php" class="btn btn-outline-primary">Overall Standing</a>
-        <?php if ($block): ?>
-        <a href="?sport=<?= $sportId ?>&export=excel" class="btn btn-outline-success"><i class="bi bi-file-earmark-excel"></i> Excel</a>
+        <?php if ($sportBlocks): ?>
+        <a href="?<?= $showAllSports ? '' : 'sport=' . $sportId . '&' ?>export=excel" class="btn btn-outline-success"><i class="bi bi-file-earmark-excel"></i> Excel</a>
         <button class="btn btn-outline-secondary" onclick="printReport()"><i class="bi bi-printer"></i> Print / PDF</button>
         <?php endif; ?>
     </div>
 </div>
 
 <?= renderReportHeader('Result Tabulation', [
-    'meta' => $block ? ('Event: ' . sportLabel($block['sport'])) : '',
+    'meta' => $showAllSports
+        ? 'All events'
+        : ($sportBlocks ? ('Event: ' . sportLabel(reset($sportBlocks)['sport'])) : ''),
 ]) ?>
 
 <div class="filter-bar no-print">
@@ -87,6 +116,7 @@ require __DIR__ . '/../_season_bar.php';
         <div class="col-md-6">
             <label class="form-label">Sport</label>
             <select name="sport" class="form-select" onchange="this.form.submit()">
+                <option value="" <?= $showAllSports ? 'selected' : '' ?>>All Events</option>
                 <?php foreach ($sports as $s): ?>
                 <option value="<?= $s['id'] ?>" <?= $sportId === (int) $s['id'] ? 'selected' : '' ?>><?= sanitize(sportLabel($s)) ?></option>
                 <?php endforeach; ?>
@@ -95,9 +125,11 @@ require __DIR__ . '/../_season_bar.php';
     </form>
 </div>
 
-<?php if (!$block): ?>
+<?php if (!$sportBlocks): ?>
 <div class="alert alert-info">No sports available.</div>
 <?php else: ?>
+<?php foreach ($sportBlocks as $block): ?>
+<?php $divisionBlocks = $block['divisions']; ?>
 <?php $scheme = $block['scheme'] ?? getPointSchemeForSport($block['sport']); ?>
 <div class="alert alert-secondary py-2 no-print">
     <strong><?= sanitize(sportLabel($block['sport'])) ?></strong>
@@ -117,6 +149,10 @@ require __DIR__ . '/../_season_bar.php';
 <div class="card mb-3">
     <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
         <span>
+            <?php if ($showAllSports): ?>
+            <strong><?= sanitize(sportLabel($block['sport'])) ?></strong>
+            <span class="text-muted mx-1">·</span>
+            <?php endif; ?>
             <i class="bi bi-diagram-3"></i> <?= sanitize($divBlock['division_name']) ?>
             <?php if (!empty($divBlock['manual_ranks'])): ?>
             <span class="badge bg-info text-dark ms-1">Manual ranks</span>
@@ -188,12 +224,14 @@ require __DIR__ . '/../_season_bar.php';
 </div>
 <?php endforeach; ?>
 
+<?php endforeach; ?>
+
 <p class="text-muted small no-print">Event Pts (Champion → 5th Runner Up) feed the <a href="<?= BASE_URL ?>/intramurals/standings/overall.php">Overall Standing</a> by division.
 <?php if (canManageEventRankings()): ?>
 Use <a href="<?= BASE_URL ?>/intramurals/rankings/index.php<?= $sportId ? '?sport=' . (int) $sportId : '' ?>">Manual Entry of Ranks</a> to enter places per division for events without scheduled matches.
 <?php endif; ?>
 <?php if (canManageIntramurals()): ?> Manage point values in <a href="<?= BASE_URL ?>/intramurals/points/index.php">Point System</a>.<?php endif; ?></p>
-<?= renderReportFooter($block ? sportLabel($block['sport']) : 'Result Tabulation') ?>
+<?= renderReportFooter($showAllSports ? 'All Events' : ($sportBlocks ? sportLabel(reset($sportBlocks)['sport']) : 'Result Tabulation')) ?>
 <?php endif; ?>
 
 <?php require_once __DIR__ . '/../../includes/footer.php'; ?>
