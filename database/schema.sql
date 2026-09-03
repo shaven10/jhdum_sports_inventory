@@ -570,6 +570,7 @@ CREATE TABLE IF NOT EXISTS intramural_event_tm_ranking (
 
 CREATE TABLE IF NOT EXISTS working_committees (
     id INT AUTO_INCREMENT PRIMARY KEY,
+    season_id INT DEFAULT NULL,
     name VARCHAR(150) NOT NULL,
     category ENUM('overall', 'sporting_events', 'socio_cultural') NOT NULL DEFAULT 'overall',
     description TEXT DEFAULT NULL,
@@ -577,8 +578,9 @@ CREATE TABLE IF NOT EXISTS working_committees (
     is_active TINYINT(1) NOT NULL DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY uq_working_committee_name (name),
-    INDEX idx_wc_category (category)
+    UNIQUE KEY uq_working_committee_season_name (season_id, name),
+    INDEX idx_wc_category (category),
+    INDEX idx_wc_season (season_id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS working_committee_members (

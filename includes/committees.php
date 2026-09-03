@@ -56,6 +56,7 @@ function ensureWorkingCommitteesSchema(): void
     if ((int) $tableStmt->fetchColumn() === 0) {
         $db->exec("CREATE TABLE working_committees (
             id INT AUTO_INCREMENT PRIMARY KEY,
+            season_id INT DEFAULT NULL,
             name VARCHAR(150) NOT NULL,
             category ENUM('overall', 'sporting_events', 'socio_cultural') NOT NULL DEFAULT 'overall',
             description TEXT DEFAULT NULL,
@@ -63,8 +64,9 @@ function ensureWorkingCommitteesSchema(): void
             is_active TINYINT(1) NOT NULL DEFAULT 1,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-            UNIQUE KEY uq_working_committee_name (name),
-            INDEX idx_wc_category (category)
+            UNIQUE KEY uq_working_committee_season_name (season_id, name),
+            INDEX idx_wc_category (category),
+            INDEX idx_wc_season (season_id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
     } else {
         $colStmt = $db->prepare('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
@@ -74,6 +76,23 @@ function ensureWorkingCommitteesSchema(): void
                 ADD COLUMN category ENUM('overall', 'sporting_events', 'socio_cultural') NOT NULL DEFAULT 'overall' AFTER name,
                 ADD INDEX idx_wc_category (category)");
         }
+
+        $colStmt->execute(['working_committees', 'season_id']);
+        if ((int) $colStmt->fetchColumn() === 0) {
+            try {
+                $db->exec('ALTER TABLE working_committees ADD COLUMN season_id INT DEFAULT NULL AFTER id');
+            } catch (Throwable $e) {
+                // Column may already exist on concurrent requests.
+            }
+            try {
+                $db->exec('ALTER TABLE working_committees ADD INDEX idx_wc_season (season_id)');
+            } catch (Throwable $e) {
+                // Index may already exist.
+            }
+        }
+
+        ensureWorkingCommitteesSeasonUniqueKey($db);
+        backfillWorkingCommitteesSeasonId($db);
     }
 
     $tableStmt->execute(['working_committee_members']);
@@ -98,71 +117,163 @@ function ensureWorkingCommitteesSchema(): void
     seedOverallWorkingCommittees();
 }
 
+/** Prefer active season; fall back to latest season id. */
+function resolveWorkingCommitteeSeasonId(?int $seasonId = null): ?int
+{
+    if ($seasonId !== null && $seasonId > 0) {
+        return $seasonId;
+    }
+
+    if (function_exists('getActiveSeason')) {
+        $active = getActiveSeason();
+        if ($active && !empty($active['id'])) {
+            return (int) $active['id'];
+        }
+    }
+
+    try {
+        $id = (int) (getDB()->query('SELECT id FROM intramural_seasons ORDER BY is_active DESC, id DESC LIMIT 1')->fetchColumn() ?: 0);
+        return $id > 0 ? $id : null;
+    } catch (Throwable $e) {
+        return null;
+    }
+}
+
+function ensureWorkingCommitteesSeasonUniqueKey(PDO $db): void
+{
+    try {
+        $idx = $db->query("SHOW INDEX FROM working_committees WHERE Key_name = 'uq_working_committee_name'")->fetch();
+        if ($idx) {
+            $db->exec('ALTER TABLE working_committees DROP INDEX uq_working_committee_name');
+        }
+    } catch (Throwable $e) {
+        // Ignore.
+    }
+
+    try {
+        $idx = $db->query("SHOW INDEX FROM working_committees WHERE Key_name = 'uq_working_committee_season_name'")->fetch();
+        if (!$idx) {
+            $db->exec('ALTER TABLE working_committees ADD UNIQUE KEY uq_working_committee_season_name (season_id, name)');
+        }
+    } catch (Throwable $e) {
+        // Ignore if duplicates prevent unique key; admin can clean up.
+    }
+}
+
+function backfillWorkingCommitteesSeasonId(PDO $db): void
+{
+    $seasonId = resolveWorkingCommitteeSeasonId();
+    if (!$seasonId) {
+        return;
+    }
+
+    try {
+        $db->prepare('UPDATE working_committees SET season_id = ? WHERE season_id IS NULL')
+            ->execute([$seasonId]);
+    } catch (Throwable $e) {
+        // Best-effort backfill.
+    }
+}
+
+function workingCommitteeSeasonSeedFlag(string $baseFlag, int $seasonId): string
+{
+    return $baseFlag . '_s' . $seasonId;
+}
+
 const WORKING_COMMITTEE_SEED_FLAG = 'working_committees_seeded';
 const WORKING_COMMITTEE_SOCIO_SEED_FLAG = 'working_committees_socio_seeded';
 const WORKING_COMMITTEE_OVERALL_SEED_FLAG = 'working_committees_overall_seeded';
 
-function workingCommitteesSeedDone(): bool
+function workingCommitteesSeedDone(?int $seasonId = null): bool
 {
+    $seasonId = resolveWorkingCommitteeSeasonId($seasonId);
+    if (!$seasonId) {
+        return true;
+    }
     $stmt = getDB()->prepare('SELECT setting_value FROM system_settings WHERE setting_key = ?');
-    $stmt->execute([WORKING_COMMITTEE_SEED_FLAG]);
+    $stmt->execute([workingCommitteeSeasonSeedFlag(WORKING_COMMITTEE_SEED_FLAG, $seasonId)]);
     return (string) $stmt->fetchColumn() === '1';
 }
 
-function workingCommitteesSocioSeedDone(): bool
+function workingCommitteesSocioSeedDone(?int $seasonId = null): bool
 {
+    $seasonId = resolveWorkingCommitteeSeasonId($seasonId);
+    if (!$seasonId) {
+        return true;
+    }
     $stmt = getDB()->prepare('SELECT setting_value FROM system_settings WHERE setting_key = ?');
-    $stmt->execute([WORKING_COMMITTEE_SOCIO_SEED_FLAG]);
+    $stmt->execute([workingCommitteeSeasonSeedFlag(WORKING_COMMITTEE_SOCIO_SEED_FLAG, $seasonId)]);
     return (string) $stmt->fetchColumn() === '1';
 }
 
-function workingCommitteesOverallSeedDone(): bool
+function workingCommitteesOverallSeedDone(?int $seasonId = null): bool
 {
+    $seasonId = resolveWorkingCommitteeSeasonId($seasonId);
+    if (!$seasonId) {
+        return true;
+    }
     $stmt = getDB()->prepare('SELECT setting_value FROM system_settings WHERE setting_key = ?');
-    $stmt->execute([WORKING_COMMITTEE_OVERALL_SEED_FLAG]);
+    $stmt->execute([workingCommitteeSeasonSeedFlag(WORKING_COMMITTEE_OVERALL_SEED_FLAG, $seasonId)]);
     return (string) $stmt->fetchColumn() === '1';
 }
 
-function markWorkingCommitteesSeeded(): void
+function markWorkingCommitteesSeeded(?int $seasonId = null): void
 {
+    $seasonId = resolveWorkingCommitteeSeasonId($seasonId);
+    if (!$seasonId) {
+        return;
+    }
     $db = getDB();
     $db->prepare("INSERT INTO system_settings (setting_key, setting_value, setting_type, description)
-        VALUES (?, '1', 'boolean', 'Working committee document already imported')
+        VALUES (?, '1', 'boolean', 'Working committee document already imported for season')
         ON DUPLICATE KEY UPDATE setting_value = '1'")
-        ->execute([WORKING_COMMITTEE_SEED_FLAG]);
+        ->execute([workingCommitteeSeasonSeedFlag(WORKING_COMMITTEE_SEED_FLAG, $seasonId)]);
 }
 
-function markWorkingCommitteesSocioSeeded(): void
+function markWorkingCommitteesSocioSeeded(?int $seasonId = null): void
 {
+    $seasonId = resolveWorkingCommitteeSeasonId($seasonId);
+    if (!$seasonId) {
+        return;
+    }
     $db = getDB();
     $db->prepare("INSERT INTO system_settings (setting_key, setting_value, setting_type, description)
-        VALUES (?, '1', 'boolean', 'Socio-cultural working committees already imported')
+        VALUES (?, '1', 'boolean', 'Socio-cultural working committees already imported for season')
         ON DUPLICATE KEY UPDATE setting_value = '1'")
-        ->execute([WORKING_COMMITTEE_SOCIO_SEED_FLAG]);
+        ->execute([workingCommitteeSeasonSeedFlag(WORKING_COMMITTEE_SOCIO_SEED_FLAG, $seasonId)]);
 }
 
-function markWorkingCommitteesOverallSeeded(): void
+function markWorkingCommitteesOverallSeeded(?int $seasonId = null): void
 {
+    $seasonId = resolveWorkingCommitteeSeasonId($seasonId);
+    if (!$seasonId) {
+        return;
+    }
     $db = getDB();
     $db->prepare("INSERT INTO system_settings (setting_key, setting_value, setting_type, description)
-        VALUES (?, '1', 'boolean', 'Overall working committees already imported')
+        VALUES (?, '1', 'boolean', 'Overall working committees already imported for season')
         ON DUPLICATE KEY UPDATE setting_value = '1'")
-        ->execute([WORKING_COMMITTEE_OVERALL_SEED_FLAG]);
+        ->execute([workingCommitteeSeasonSeedFlag(WORKING_COMMITTEE_OVERALL_SEED_FLAG, $seasonId)]);
 }
 
 /**
- * Insert missing committees/members from a catalog. Does not revive deleted rows once
+ * Insert missing committees/members from a catalog for a season. Does not revive deleted rows once
  * the matching one-time seed flag has been set (unless $force is true).
  *
  * @param list<array{name:string,description:?string,sort_order?:int,members?:list<array<string,mixed>>}> $catalog
  */
-function importWorkingCommitteeCatalog(array $catalog, string $category, bool $force = false): int
+function importWorkingCommitteeCatalog(array $catalog, string $category, bool $force = false, ?int $seasonId = null): int
 {
     $category = normalizeWorkingCommitteeCategory($category);
+    $seasonId = resolveWorkingCommitteeSeasonId($seasonId);
+    if (!$seasonId) {
+        return 0;
+    }
+
     $db = getDB();
     $created = 0;
-    $findCommittee = $db->prepare('SELECT id FROM working_committees WHERE name = ? LIMIT 1');
-    $insertCommittee = $db->prepare('INSERT INTO working_committees (name, category, description, sort_order, is_active) VALUES (?, ?, ?, ?, 1)');
+    $findCommittee = $db->prepare('SELECT id FROM working_committees WHERE season_id = ? AND name = ? LIMIT 1');
+    $insertCommittee = $db->prepare('INSERT INTO working_committees (season_id, name, category, description, sort_order, is_active) VALUES (?, ?, ?, ?, ?, 1)');
     $findMember = $db->prepare('SELECT id FROM working_committee_members WHERE committee_id = ? AND full_name = ? AND COALESCE(position_title, \'\') = ? LIMIT 1');
     $insertMember = $db->prepare('INSERT INTO working_committee_members
         (committee_id, full_name, position_title, organization, sort_order, is_active)
@@ -170,10 +281,11 @@ function importWorkingCommitteeCatalog(array $catalog, string $category, bool $f
 
     foreach ($catalog as $index => $item) {
         $name = (string) $item['name'];
-        $findCommittee->execute([$name]);
+        $findCommittee->execute([$seasonId, $name]);
         $committeeId = (int) $findCommittee->fetchColumn();
         if ($committeeId <= 0) {
             $insertCommittee->execute([
+                $seasonId,
                 $name,
                 $category,
                 $item['description'] ?? null,
@@ -212,74 +324,88 @@ function importWorkingCommitteeCatalog(array $catalog, string $category, bool $f
 /**
  * Import sporting-event committees from the official working committee document.
  *
- * Runs once only, so committees deleted by the admin are not resurrected on the next
+ * Runs once per season only, so committees deleted by the admin are not resurrected on the next
  * page load. Pass $force = true for the explicit "restore document defaults" action.
  */
-function seedSportingEventWorkingCommittees(bool $force = false): int
+function seedSportingEventWorkingCommittees(bool $force = false, ?int $seasonId = null): int
 {
-    static $ranThisRequest = false;
-    if ($ranThisRequest && !$force) {
+    static $ranSeasons = [];
+    $seasonId = resolveWorkingCommitteeSeasonId($seasonId);
+    if (!$seasonId) {
         return 0;
     }
-    $ranThisRequest = true;
+    if (!$force && isset($ranSeasons[$seasonId])) {
+        return 0;
+    }
+    $ranSeasons[$seasonId] = true;
 
     $db = getDB();
 
     if (!$force) {
-        if (workingCommitteesSeedDone()) {
+        if (workingCommitteesSeedDone($seasonId)) {
             return 0;
         }
-        // Installed before this flag existed: keep whatever the admin has now.
-        if ((int) $db->query('SELECT COUNT(*) FROM working_committees')->fetchColumn() > 0) {
-            markWorkingCommitteesSeeded();
+        // Season already has committees: keep whatever the admin has now.
+        $countStmt = $db->prepare('SELECT COUNT(*) FROM working_committees WHERE season_id = ?');
+        $countStmt->execute([$seasonId]);
+        if ((int) $countStmt->fetchColumn() > 0) {
+            markWorkingCommitteesSeeded($seasonId);
             return 0;
         }
     }
 
-    $created = importWorkingCommitteeCatalog(sportingEventWorkingCommitteeSeedData(), 'sporting_events', $force);
-    markWorkingCommitteesSeeded();
+    $created = importWorkingCommitteeCatalog(sportingEventWorkingCommitteeSeedData(), 'sporting_events', $force, $seasonId);
+    markWorkingCommitteesSeeded($seasonId);
 
     return $created;
 }
 
 /**
- * Import socio-cultural committees from the official document (one-time unless forced).
+ * Import socio-cultural committees from the official document (one-time per season unless forced).
  */
-function seedSocioCulturalWorkingCommittees(bool $force = false): int
+function seedSocioCulturalWorkingCommittees(bool $force = false, ?int $seasonId = null): int
 {
-    static $ranThisRequest = false;
-    if ($ranThisRequest && !$force) {
+    static $ranSeasons = [];
+    $seasonId = resolveWorkingCommitteeSeasonId($seasonId);
+    if (!$seasonId) {
         return 0;
     }
-    $ranThisRequest = true;
+    if (!$force && isset($ranSeasons[$seasonId])) {
+        return 0;
+    }
+    $ranSeasons[$seasonId] = true;
 
-    if (!$force && workingCommitteesSocioSeedDone()) {
+    if (!$force && workingCommitteesSocioSeedDone($seasonId)) {
         return 0;
     }
 
-    $created = importWorkingCommitteeCatalog(socioCulturalWorkingCommitteeSeedData(), 'socio_cultural', $force);
-    markWorkingCommitteesSocioSeeded();
+    $created = importWorkingCommitteeCatalog(socioCulturalWorkingCommitteeSeedData(), 'socio_cultural', $force, $seasonId);
+    markWorkingCommitteesSocioSeeded($seasonId);
 
     return $created;
 }
 
 /**
- * Import overall committees from the official document (one-time unless forced).
+ * Import overall committees from the official document (one-time per season unless forced).
  */
-function seedOverallWorkingCommittees(bool $force = false): int
+function seedOverallWorkingCommittees(bool $force = false, ?int $seasonId = null): int
 {
-    static $ranThisRequest = false;
-    if ($ranThisRequest && !$force) {
+    static $ranSeasons = [];
+    $seasonId = resolveWorkingCommitteeSeasonId($seasonId);
+    if (!$seasonId) {
         return 0;
     }
-    $ranThisRequest = true;
+    if (!$force && isset($ranSeasons[$seasonId])) {
+        return 0;
+    }
+    $ranSeasons[$seasonId] = true;
 
-    if (!$force && workingCommitteesOverallSeedDone()) {
+    if (!$force && workingCommitteesOverallSeedDone($seasonId)) {
         return 0;
     }
 
-    $created = importWorkingCommitteeCatalog(overallWorkingCommitteeSeedData(), 'overall', $force);
-    markWorkingCommitteesOverallSeeded();
+    $created = importWorkingCommitteeCatalog(overallWorkingCommitteeSeedData(), 'overall', $force, $seasonId);
+    markWorkingCommitteesOverallSeeded($seasonId);
 
     return $created;
 }
@@ -749,17 +875,22 @@ function overallWorkingCommitteeSeedData(): array
 }
 
 /** @return list<array<string,mixed>> */
-function getWorkingCommittees(bool $activeOnly = true, ?string $category = null): array
+function getWorkingCommittees(bool $activeOnly = true, ?string $category = null, ?int $seasonId = null): array
 {
     ensureWorkingCommitteesSchema();
+    $seasonId = resolveWorkingCommitteeSeasonId($seasonId);
+    if (!$seasonId) {
+        return [];
+    }
+
     $db = getDB();
     $sql = 'SELECT c.*,
             (SELECT COUNT(*) FROM working_committee_members m WHERE m.committee_id = c.id' .
         ($activeOnly ? ' AND m.is_active = 1' : '') .
         ') AS member_count
         FROM working_committees c';
-    $where = [];
-    $params = [];
+    $where = ['c.season_id = ?'];
+    $params = [$seasonId];
     if ($activeOnly) {
         $where[] = 'c.is_active = 1';
     }
@@ -767,16 +898,11 @@ function getWorkingCommittees(bool $activeOnly = true, ?string $category = null)
         $where[] = 'c.category = ?';
         $params[] = normalizeWorkingCommitteeCategory($category);
     }
-    if ($where) {
-        $sql .= ' WHERE ' . implode(' AND ', $where);
-    }
+    $sql .= ' WHERE ' . implode(' AND ', $where);
     $sql .= ' ORDER BY FIELD(c.category, \'overall\', \'sporting_events\', \'socio_cultural\'), c.sort_order ASC, c.name ASC';
-    if ($params) {
-        $stmt = $db->prepare($sql);
-        $stmt->execute($params);
-        return $stmt->fetchAll();
-    }
-    return $db->query($sql)->fetchAll();
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
+    return $stmt->fetchAll();
 }
 
 function getWorkingCommitteeById(int $id): ?array
@@ -825,9 +951,9 @@ function getWorkingCommitteeMemberById(int $id): ?array
  *
  * @return list<array{category:string,label:string,committees:list<array{committee:array,members:list<array>}>}>
  */
-function getPublicWorkingCommitteesGrouped(): array
+function getPublicWorkingCommitteesGrouped(?int $seasonId = null): array
 {
-    $committees = getWorkingCommittees(true);
+    $committees = getWorkingCommittees(true, null, $seasonId);
     $buckets = [];
     foreach (workingCommitteeCategoryOptions() as $key => $label) {
         $buckets[$key] = [
@@ -922,22 +1048,25 @@ function compareWorkingCommitteesChronologically(array $a, array $b): int
     return strcasecmp((string) ($a['name'] ?? ''), (string) ($b['name'] ?? ''));
 }
 
-/** Sporting + socio-cultural committees in chronological order (cached per request). */
-function getChronologicalEventCommittees(): array
+/** Sporting + socio-cultural committees in chronological order (cached per season). */
+function getChronologicalEventCommittees(?int $seasonId = null): array
 {
-    static $cache = null;
-    if ($cache !== null) {
-        return $cache;
+    static $cache = [];
+    $seasonId = resolveWorkingCommitteeSeasonId($seasonId);
+    $cacheKey = $seasonId ?? 0;
+    if (isset($cache[$cacheKey])) {
+        return $cache[$cacheKey];
     }
 
     ensureWorkingCommitteesSchema();
-    $cache = array_values(array_filter(
-        getWorkingCommittees(true),
+    $list = array_values(array_filter(
+        getWorkingCommittees(true, null, $seasonId),
         static fn(array $c): bool => in_array((string) ($c['category'] ?? ''), ['sporting_events', 'socio_cultural'], true)
     ));
-    usort($cache, 'compareWorkingCommitteesChronologically');
+    usort($list, 'compareWorkingCommitteesChronologically');
+    $cache[$cacheKey] = $list;
 
-    return $cache;
+    return $cache[$cacheKey];
 }
 
 function committeeGenderMatchesSport(string $committeeName, string $sportCategory): bool

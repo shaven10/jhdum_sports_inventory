@@ -11,6 +11,13 @@ if (!$committee) {
     redirect(BASE_URL . '/admin/committees/index.php');
 }
 
+$activeSeason = getActiveSeason();
+$activeSeasonId = $activeSeason ? (int) $activeSeason['id'] : null;
+if (!$activeSeasonId || (int) ($committee['season_id'] ?? 0) !== $activeSeasonId) {
+    flash('error', 'That committee belongs to another season. Activate its season to manage members.');
+    redirect(BASE_URL . '/admin/committees/index.php');
+}
+
 $errors = [];
 $editMember = null;
 

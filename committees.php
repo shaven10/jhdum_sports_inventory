@@ -6,8 +6,10 @@ require_once __DIR__ . '/includes/auth.php';
 ensureLiveBoardColumns();
 
 $sections = [];
+$activeSeason = null;
 try {
-    $sections = getPublicWorkingCommitteesGrouped();
+    $activeSeason = getActiveSeason();
+    $sections = getPublicWorkingCommitteesGrouped($activeSeason ? (int) $activeSeason['id'] : null);
 } catch (Throwable $e) {
     $sections = [];
 }
@@ -42,7 +44,12 @@ $styleVersion = is_file($stylePath) ? (string) filemtime($stylePath) : APP_VERSI
                     <h1 class="live-board-title">Working Committees</h1>
                 </div>
             </div>
-            <p class="live-board-lead">Overall, sporting events, and socio-cultural working committees.</p>
+            <p class="live-board-lead">
+                Overall, sporting events, and socio-cultural working committees
+                <?php if ($activeSeason): ?>
+                for <strong><?= sanitize(seasonLabel($activeSeason)) ?></strong>
+                <?php endif; ?>.
+            </p>
             <div class="live-board-cta">
                 <a class="btn btn-light btn-lg" href="<?= sanitize(getPublicStandingsUrl()) ?>"><?= isLiveBoardEnabled() ? 'Back to live rankings' : 'Back to home' ?></a>
                 <?php if (isLoggedIn() && isAdmin()): ?>

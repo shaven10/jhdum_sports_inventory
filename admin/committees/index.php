@@ -7,9 +7,21 @@ $db = getDB();
 $errors = [];
 $editCommittee = null;
 $categoryOptions = workingCommitteeCategoryOptions();
+$activeSeason = getActiveSeason();
+$activeSeasonId = $activeSeason ? (int) $activeSeason['id'] : null;
+$activeSeasonLabel = $activeSeason ? seasonLabel($activeSeason) : 'No active season';
+
+if (!$activeSeasonId) {
+    flash('error', 'Set an active intramural season before managing working committees.');
+    redirect(BASE_URL . '/intramurals/seasons/index.php');
+}
 
 if (isset($_GET['edit'])) {
     $editCommittee = getWorkingCommitteeById((int) $_GET['edit']);
+    if ($editCommittee && (int) ($editCommittee['season_id'] ?? 0) !== $activeSeasonId) {
+        flash('error', 'That committee belongs to another season. Switch the active season to edit it.');
+        redirect(BASE_URL . '/admin/committees/index.php');
+    }
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
@@ -31,23 +43,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
         if ($errors === []) {
             try {
                 if ($action === 'create') {
-                    $db->prepare('INSERT INTO working_committees (name, category, description, sort_order, is_active) VALUES (?, ?, ?, ?, 1)')
-                        ->execute([$name, $category, $description !== '' ? $description : null, $sortOrder]);
+                    $db->prepare('INSERT INTO working_committees (season_id, name, category, description, sort_order, is_active) VALUES (?, ?, ?, ?, ?, 1)')
+                        ->execute([$activeSeasonId, $name, $category, $description !== '' ? $description : null, $sortOrder]);
                     $newId = (int) $db->lastInsertId();
                     auditLog((int) $_SESSION['user_id'], 'create', 'working_committee', $newId, null, [
                         'name' => $name,
                         'category' => $category,
+                        'season_id' => $activeSeasonId,
                     ]);
                     flash('success', 'Committee created. Add members next.');
                     redirect(BASE_URL . '/admin/committees/members.php?committee_id=' . $newId);
                 }
 
                 $existing = getWorkingCommitteeById($id);
-                if (!$existing) {
-                    $errors[] = 'Committee not found.';
+                if (!$existing || (int) ($existing['season_id'] ?? 0) !== $activeSeasonId) {
+                    $errors[] = 'Committee not found in the active season.';
                 } else {
-                    $db->prepare('UPDATE working_committees SET name = ?, category = ?, description = ?, sort_order = ? WHERE id = ?')
-                        ->execute([$name, $category, $description !== '' ? $description : null, $sortOrder, $id]);
+                    $db->prepare('UPDATE working_committees SET name = ?, category = ?, description = ?, sort_order = ? WHERE id = ? AND season_id = ?')
+                        ->execute([$name, $category, $description !== '' ? $description : null, $sortOrder, $id, $activeSeasonId]);
                     auditLog((int) $_SESSION['user_id'], 'update', 'working_committee', $id, [
                         'name' => $existing['name'],
                         'category' => $existing['category'] ?? null,
@@ -59,7 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
                     redirect(BASE_URL . '/admin/committees/index.php');
                 }
             } catch (PDOException $e) {
-                $errors[] = 'A committee with this name already exists.';
+                $errors[] = 'A committee with this name already exists for the active season.';
                 if ($action === 'update' && $id) {
                     $editCommittee = getWorkingCommitteeById($id);
                 }
@@ -77,8 +90,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
 
     if ($action === 'deactivate') {
         $id = (int) post('committee_id');
-        if ($id && getWorkingCommitteeById($id)) {
-            $db->prepare('UPDATE working_committees SET is_active = 0 WHERE id = ?')->execute([$id]);
+        $committee = getWorkingCommitteeById($id);
+        if ($committee && (int) ($committee['season_id'] ?? 0) === $activeSeasonId) {
+            $db->prepare('UPDATE working_committees SET is_active = 0 WHERE id = ? AND season_id = ?')->execute([$id, $activeSeasonId]);
             auditLog((int) $_SESSION['user_id'], 'deactivate', 'working_committee', $id);
             flash('success', 'Committee hidden from the public page.');
         }
@@ -87,8 +101,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
 
     if ($action === 'activate') {
         $id = (int) post('committee_id');
-        if ($id && getWorkingCommitteeById($id)) {
-            $db->prepare('UPDATE working_committees SET is_active = 1 WHERE id = ?')->execute([$id]);
+        $committee = getWorkingCommitteeById($id);
+        if ($committee && (int) ($committee['season_id'] ?? 0) === $activeSeasonId) {
+            $db->prepare('UPDATE working_committees SET is_active = 1 WHERE id = ? AND season_id = ?')->execute([$id, $activeSeasonId]);
             auditLog((int) $_SESSION['user_id'], 'activate', 'working_committee', $id);
             flash('success', 'Committee is now visible on the public page.');
         }
@@ -98,9 +113,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
     if ($action === 'delete') {
         $id = (int) post('committee_id');
         $committee = getWorkingCommitteeById($id);
-        if ($committee) {
+        if ($committee && (int) ($committee['season_id'] ?? 0) === $activeSeasonId) {
             $db->prepare('DELETE FROM working_committee_members WHERE committee_id = ?')->execute([$id]);
-            $db->prepare('DELETE FROM working_committees WHERE id = ?')->execute([$id]);
+            $db->prepare('DELETE FROM working_committees WHERE id = ? AND season_id = ?')->execute([$id, $activeSeasonId]);
             auditLog((int) $_SESSION['user_id'], 'delete', 'working_committee', $id, ['name' => $committee['name']]);
             flash('success', 'Committee and its members deleted.');
         }
@@ -108,24 +123,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
     }
 
     if ($action === 'reseed') {
-        $sporting = seedSportingEventWorkingCommittees(true);
-        $socio = seedSocioCulturalWorkingCommittees(true);
-        $overall = seedOverallWorkingCommittees(true);
+        $sporting = seedSportingEventWorkingCommittees(true, $activeSeasonId);
+        $socio = seedSocioCulturalWorkingCommittees(true, $activeSeasonId);
+        $overall = seedOverallWorkingCommittees(true, $activeSeasonId);
         $created = $sporting + $socio + $overall;
         auditLog((int) $_SESSION['user_id'], 'reseed', 'working_committee', null, null, [
             'sporting_created' => $sporting,
             'socio_created' => $socio,
             'overall_created' => $overall,
+            'season_id' => $activeSeasonId,
         ]);
         flash('success', $created > 0
-            ? 'Restored ' . $created . ' committee(s) from the document (' . $overall . ' overall, ' . $sporting . ' sporting, ' . $socio . ' socio-cultural).'
-            : 'All document committees are already present.');
+            ? 'Restored ' . $created . ' committee(s) for ' . $activeSeasonLabel . ' (' . $overall . ' overall, ' . $sporting . ' sporting, ' . $socio . ' socio-cultural).'
+            : 'All document committees are already present for the active season.');
         redirect(BASE_URL . '/admin/committees/index.php');
     }
 }
 
 $filterCategory = get('category', 'all');
-$committees = getWorkingCommittees(false, $filterCategory === 'all' ? null : $filterCategory);
+$committees = getWorkingCommittees(false, $filterCategory === 'all' ? null : $filterCategory, $activeSeasonId);
 $formName = $editCommittee['name'] ?? post('name');
 $formCategory = $editCommittee['category'] ?? post('category', 'sporting_events');
 $formDescription = $editCommittee['description'] ?? post('description');
@@ -138,15 +154,19 @@ require_once __DIR__ . '/../../includes/header.php';
 <div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2">
     <div>
         <h1><i class="bi bi-people"></i> Working Committees</h1>
-        <p class="text-muted mb-0">Grouped as Overall, Sporting Events, and Socio-Cultural. Manage members for each committee.</p>
+        <p class="text-muted mb-0">
+            Bound to the active season: <strong><?= sanitize($activeSeasonLabel) ?></strong>.
+            Change the active season under Intramurals → Seasons to manage a different set.
+        </p>
     </div>
     <div class="d-flex flex-wrap gap-2">
+        <a href="<?= BASE_URL ?>/intramurals/seasons/index.php" class="btn btn-outline-secondary"><i class="bi bi-calendar3"></i> Seasons</a>
         <a href="<?= BASE_URL ?>/committees.php" class="btn btn-outline-primary" target="_blank"><i class="bi bi-box-arrow-up-right"></i> Public page</a>
         <form method="POST" class="d-inline">
             <?= csrfField() ?>
             <input type="hidden" name="action" value="reseed">
             <button type="submit" class="btn btn-outline-warning"
-                    data-confirm="Re-add overall, sporting event, and socio-cultural committees from the official document? Existing committees are left untouched.">
+                    data-confirm="Re-add overall, sporting event, and socio-cultural committees from the official document for <?= sanitize($activeSeasonLabel) ?>? Existing committees in this season are left untouched.">
                 <i class="bi bi-arrow-counterclockwise"></i> Restore document defaults
             </button>
         </form>
@@ -223,10 +243,10 @@ require_once __DIR__ . '/../../includes/header.php';
     </div>
     <div class="col-lg-8">
         <div class="card">
-            <div class="card-header">Committees</div>
+            <div class="card-header">Committees for active season</div>
             <div class="card-body p-0">
                 <?php if (empty($committees)): ?>
-                <div class="p-4 text-muted">No committees in this group yet.</div>
+                <div class="p-4 text-muted">No committees for this season yet. Add one, or restore document defaults.</div>
                 <?php else: ?>
                 <div class="table-responsive">
                     <table class="table table-hover mb-0 align-middle">
