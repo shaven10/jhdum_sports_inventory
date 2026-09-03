@@ -136,19 +136,85 @@ function ensureAuditLogsSchema(): void
 
 function auditLog(?int $userId, string $action, ?string $entityType = null, ?int $entityId = null, ?array $oldValues = null, ?array $newValues = null): void
 {
-    ensureAuditLogsSchema();
-    $db = getDB();
-    $stmt = $db->prepare('INSERT INTO audit_logs (user_id, action, entity_type, entity_id, old_values, new_values, ip_address, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
-    $stmt->execute([
-        $userId,
-        $action,
-        $entityType,
-        $entityId,
-        $oldValues ? json_encode($oldValues) : null,
-        $newValues ? json_encode($newValues) : null,
-        $_SERVER['REMOTE_ADDR'] ?? null,
-        $_SERVER['HTTP_USER_AGENT'] ?? null
-    ]);
+    try {
+        ensureAuditLogsSchema();
+        $db = getDB();
+
+        $validUserId = null;
+        if ($userId !== null && $userId > 0) {
+            $check = $db->prepare('SELECT id FROM users WHERE id = ?');
+            $check->execute([$userId]);
+            if ($check->fetch()) {
+                $validUserId = $userId;
+            }
+        }
+
+        $stmt = $db->prepare('INSERT INTO audit_logs (user_id, action, entity_type, entity_id, old_values, new_values, ip_address, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+        $stmt->execute([
+            $validUserId,
+            $action,
+            $entityType,
+            $entityId,
+            $oldValues ? json_encode($oldValues) : null,
+            $newValues ? json_encode($newValues) : null,
+            $_SERVER['REMOTE_ADDR'] ?? null,
+            $_SERVER['HTTP_USER_AGENT'] ?? null,
+        ]);
+    } catch (Throwable $e) {
+        // Audit logging must never block the action that triggered it.
+    }
+}
+
+function resolveSettingsUserId(int $userId): ?int
+{
+    if ($userId <= 0) {
+        return null;
+    }
+
+    try {
+        $db = getDB();
+        $stmt = $db->prepare('SELECT id FROM users WHERE id = ?');
+        $stmt->execute([$userId]);
+        return $stmt->fetch() ? $userId : null;
+    } catch (Throwable $e) {
+        return null;
+    }
+}
+
+function systemSettingsHasUpdatedByColumn(): bool
+{
+    static $hasColumn = null;
+    if ($hasColumn !== null) {
+        return $hasColumn;
+    }
+
+    try {
+        $db = getDB();
+        $stmt = $db->prepare('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
+        $stmt->execute(['system_settings', 'updated_by']);
+        $hasColumn = (int) $stmt->fetchColumn() > 0;
+    } catch (Throwable $e) {
+        $hasColumn = false;
+    }
+
+    return $hasColumn;
+}
+
+/** Repair system_settings id/auto_increment and ensure table exists. */
+function ensureSystemSettingsSchema(): void
+{
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    try {
+        $db = getDB();
+        ensureTablePrimaryAutoIncrement($db, 'system_settings');
+    } catch (Throwable $e) {
+        // Best-effort repair only.
+    }
 }
 
 function createNotification(int $userId, string $title, string $message, string $type = 'info', ?string $link = null): void
@@ -690,6 +756,8 @@ function countOpenIncidentReports(): int
 
 function getSetting(string $key, $default = null)
 {
+    ensureSystemSettingsSchema();
+
     $db = getDB();
     $stmt = $db->prepare('SELECT setting_value, setting_type FROM system_settings WHERE setting_key = ?');
     $stmt->execute([$key]);
@@ -707,18 +775,75 @@ function getSetting(string $key, $default = null)
     };
 }
 
-function updateSetting(string $key, $value, int $userId): void
+function updateSetting(string $key, $value, int $userId): bool
 {
-    $db = getDB();
-    $stmt = $db->prepare('SELECT id FROM system_settings WHERE setting_key = ?');
-    $stmt->execute([$key]);
+    try {
+        $db = getDB();
+        ensureSystemSettingsSchema();
 
-    if ($stmt->fetch()) {
-        $db->prepare('UPDATE system_settings SET setting_value = ?, updated_by = ? WHERE setting_key = ?')
-           ->execute([(string) $value, $userId, $key]);
-    } else {
-        $db->prepare('INSERT INTO system_settings (setting_key, setting_value, setting_type, updated_by) VALUES (?, ?, ?, ?)')
-           ->execute([$key, (string) $value, 'string', $userId]);
+        $updatedBy = resolveSettingsUserId($userId);
+        $stringValue = (string) $value;
+
+        if (systemSettingsHasUpdatedByColumn()) {
+            try {
+                $stmt = $db->prepare('INSERT INTO system_settings (setting_key, setting_value, setting_type, updated_by) VALUES (?, ?, ?, ?)
+                    ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_by = VALUES(updated_by)');
+                $stmt->execute([$key, $stringValue, 'string', $updatedBy]);
+                return true;
+            } catch (Throwable $e) {
+                // Fall back without updated_by below.
+            }
+        }
+
+        $stmt = $db->prepare('INSERT INTO system_settings (setting_key, setting_value, setting_type) VALUES (?, ?, ?)
+            ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)');
+        $stmt->execute([$key, $stringValue, 'string']);
+
+        return true;
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
+function formValue(string $value): string
+{
+    return htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
+}
+
+/** Seed default Sports Development Office landing content when missing. */
+function ensureSdoAboutSettings(): void
+{
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    $defaults = [
+        'sdo_about_title' => [
+            'About the Sports Development Office',
+            'Landing page SDO section title',
+        ],
+        'sdo_about_content' => [
+            "The Sports Development Office (SDO) leads the campus sports program at J.H. Cerilles State College — organizing intramurals, supporting varsity teams, managing sports facilities and equipment, and promoting wellness through physical activity.\n\nOur office works with coaches, unit managers, and student-athletes to deliver fair competition, meaningful recreation, and opportunities for leadership on and off the field.",
+            'Landing page SDO about text',
+        ],
+    ];
+
+    try {
+        ensureSystemSettingsSchema();
+        $db = getDB();
+        foreach ($defaults as $key => [$value, $description]) {
+            $stmt = $db->prepare('SELECT id FROM system_settings WHERE setting_key = ?');
+            $stmt->execute([$key]);
+            if ($stmt->fetch()) {
+                continue;
+            }
+            $db->prepare('INSERT INTO system_settings (setting_key, setting_value, setting_type, description) VALUES (?, ?, ?, ?)')
+                ->execute([$key, $value, 'string', $description]);
+        }
+    } catch (Throwable $e) {
+        // Ignore — landing page falls back to inline defaults.
     }
 }
 

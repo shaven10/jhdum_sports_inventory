@@ -3,6 +3,11 @@
  * Public live rankings landing page — overall, medal tally, per-event.
  */
 require_once __DIR__ . '/includes/auth.php';
+ensureLiveBoardColumns();
+
+if (!isLiveBoardEnabled() && !isAdmin()) {
+    redirect(BASE_URL . '/landing.php');
+}
 
 if (isLoggedIn()) {
     // Staff still see the board; home is available via CTA.
@@ -38,6 +43,13 @@ $styleVersion = is_file($stylePath) ? (string) filemtime($stylePath) : APP_VERSI
 </head>
 <body class="live-board-page">
 <div class="live-board">
+    <?php if (isAdmin() && !isLiveBoardEnabled()): ?>
+    <div class="live-admin-notice" role="status">
+        <i class="bi bi-eye-slash"></i>
+        Live standings are hidden from the public.
+        <a href="<?= BASE_URL ?>/admin/live_board.php">Enable live standings</a>
+    </div>
+    <?php endif; ?>
     <header class="live-board-hero">
         <div class="live-board-hero__bg" aria-hidden="true"></div>
         <div class="live-board-hero__inner">

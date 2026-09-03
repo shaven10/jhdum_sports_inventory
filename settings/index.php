@@ -5,6 +5,13 @@ requireRole(['admin']);
 $db = getDB();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
+    if (post('action') === 'test_registrar_api') {
+        $overrideKey = normalizeRegistrarApiKey(post('registrar_api_key'));
+        $test = testRegistrarApiConnection($overrideKey !== '' ? $overrideKey : null);
+        flash($test['ok'] ? 'success' : 'error', $test['message']);
+        redirect(BASE_URL . '/settings/index.php#registrar-api');
+    }
+
     $settings = [
         'max_borrow_days', 'default_borrow_days', 'max_borrow_items',
         'low_stock_threshold', 'require_approval', 'notification_email',
@@ -17,6 +24,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
         if (isset($_POST[$key])) {
             updateSetting($key, post($key), $_SESSION['user_id']);
         }
+    }
+
+    if (isset($_POST['registrar_api_base_url'])) {
+        updateSetting('registrar_api_base_url', trim(post('registrar_api_base_url')), $_SESSION['user_id']);
+    }
+    $newApiKey = normalizeRegistrarApiKey(post('registrar_api_key'));
+    if ($newApiKey !== '') {
+        if (!isValidRegistrarApiKeyFormat($newApiKey)) {
+            flash('error', 'Invalid API key format. Copy the full key from Registrar → External API (starts with rd_ and is 51 characters long).');
+            redirect(BASE_URL . '/settings/index.php#registrar-api');
+        }
+        updateSetting('registrar_api_key', $newApiKey, $_SESSION['user_id']);
     }
 
     auditLog($_SESSION['user_id'], 'update_settings', 'system_settings');
@@ -84,6 +103,36 @@ require_once __DIR__ . '/../includes/header.php';
         <label class="form-label">Borrowing Policy Text</label>
         <textarea name="borrowing_policy" class="form-control" rows="4"><?= sanitize($settingsMap['borrowing_policy'] ?? '') ?></textarea>
     </div>
+</div>
+
+<h5 class="mb-3" id="registrar-api">Student Login (Registrar API)</h5>
+<p class="text-muted small">Active students sign in with their student ID. The system verifies enrollment through the Registrar Active Students API.</p>
+<div class="row g-3 mb-2">
+    <div class="col-12">
+        <label class="form-label">API Base URL</label>
+        <input type="url" name="registrar_api_base_url" class="form-control"
+               value="<?= sanitize($settingsMap['registrar_api_base_url'] ?? 'http://localhost/regdum_online_processing/api/v1') ?>"
+               placeholder="http://localhost/regdum_online_processing/api/v1">
+    </div>
+    <div class="col-12">
+        <label class="form-label">API Key</label>
+        <input type="password" name="registrar_api_key" class="form-control" autocomplete="new-password"
+               placeholder="<?= !empty($settingsMap['registrar_api_key']) ? '•••••••• (leave blank to keep current key)' : 'Paste full rd_... key from Registrar External API' ?>">
+        <?php if (!empty($settingsMap['registrar_api_key'])): ?>
+        <div class="form-text text-success">
+            <i class="bi bi-check-circle"></i> API key saved (prefix: <code><?= sanitize(registrarApiKeyPrefix()) ?></code>).
+            Compare this prefix with the key in Registrar → External API.
+        </div>
+        <?php else: ?>
+        <div class="form-text text-warning"><i class="bi bi-exclamation-triangle"></i> Student ID login is disabled until an API key is saved.</div>
+        <?php endif; ?>
+        <div class="form-text">Copy the <strong>full</strong> key when it is first created in Registrar → External API. Masked keys like <code>rd_abc123••••</code> cannot be used.</div>
+    </div>
+</div>
+<div class="mb-4">
+    <button type="submit" formaction="<?= BASE_URL ?>/settings/index.php#registrar-api" formmethod="post" name="action" value="test_registrar_api" class="btn btn-outline-secondary" <?= isRegistrarStudentLoginConfigured() ? '' : 'disabled' ?>>
+        <i class="bi bi-plug"></i> Test Registrar API Connection
+    </button>
 </div>
 
 <h5 class="mb-3">Certificate Information</h5>

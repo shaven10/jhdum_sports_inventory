@@ -3,6 +3,7 @@
  * Public working committees listing — grouped by Overall / Sporting Events / Socio-Cultural.
  */
 require_once __DIR__ . '/includes/auth.php';
+ensureLiveBoardColumns();
 
 $sections = [];
 try {
@@ -43,7 +44,7 @@ $styleVersion = is_file($stylePath) ? (string) filemtime($stylePath) : APP_VERSI
             </div>
             <p class="live-board-lead">Overall, sporting events, and socio-cultural working committees.</p>
             <div class="live-board-cta">
-                <a class="btn btn-light btn-lg" href="<?= BASE_URL ?>/live.php">Back to live rankings</a>
+                <a class="btn btn-light btn-lg" href="<?= sanitize(getPublicStandingsUrl()) ?>"><?= isLiveBoardEnabled() ? 'Back to live rankings' : 'Back to home' ?></a>
                 <?php if (isLoggedIn() && isAdmin()): ?>
                 <a class="btn btn-outline-light btn-lg" href="<?= BASE_URL ?>/admin/committees/index.php">Manage committees</a>
                 <?php elseif (!isLoggedIn()): ?>
@@ -117,7 +118,7 @@ $styleVersion = is_file($stylePath) ? (string) filemtime($stylePath) : APP_VERSI
 
     <footer class="live-board-footer">
         <span><?= sanitize(APP_NAME) ?></span>
-        <a href="<?= BASE_URL ?>/live.php">Live rankings</a>
+        <a href="<?= sanitize(getPublicStandingsUrl()) ?>"><?= isLiveBoardEnabled() ? 'Live rankings' : 'Home' ?></a>
     </footer>
 </div>
 </body>

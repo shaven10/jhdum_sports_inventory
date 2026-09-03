@@ -3,6 +3,7 @@ require_once __DIR__ . '/includes/auth.php';
 requireLogin();
 
 $showInventory = canViewInventoryDashboard();
+$showStudentBorrowing = canBorrowEquipment();
 $showCompetition = canViewCompetitionDashboard();
 $showCoachPanel = isCoach() && !canManageIntramurals();
 
@@ -18,6 +19,8 @@ $overallStandings = [];
 $coachAssignments = [];
 $teamNames = [];
 $sportNames = [];
+$studentRequests = [];
+$studentBorrowStats = ['active' => 0, 'pending' => 0, 'overdue' => 0];
 $isTmDashboard = isTournamentManager() && !canManageIntramurals();
 $showUnfinishedMatches = false;
 
@@ -48,6 +51,37 @@ if ($showInventory) {
         GROUP BY e.id, e.name
         ORDER BY borrow_count DESC LIMIT 5
     ")->fetchAll();
+}
+
+if ($showStudentBorrowing) {
+    $uid = (int) $_SESSION['user_id'];
+    $stmt = $db->prepare("
+        SELECT br.*, e.name AS equipment_name
+        FROM borrowing_requests br
+        JOIN equipment e ON br.equipment_id = e.id
+        WHERE br.user_id = ?
+        ORDER BY br.created_at DESC LIMIT 5
+    ");
+    $stmt->execute([$uid]);
+    $studentRequests = $stmt->fetchAll();
+
+    $stmt = $db->prepare("
+        SELECT
+            SUM(CASE WHEN status IN ('approved', 'checked_out') THEN 1 ELSE 0 END) AS active,
+            SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
+            SUM(CASE WHEN status = 'overdue' THEN 1 ELSE 0 END) AS overdue
+        FROM borrowing_requests
+        WHERE user_id = ?
+    ");
+    $stmt->execute([$uid]);
+    $row = $stmt->fetch();
+    if ($row) {
+        $studentBorrowStats = [
+            'active' => (int) ($row['active'] ?? 0),
+            'pending' => (int) ($row['pending'] ?? 0),
+            'overdue' => (int) ($row['overdue'] ?? 0),
+        ];
+    }
 }
 
 try {
@@ -96,6 +130,8 @@ if (isSecretariat()) {
     $dashboardSubtitle = hasCoachAssignments()
         ? 'Your assigned teams and events'
         : 'No event assignments yet — ask your unit manager to assign you';
+} elseif ($showStudentBorrowing) {
+    $dashboardSubtitle = 'Browse equipment and track your borrowing requests';
 }
 
 $dashboardActions = '';
@@ -156,6 +192,87 @@ if (canViewAnnouncements()) {
             </div>
         </a>
         <?php endforeach; ?>
+    </div>
+</div>
+<?php endif; ?>
+
+<?php if ($showStudentBorrowing): ?>
+<div class="row g-3 mb-4">
+    <div class="col-6 col-md-4">
+        <a href="<?= BASE_URL ?>/requests/index.php?status=checked_out" class="stat-card-link">
+            <div class="card stat-card h-100">
+                <div class="card-body d-flex align-items-center gap-3">
+                    <div class="stat-icon bg-info bg-opacity-10 text-info bi bi-box-arrow-right" aria-hidden="true"></div>
+                    <div>
+                        <div class="stat-value"><?= $studentBorrowStats['active'] ?></div>
+                        <div class="stat-label">Active Borrows</div>
+                    </div>
+                </div>
+            </div>
+        </a>
+    </div>
+    <div class="col-6 col-md-4">
+        <a href="<?= BASE_URL ?>/requests/index.php?status=pending" class="stat-card-link">
+            <div class="card stat-card h-100">
+                <div class="card-body d-flex align-items-center gap-3">
+                    <div class="stat-icon bg-warning bg-opacity-10 text-warning bi bi-hourglass-split" aria-hidden="true"></div>
+                    <div>
+                        <div class="stat-value"><?= $studentBorrowStats['pending'] ?></div>
+                        <div class="stat-label">Pending Requests</div>
+                    </div>
+                </div>
+            </div>
+        </a>
+    </div>
+    <div class="col-6 col-md-4">
+        <a href="<?= BASE_URL ?>/requests/index.php?status=overdue" class="stat-card-link">
+            <div class="card stat-card h-100">
+                <div class="card-body d-flex align-items-center gap-3">
+                    <div class="stat-icon bg-danger bg-opacity-10 text-danger bi bi-exclamation-triangle-fill" aria-hidden="true"></div>
+                    <div>
+                        <div class="stat-value"><?= $studentBorrowStats['overdue'] ?></div>
+                        <div class="stat-label">Overdue</div>
+                    </div>
+                </div>
+            </div>
+        </a>
+    </div>
+</div>
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span><i class="bi bi-clipboard-check"></i> My Recent Requests</span>
+        <div class="d-flex gap-2">
+            <a href="<?= BASE_URL ?>/equipment/index.php" class="btn btn-sm btn-primary"><i class="bi bi-plus-circle"></i> Browse Equipment</a>
+            <a href="<?= BASE_URL ?>/requests/index.php" class="btn btn-sm btn-outline-primary">View All</a>
+        </div>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Request #</th>
+                        <th>Equipment</th>
+                        <th>Status</th>
+                        <th>Date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if (empty($studentRequests)): ?>
+                    <tr><td colspan="4" class="text-muted text-center py-4">No requests yet. Browse equipment to submit your first request.</td></tr>
+                    <?php else: ?>
+                    <?php foreach ($studentRequests as $req): ?>
+                    <tr>
+                        <td><a href="<?= BASE_URL ?>/requests/view.php?id=<?= (int) $req['id'] ?>"><?= sanitize($req['request_number']) ?></a></td>
+                        <td><?= sanitize($req['equipment_name']) ?></td>
+                        <td><?= statusBadge($req['status']) ?></td>
+                        <td><?= formatDateTime($req['created_at']) ?></td>
+                    </tr>
+                    <?php endforeach; ?>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
     </div>
 </div>
 <?php endif; ?>

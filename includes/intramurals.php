@@ -301,6 +301,48 @@ function ensureResultsLockColumns(): void
     ensureEventResultsLockTable();
 }
 
+/** Ensure intramural_seasons has live board toggle columns. */
+function ensureLiveBoardColumns(): void
+{
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    try {
+        ensureResultsLockColumns();
+
+        $db = getDB();
+        $stmt = $db->prepare('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
+        $anchor = 'is_archived';
+        foreach (['results_locked_by', 'roster_locked_by', 'is_archived'] as $candidate) {
+            $stmt->execute(['intramural_seasons', $candidate]);
+            if ((int) $stmt->fetchColumn() > 0) {
+                $anchor = $candidate;
+                break;
+            }
+        }
+
+        $stmt->execute(['intramural_seasons', 'live_board_enabled']);
+        if ((int) $stmt->fetchColumn() === 0) {
+            $db->exec("ALTER TABLE intramural_seasons ADD COLUMN live_board_enabled TINYINT(1) NOT NULL DEFAULT 1 AFTER `{$anchor}`");
+        }
+
+        $stmt->execute(['intramural_seasons', 'live_board_updated_at']);
+        if ((int) $stmt->fetchColumn() === 0) {
+            $db->exec('ALTER TABLE intramural_seasons ADD COLUMN live_board_updated_at DATETIME DEFAULT NULL AFTER live_board_enabled');
+        }
+
+        $stmt->execute(['intramural_seasons', 'live_board_updated_by']);
+        if ((int) $stmt->fetchColumn() === 0) {
+            $db->exec('ALTER TABLE intramural_seasons ADD COLUMN live_board_updated_by INT DEFAULT NULL AFTER live_board_updated_at');
+        }
+    } catch (Throwable $e) {
+        // Do not break public pages if a legacy schema cannot be altered in-place.
+    }
+}
+
 /** Per-event results locks (within a season). */
 function ensureEventResultsLockTable(): void
 {
@@ -3521,6 +3563,182 @@ function uploadTeamLogo(array $file): ?string
     return uploadToPath($file, UPLOAD_PATH_TEAMS, 'team');
 }
 
+function uploadGalleryPhoto(array $file): ?string
+{
+    return uploadToPath($file, UPLOAD_PATH_GALLERY, 'gal');
+}
+
+function galleryPhotoUrl(?string $filename): ?string
+{
+    return $filename ? UPLOAD_URL_GALLERY . $filename : null;
+}
+
+/** Ensure season activity gallery table exists. */
+function ensureSeasonGalleryTable(): void
+{
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    try {
+        $db = getDB();
+        $stmt = $db->prepare('SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?');
+        $stmt->execute(['intramural_season_gallery']);
+        if ((int) $stmt->fetchColumn() === 0) {
+            $db->exec("CREATE TABLE intramural_season_gallery (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                season_id INT NOT NULL,
+                filename VARCHAR(255) NOT NULL,
+                caption VARCHAR(255) DEFAULT NULL,
+                sort_order INT NOT NULL DEFAULT 0,
+                uploaded_by INT DEFAULT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_gallery_season (season_id, sort_order)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+    } catch (Throwable $e) {
+        // Gallery is optional — public pages must still load if auto-migration fails.
+    }
+
+    if (!is_dir(UPLOAD_PATH_GALLERY)) {
+        @mkdir(UPLOAD_PATH_GALLERY, 0755, true);
+    }
+}
+
+function seasonGalleryTableReady(): bool
+{
+    try {
+        ensureSeasonGalleryTable();
+        $db = getDB();
+        $stmt = $db->prepare('SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?');
+        $stmt->execute(['intramural_season_gallery']);
+        return (int) $stmt->fetchColumn() > 0;
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
+/** Most recent season that is not currently active. */
+function getLastInactiveSeason(): ?array
+{
+    try {
+        $db = getDB();
+        $active = getActiveSeason();
+        $excludeId = $active ? (int) $active['id'] : 0;
+        $stmt = $db->prepare('SELECT * FROM intramural_seasons WHERE is_active = 0 AND id != ? ORDER BY year_label DESC, id DESC LIMIT 1');
+        $stmt->execute([$excludeId]);
+        return $stmt->fetch() ?: null;
+    } catch (Throwable $e) {
+        return null;
+    }
+}
+
+/** Season whose gallery photos should appear on the public landing page. */
+function getGalleryDisplaySeason(): ?array
+{
+    if (!seasonGalleryTableReady()) {
+        return getLastInactiveSeason() ?: getActiveSeason();
+    }
+
+    $lastInactive = getLastInactiveSeason();
+    if ($lastInactive && getSeasonGalleryPhotos((int) $lastInactive['id']) !== []) {
+        return $lastInactive;
+    }
+
+    $active = getActiveSeason();
+    if ($active && getSeasonGalleryPhotos((int) $active['id']) !== []) {
+        return $active;
+    }
+
+    return $lastInactive ?: $active;
+}
+
+/** @return list<array> */
+function getSeasonGalleryPhotos(int $seasonId): array
+{
+    if (!seasonGalleryTableReady()) {
+        return [];
+    }
+
+    try {
+        $db = getDB();
+        $stmt = $db->prepare('SELECT * FROM intramural_season_gallery WHERE season_id = ? ORDER BY sort_order ASC, id ASC');
+        $stmt->execute([$seasonId]);
+        return $stmt->fetchAll() ?: [];
+    } catch (Throwable $e) {
+        return [];
+    }
+}
+
+function addSeasonGalleryPhoto(int $seasonId, string $filename, ?string $caption, int $userId, int $sortOrder = 0): ?int
+{
+    if (!seasonGalleryTableReady() || !getSeasonById($seasonId)) {
+        return null;
+    }
+
+    $uploaderId = null;
+    if ($userId > 0) {
+        try {
+            $db = getDB();
+            $stmt = $db->prepare('SELECT id FROM users WHERE id = ?');
+            $stmt->execute([$userId]);
+            if ($stmt->fetch()) {
+                $uploaderId = $userId;
+            }
+        } catch (Throwable $e) {
+            $uploaderId = null;
+        }
+    }
+
+    try {
+        $db = getDB();
+        $stmt = $db->prepare('INSERT INTO intramural_season_gallery (season_id, filename, caption, sort_order, uploaded_by) VALUES (?, ?, ?, ?, ?)');
+        $stmt->execute([$seasonId, $filename, $caption !== '' ? $caption : null, $sortOrder, $uploaderId]);
+        return (int) $db->lastInsertId() ?: null;
+    } catch (Throwable $e) {
+        return null;
+    }
+}
+
+function deleteSeasonGalleryPhoto(int $photoId): bool
+{
+    ensureSeasonGalleryTable();
+
+    $db = getDB();
+    $stmt = $db->prepare('SELECT filename FROM intramural_season_gallery WHERE id = ?');
+    $stmt->execute([$photoId]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        return false;
+    }
+
+    deleteUploadedFile($row['filename'], UPLOAD_PATH_GALLERY);
+    $db->prepare('DELETE FROM intramural_season_gallery WHERE id = ?')->execute([$photoId]);
+    return true;
+}
+
+function updateSeasonGalleryPhoto(int $photoId, ?string $caption, int $sortOrder): bool
+{
+    ensureSeasonGalleryTable();
+
+    $db = getDB();
+    $stmt = $db->prepare('UPDATE intramural_season_gallery SET caption = ?, sort_order = ? WHERE id = ?');
+    $stmt->execute([$caption !== '' ? $caption : null, $sortOrder, $photoId]);
+    return $stmt->rowCount() > 0;
+}
+
+function getSeasonGalleryPhotoById(int $photoId): ?array
+{
+    ensureSeasonGalleryTable();
+
+    $db = getDB();
+    $stmt = $db->prepare('SELECT * FROM intramural_season_gallery WHERE id = ?');
+    $stmt->execute([$photoId]);
+    return $stmt->fetch() ?: null;
+}
+
 function uploadToPath(array $file, string $path, string $prefix): ?string
 {
     if ($file['error'] !== UPLOAD_ERR_OK) {
@@ -3654,6 +3872,59 @@ function setActiveSeason(int $seasonId): bool
     $db->prepare('UPDATE intramural_seasons SET is_active = 1, is_archived = 0 WHERE id = ?')->execute([$seasonId]);
     $_SESSION['intramural_season_id'] = $seasonId;
     return true;
+}
+
+/** Whether the public live overall / medal standings page is enabled for the active season. */
+function isLiveBoardEnabled(?int $seasonId = null): bool
+{
+    ensureLiveBoardColumns();
+
+    $season = null;
+    if ($seasonId !== null) {
+        $season = getSeasonById($seasonId);
+    } else {
+        $season = getActiveSeason();
+    }
+
+    if (!$season) {
+        return false;
+    }
+
+    return !empty($season['live_board_enabled']);
+}
+
+function setLiveBoardEnabled(int $seasonId, bool $enabled, int $userId): bool
+{
+    ensureLiveBoardColumns();
+
+    $season = getSeasonById($seasonId);
+    if (!$season || empty($season['is_active'])) {
+        return false;
+    }
+
+    $db = getDB();
+    $updatedBy = null;
+    if ($userId > 0) {
+        $check = $db->prepare('SELECT id FROM users WHERE id = ?');
+        $check->execute([$userId]);
+        if ($check->fetch()) {
+            $updatedBy = $userId;
+        }
+    }
+
+    $stmt = $db->prepare('UPDATE intramural_seasons SET live_board_enabled = ?, live_board_updated_at = NOW(), live_board_updated_by = ? WHERE id = ?');
+    $stmt->execute([$enabled ? 1 : 0, $updatedBy, $seasonId]);
+    return $stmt->rowCount() > 0;
+}
+
+/** Public URL for standings — live board when enabled, landing page when disabled. */
+function getPublicStandingsUrl(): string
+{
+    ensureLiveBoardColumns();
+    if (isLiveBoardEnabled()) {
+        return BASE_URL . '/live.php';
+    }
+    return BASE_URL . '/landing.php';
 }
 
 function isViewingActiveSeason(): bool

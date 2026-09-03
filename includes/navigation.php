@@ -44,6 +44,16 @@ function buildAppNavigation(): array
             $items[] = ['label' => 'Analytics', 'href' => BASE_URL . '/reports/analytics.php', 'icon' => 'bi-pie-chart'];
         }
         $nav[] = ['type' => 'group', 'label' => 'Inventory', 'icon' => 'bi-box-seam', 'items' => $items];
+    } elseif (canBorrowEquipment()) {
+        $nav[] = [
+            'type' => 'group',
+            'label' => 'Equipment Borrowing',
+            'icon' => 'bi-box-seam',
+            'items' => [
+                ['label' => 'Browse Equipment', 'href' => BASE_URL . '/equipment/index.php', 'icon' => 'bi-search'],
+                ['label' => 'My Requests', 'href' => BASE_URL . '/requests/index.php', 'icon' => 'bi-clipboard-check'],
+            ],
+        ];
     }
 
     if (canViewCompetitionDashboard() && !isPublication()) {

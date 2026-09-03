@@ -11,6 +11,7 @@ $sportCount = 0;
 $seasonLabel = '—';
 $rosterLocked = false;
 $resultsLocked = false;
+$liveBoardEnabled = true;
 $openIncidents = 0;
 
 try {
@@ -25,6 +26,7 @@ try {
         $seasonLabel = seasonLabel(getCurrentSeason());
         $rosterLocked = function_exists('isRosterLocked') ? isRosterLocked() : false;
         $resultsLocked = function_exists('isResultsLocked') ? isResultsLocked() : false;
+        $liveBoardEnabled = function_exists('isLiveBoardEnabled') ? isLiveBoardEnabled() : true;
     }
 } catch (Throwable $e) {
 }
@@ -64,6 +66,8 @@ $adminSections = [
         'cards' => [
             ['title' => 'Seasons / Years', 'desc' => 'Active season: ' . $seasonLabel, 'href' => BASE_URL . '/intramurals/seasons/index.php', 'icon' => 'bi-calendar3', 'color' => 'primary', 'meta' => $sportCount . ' sports · ' . $teamCount . ' teams'],
             ['title' => 'Roster Lock', 'desc' => $rosterLocked ? 'Rosters are currently locked' : 'Rosters are currently open', 'href' => BASE_URL . '/intramurals/roster/lock.php', 'icon' => $rosterLocked ? 'bi-lock-fill' : 'bi-unlock-fill', 'color' => $rosterLocked ? 'danger' : 'success'],
+            ['title' => 'Live Standings', 'desc' => $liveBoardEnabled ? 'Public live board is enabled' : 'Public live board is hidden', 'href' => BASE_URL . '/admin/live_board.php', 'icon' => $liveBoardEnabled ? 'bi-broadcast' : 'bi-eye-slash', 'color' => $liveBoardEnabled ? 'success' : 'secondary'],
+            ['title' => 'Landing Page', 'desc' => 'SDO about text and activity gallery', 'href' => BASE_URL . '/admin/landing.php', 'icon' => 'bi-house-door', 'color' => 'info'],
             ['title' => 'Lock Results', 'desc' => $resultsLocked ? 'Match results are currently locked' : 'Match results are currently open', 'href' => BASE_URL . '/admin/results_lock.php', 'icon' => $resultsLocked ? 'bi-lock-fill' : 'bi-trophy-fill', 'color' => $resultsLocked ? 'danger' : 'success'],
             ['title' => 'TM Ranking Access', 'desc' => 'Activate Manual Entry of Ranks for tournament managers per event', 'href' => BASE_URL . '/admin/tm_ranking.php', 'icon' => 'bi-list-check', 'color' => 'warning'],
             ['title' => 'Divisions', 'desc' => 'Group teams (e.g. HS / College) and assign events', 'href' => BASE_URL . '/admin/divisions/index.php', 'icon' => 'bi-diagram-3', 'color' => 'info'],

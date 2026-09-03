@@ -9,7 +9,7 @@ define('APP_SHORT_NAME', 'JHCSC SDIMIS');
 define('APP_CAMPUS', 'J.H. Cerilles State College');
 define('APP_TAGLINE', 'Sports Development Management Information System');
 define('APP_VERSION', '1.0.0');
-define('BASE_URL', '/sports_inventory');
+define('BASE_URL', '/jhdum_sports_inventory');
 define('APP_LOGO', BASE_URL . '/assets/img/sports-development-logo.png');
 define('APP_LOGO_PATH', __DIR__ . '/../assets/img/sports-development-logo.png');
 define('UPLOAD_PATH', __DIR__ . '/../uploads/equipment/');
@@ -18,6 +18,8 @@ define('UPLOAD_PATH_ATHLETES', __DIR__ . '/../uploads/athletes/');
 define('UPLOAD_URL_ATHLETES', BASE_URL . '/uploads/athletes/');
 define('UPLOAD_PATH_TEAMS', __DIR__ . '/../uploads/teams/');
 define('UPLOAD_URL_TEAMS', BASE_URL . '/uploads/teams/');
+define('UPLOAD_PATH_GALLERY', __DIR__ . '/../uploads/gallery/');
+define('UPLOAD_URL_GALLERY', BASE_URL . '/uploads/gallery/');
 define('MAX_UPLOAD_SIZE', 5 * 1024 * 1024); // 5MB
 define('LOW_STOCK_THRESHOLD', 3);
 define('DEFAULT_BORROW_DAYS', 7);

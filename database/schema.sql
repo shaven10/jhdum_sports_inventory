@@ -10,15 +10,15 @@ USE jhcsc_sports_inventory;
 -- Users table
 CREATE TABLE IF NOT EXISTS users (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(50) NOT NULL UNIQUE,
-    email VARCHAR(100) NOT NULL UNIQUE,
+    username VARCHAR(80) NOT NULL UNIQUE,
+    email VARCHAR(190) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,
     password_plain VARCHAR(255) DEFAULT NULL,
-    first_name VARCHAR(50) NOT NULL,
-    last_name VARCHAR(50) NOT NULL,
-    student_id VARCHAR(20) DEFAULT NULL,
-    department VARCHAR(100) DEFAULT NULL,
-    phone VARCHAR(20) DEFAULT NULL,
+    first_name VARCHAR(100) NOT NULL,
+    last_name VARCHAR(100) NOT NULL,
+    student_id VARCHAR(50) DEFAULT NULL,
+    department VARCHAR(255) DEFAULT NULL,
+    phone VARCHAR(40) DEFAULT NULL,
     role ENUM('admin', 'coordinator', 'staff', 'unit_manager', 'coach', 'tabulator', 'secretariat', 'publication', 'student') NOT NULL DEFAULT 'student',
     team_id INT DEFAULT NULL,
     avatar VARCHAR(255) DEFAULT NULL,
@@ -266,7 +266,9 @@ INSERT INTO system_settings (setting_key, setting_value, setting_type, descripti
 ('theme_body_bg', '#f3f7f4', 'string', 'Custom body background'),
 ('theme_card_bg', '#ffffff', 'string', 'Custom card background'),
 ('theme_text', '#1b2e1d', 'string', 'Custom text color'),
-('theme_login_gradient', 'linear-gradient(135deg, #1b5e20 0%, #2e7d32 45%, #c62828 100%)', 'string', 'Login page gradient');
+('theme_login_gradient', 'linear-gradient(135deg, #1b5e20 0%, #2e7d32 45%, #c62828 100%)', 'string', 'Login page gradient'),
+('sdo_about_title', 'About the Sports Development Office', 'string', 'Landing page SDO section title'),
+('sdo_about_content', 'The Sports Development Office (SDO) leads the campus sports program at J.H. Cerilles State College — organizing intramurals, supporting varsity teams, managing sports facilities and equipment, and promoting wellness through physical activity.\n\nOur office works with coaches, unit managers, and student-athletes to deliver fair competition, meaningful recreation, and opportunities for leadership on and off the field.', 'string', 'Landing page SDO about text');
 
 -- =====================
 -- Intramurals Module
@@ -289,9 +291,23 @@ CREATE TABLE IF NOT EXISTS intramural_seasons (
     results_lock_date DATE DEFAULT NULL,
     results_locked_at DATETIME DEFAULT NULL,
     results_locked_by INT DEFAULT NULL,
+    live_board_enabled TINYINT(1) NOT NULL DEFAULT 1,
+    live_board_updated_at DATETIME DEFAULT NULL,
+    live_board_updated_by INT DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uq_season_year_label (year_label)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS intramural_season_gallery (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    season_id INT NOT NULL,
+    filename VARCHAR(255) NOT NULL,
+    caption VARCHAR(255) DEFAULT NULL,
+    sort_order INT NOT NULL DEFAULT 0,
+    uploaded_by INT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_gallery_season (season_id, sort_order)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS intramural_divisions (

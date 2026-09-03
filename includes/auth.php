@@ -5,6 +5,7 @@
 
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/functions.php';
+require_once __DIR__ . '/registrar_api.php';
 require_once __DIR__ . '/intramurals.php';
 require_once __DIR__ . '/committees.php';
 
@@ -52,7 +53,7 @@ function getHomeUrl(): string
 /** Show inventory stats and borrowing widgets on the main dashboard. */
 function canViewInventoryDashboard(): bool
 {
-    return isLoggedIn() && !isIntramuralsOnlyRole();
+    return isLoggedIn() && !isIntramuralsOnlyRole() && !canBorrowEquipment();
 }
 
 /** Show match results and overall standings on the main dashboard. */
@@ -101,6 +102,246 @@ function login(string $username, string $password): array
     auditLog($user['id'], 'login', 'user', $user['id']);
 
     return ['success' => true, 'message' => 'Login successful.', 'role' => $user['role']];
+}
+
+/**
+ * Log in an active enrolled student using Registrar API verification (student ID only).
+ */
+function loginStudentById(string $studentId): array
+{
+    $lookup = fetchActiveStudentByStudentId($studentId);
+    if (!$lookup['ok'] || empty($lookup['student'])) {
+        return ['success' => false, 'message' => $lookup['message']];
+    }
+
+    $userId = syncStudentUserFromRegistrar($lookup['student']);
+    if (!$userId) {
+        return ['success' => false, 'message' => 'Could not set up your borrowing account. Please contact the Sports Development Office.'];
+    }
+
+    $db = getDB();
+    $stmt = $db->prepare('SELECT * FROM users WHERE id = ? AND is_active = 1');
+    $stmt->execute([$userId]);
+    $user = $stmt->fetch();
+
+    if (!$user || ($user['role'] ?? '') !== 'student') {
+        return ['success' => false, 'message' => 'Your account is not authorized for student borrowing.'];
+    }
+
+    $_SESSION['user_id'] = (int) $user['id'];
+    $_SESSION['user_role'] = $user['role'];
+    $_SESSION['user_name'] = trim($user['first_name'] . ' ' . $user['last_name']);
+    $_SESSION['username'] = $user['username'];
+    $_SESSION['team_id'] = null;
+    $_SESSION['student_id'] = $user['student_id'] ?? null;
+
+    logLoginAttempt((int) $user['id'], 'success');
+    auditLog((int) $user['id'], 'login_student_id', 'user', (int) $user['id'], null, [
+        'student_id' => $user['student_id'],
+    ]);
+
+    return ['success' => true, 'message' => 'Welcome, ' . $_SESSION['user_name'] . '!', 'role' => 'student'];
+}
+
+/** Widen users columns used by Registrar student login (idempotent). */
+function ensureStudentBorrowingUsersSchema(): void
+{
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    try {
+        $db = getDB();
+        ensureTablePrimaryAutoIncrement($db, 'users');
+
+        $alters = [
+            'student_id' => "ALTER TABLE users MODIFY student_id VARCHAR(50) DEFAULT NULL",
+            'department' => "ALTER TABLE users MODIFY department VARCHAR(255) DEFAULT NULL",
+            'phone' => "ALTER TABLE users MODIFY phone VARCHAR(40) DEFAULT NULL",
+            'first_name' => "ALTER TABLE users MODIFY first_name VARCHAR(100) NOT NULL",
+            'last_name' => "ALTER TABLE users MODIFY last_name VARCHAR(100) NOT NULL",
+            'email' => "ALTER TABLE users MODIFY email VARCHAR(190) NOT NULL",
+            'username' => "ALTER TABLE users MODIFY username VARCHAR(80) NOT NULL",
+        ];
+
+        foreach ($alters as $column => $sql) {
+            $stmt = $db->prepare('SELECT CHARACTER_MAXIMUM_LENGTH FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
+            $stmt->execute(['users', $column]);
+            $len = (int) ($stmt->fetchColumn() ?: 0);
+            $needed = match ($column) {
+                'student_id' => 50,
+                'department' => 255,
+                'phone' => 40,
+                'first_name', 'last_name' => 100,
+                'email' => 190,
+                'username' => 80,
+                default => 0,
+            };
+            if ($len > 0 && $len < $needed) {
+                $db->exec($sql);
+            }
+        }
+    } catch (Throwable $e) {
+        // Best-effort schema widen only.
+    }
+}
+
+function truncateForColumn(string $value, int $max): string
+{
+    if (function_exists('mb_substr')) {
+        return mb_substr($value, 0, $max);
+    }
+
+    return substr($value, 0, $max);
+}
+
+function allocateUniqueStudentUsername(PDO $db, string $baseUsername, ?int $excludeUserId = null): string
+{
+    $base = truncateForColumn($baseUsername !== '' ? $baseUsername : 'student', 60);
+    $candidate = $base;
+    for ($i = 0; $i < 20; $i++) {
+        if ($i > 0) {
+            $suffix = '_' . substr(md5($base . $i . microtime(true)), 0, 6);
+            $candidate = truncateForColumn($base, 80 - strlen($suffix)) . $suffix;
+        }
+
+        if ($excludeUserId) {
+            $stmt = $db->prepare('SELECT id FROM users WHERE username = ? AND id != ? LIMIT 1');
+            $stmt->execute([$candidate, $excludeUserId]);
+        } else {
+            $stmt = $db->prepare('SELECT id FROM users WHERE username = ? LIMIT 1');
+            $stmt->execute([$candidate]);
+        }
+
+        if (!$stmt->fetch()) {
+            return $candidate;
+        }
+    }
+
+    return truncateForColumn('student_' . bin2hex(random_bytes(8)), 80);
+}
+
+function allocateUniqueStudentEmail(PDO $db, array $student, ?int $excludeUserId = null): string
+{
+    $email = registrarStudentLoginEmail($student);
+    $check = function (string $candidate) use ($db, $excludeUserId): bool {
+        if ($excludeUserId) {
+            $stmt = $db->prepare('SELECT id FROM users WHERE email = ? AND id != ? LIMIT 1');
+            $stmt->execute([$candidate, $excludeUserId]);
+        } else {
+            $stmt = $db->prepare('SELECT id FROM users WHERE email = ? LIMIT 1');
+            $stmt->execute([$candidate]);
+        }
+        return (bool) $stmt->fetch();
+    };
+
+    if (!$check($email)) {
+        return truncateForColumn($email, 190);
+    }
+
+    $fallback = registrarStudentLoginEmail(array_merge($student, ['email' => '']));
+    if (!$check($fallback)) {
+        return truncateForColumn($fallback, 190);
+    }
+
+    $studentId = preg_replace('/[^a-zA-Z0-9._-]/', '', (string) ($student['student_id'] ?? '')) ?: 'student';
+    $unique = strtolower($studentId) . '.' . substr(md5((string) ($student['id'] ?? $studentId) . microtime(true)), 0, 8) . '@student.jhcsc.local';
+
+    return truncateForColumn($unique, 190);
+}
+
+/** Create or update a local student user from Registrar API data. */
+function syncStudentUserFromRegistrar(array $student): ?int
+{
+    $studentId = trim((string) ($student['student_id'] ?? ''));
+    if ($studentId === '') {
+        return null;
+    }
+
+    $db = getDB();
+    ensureStudentBorrowingUsersSchema();
+
+    $firstName = trim((string) ($student['first_name'] ?? 'Student'));
+    $lastName = trim((string) ($student['last_name'] ?? ''));
+    if ($lastName === '' && !empty($student['full_name'])) {
+        $parts = preg_split('/,\s*/', (string) $student['full_name'], 2);
+        if (is_array($parts) && count($parts) === 2) {
+            $lastName = trim($parts[0]);
+            $firstName = trim($parts[1]) ?: $firstName;
+        }
+    }
+    if ($firstName === '') {
+        $firstName = 'Student';
+    }
+    if ($lastName === '') {
+        $lastName = $studentId;
+    }
+
+    $department = trim((string) ($student['course'] ?? ''));
+    $phone = trim((string) ($student['phone'] ?? ''));
+    $baseUsername = registrarStudentUsername($student);
+
+    $firstName = truncateForColumn($firstName, 100);
+    $lastName = truncateForColumn($lastName, 100);
+    $studentId = truncateForColumn($studentId, 50);
+    $department = $department !== '' ? truncateForColumn($department, 255) : null;
+    $phone = $phone !== '' ? truncateForColumn($phone, 40) : null;
+
+    try {
+        $stmt = $db->prepare('SELECT * FROM users WHERE student_id = ? LIMIT 1');
+        $stmt->execute([$studentId]);
+        $existing = $stmt->fetch();
+
+        // Reuse an existing student account that already uses this username.
+        if (!$existing) {
+            $stmt = $db->prepare('SELECT * FROM users WHERE username = ? AND role = ? LIMIT 1');
+            $stmt->execute([$baseUsername, 'student']);
+            $existing = $stmt->fetch();
+        }
+
+        if ($existing) {
+            if (($existing['role'] ?? '') !== 'student') {
+                // Never hijack staff/admin accounts that happen to share a username.
+                $existing = null;
+            }
+        }
+
+        if ($existing) {
+            $userId = (int) $existing['id'];
+            $username = allocateUniqueStudentUsername($db, $baseUsername, $userId);
+            $email = allocateUniqueStudentEmail($db, $student, $userId);
+
+            $db->prepare('UPDATE users SET username = ?, email = ?, first_name = ?, last_name = ?, student_id = ?, department = ?, phone = ?, is_active = 1 WHERE id = ? AND role = ?')
+                ->execute([$username, $email, $firstName, $lastName, $studentId, $department, $phone, $userId, 'student']);
+
+            return $userId;
+        }
+
+        $username = allocateUniqueStudentUsername($db, $baseUsername);
+        $email = allocateUniqueStudentEmail($db, $student);
+        $passwordHash = password_hash(bin2hex(random_bytes(16)), PASSWORD_DEFAULT);
+
+        $db->prepare('INSERT INTO users (username, email, password, first_name, last_name, student_id, department, phone, role, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)')
+            ->execute([$username, $email, $passwordHash, $firstName, $lastName, $studentId, $department, $phone, 'student']);
+
+        $newId = (int) $db->lastInsertId();
+        if ($newId > 0) {
+            return $newId;
+        }
+
+        // Some MySQL setups return 0 from lastInsertId; resolve by student_id.
+        $stmt = $db->prepare('SELECT id FROM users WHERE student_id = ? AND role = ? ORDER BY id DESC LIMIT 1');
+        $stmt->execute([$studentId, 'student']);
+        $resolved = (int) ($stmt->fetchColumn() ?: 0);
+
+        return $resolved > 0 ? $resolved : null;
+    } catch (Throwable $e) {
+        error_log('syncStudentUserFromRegistrar failed for student_id ' . $studentId . ': ' . $e->getMessage());
+        return null;
+    }
 }
 
 function logout(): void

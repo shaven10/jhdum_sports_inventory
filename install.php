@@ -89,7 +89,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->exec($statement);
         }
 
-        foreach (['equipment', 'athletes', 'teams'] as $dir) {
+        foreach (['equipment', 'athletes', 'teams', 'gallery'] as $dir) {
             $uploadDir = __DIR__ . '/uploads/' . $dir;
             if (!is_dir($uploadDir)) {
                 mkdir($uploadDir, 0755, true);
