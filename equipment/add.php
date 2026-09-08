@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../includes/auth.php';
 requireRole(['admin', 'coordinator', 'staff']);
+ensureEquipmentBorrowableColumn();
 
 $db = getDB();
 $categories = $db->query('SELECT * FROM equipment_categories WHERE is_active = 1 ORDER BY name')->fetchAll();
@@ -20,6 +21,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $location = post('location', 'Sports Office');
     $barcode = post('barcode') ?: generateBarcode();
     $lowStock = max(1, (int) post('low_stock_threshold', '3'));
+    $isBorrowable = post('is_borrowable') === '1' ? 1 : 0;
 
     if (empty($name)) $errors[] = 'Equipment name is required.';
     if (!$categoryId) $errors[] = 'Category is required.';
@@ -32,8 +34,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if (empty($errors)) {
-        $stmt = $db->prepare('INSERT INTO equipment (category_id, name, description, barcode, quantity_total, quantity_available, `condition`, location, image, low_stock_threshold) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-        $stmt->execute([$categoryId, $name, $description, $barcode, $quantity, $quantity, $condition, $location, $image, $lowStock]);
+        $stmt = $db->prepare('INSERT INTO equipment (category_id, name, description, barcode, quantity_total, quantity_available, `condition`, location, image, low_stock_threshold, is_borrowable) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $stmt->execute([$categoryId, $name, $description, $barcode, $quantity, $quantity, $condition, $location, $image, $lowStock, $isBorrowable]);
 
         $id = (int) $db->lastInsertId();
         auditLog($_SESSION['user_id'], 'create', 'equipment', $id, null, ['name' => $name, 'quantity' => $quantity]);
@@ -105,6 +107,12 @@ require_once __DIR__ . '/../includes/header.php';
                         <div class="col-md-6">
                             <label class="form-label">Equipment Image</label>
                             <input type="file" name="image" class="form-control" accept="image/*">
+                        </div>
+                        <div class="col-12">
+                            <div class="form-check">
+                                <input type="checkbox" name="is_borrowable" class="form-check-input" id="is_borrowable" value="1" <?= post('is_borrowable', '1') === '1' ? 'checked' : '' ?>>
+                                <label class="form-check-label" for="is_borrowable">Allow students to borrow this equipment</label>
+                            </div>
                         </div>
                     </div>
                     <div class="mt-4 d-flex gap-2">

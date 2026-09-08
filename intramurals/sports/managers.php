@@ -10,7 +10,7 @@ if (!canManageIntramurals()) {
 
 $db = getDB();
 $seasonId = getCurrentSeasonId();
-$sports = $db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll();
+$sports = $db->query('SELECT * FROM intramural_sports ORDER BY ' . intramuralSportsOrderBy())->fetchAll();
 $managers = $db->query("SELECT id, first_name, last_name, username FROM users WHERE role = 'tabulator' AND is_active = 1 ORDER BY first_name, last_name")->fetchAll();
 
 $current = [];
@@ -84,7 +84,7 @@ require __DIR__ . '/../_season_bar.php';
 </div>
 
 <div class="alert alert-info">
-    Each event must have a tournament manager who can generate fixtures, schedule matches, and record scores for that event only.
+    Each event must have a tournament manager who can generate fixtures, schedule matches, and enter scores and rankings for that event only.
     Create user accounts with the <strong>Tournament Manager</strong> role first, then assign them here.
 </div>
 

@@ -44,7 +44,7 @@ if (!in_array($sort, ['schedule', 'game_number'], true)) {
 $page = max(1, (int) get('page', '1'));
 $perPage = 20;
 
-$sports = filterSportsForUser($db->query('SELECT id, name, category, tournament_format FROM intramural_sports ORDER BY name')->fetchAll());
+$sports = filterSportsForUser($db->query('SELECT id, name, category, event_group, tournament_format FROM intramural_sports ORDER BY ' . intramuralSportsOrderBy())->fetchAll());
 $validSportIds = [];
 foreach ($sports as $s) {
     $validSportIds[(int) $s['id']] = true;
@@ -431,7 +431,10 @@ $reportMeta = implode(' · ', $reportMetaParts);
                         <?php if (empty($sports)): ?>
                         <div class="text-muted small p-2">No sports available.</div>
                         <?php else: ?>
-                            <?php foreach ($sports as $s): ?>
+                            <?php foreach (groupSportsByEventGroup($sports) as $groupKey => $groupSports): ?>
+                            <?php if ($groupSports === []) continue; ?>
+                            <div class="sport-display-picker__group small text-uppercase fw-semibold text-muted px-2 pt-2"><?= sanitize(sportEventGroupLabel($groupKey)) ?></div>
+                            <?php foreach ($groupSports as $s): ?>
                                 <?php
                                 $sid = (int) $s['id'];
                                 $label = sportLabel($s);
@@ -453,6 +456,7 @@ $reportMeta = implode(' · ', $reportMetaParts);
                                         <?php endif; ?>
                                     </span>
                                 </label>
+                            <?php endforeach; ?>
                             <?php endforeach; ?>
                             <div class="sport-display-picker__empty text-muted small p-2 d-none" id="matchSportsEmpty">No sports match your search.</div>
                         <?php endif; ?>

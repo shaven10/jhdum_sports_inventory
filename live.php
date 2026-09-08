@@ -177,16 +177,46 @@ $styleVersion = is_file($stylePath) ? (string) filemtime($stylePath) : APP_VERSI
 
     function fillEventOptions(preserve) {
         const prev = preserve ? els.event.value : '';
-        const opts = ['<option value="">Select event</option>'];
+        const groups = {};
+        const order = [];
         (data.events || []).forEach(ev => {
-            opts.push(`<option value="${esc(ev.sport_id)}">${esc(ev.label)}</option>`);
+            const key = ev.event_group || 'sports_competition';
+            const label = ev.event_group_label || (key === 'socio_cultural' ? 'Socio-Cultural Events' : 'Sports Competition');
+            if (!groups[key]) {
+                groups[key] = { label, items: [] };
+                order.push(key);
+            }
+            groups[key].items.push(ev);
         });
-        els.event.innerHTML = opts.join('');
+        let html = '<option value="">Select event</option>';
+        order.forEach(key => {
+            const g = groups[key];
+            html += `<optgroup label="${esc(g.label)}">`;
+            g.items.forEach(ev => {
+                html += `<option value="${esc(ev.sport_id)}">${esc(ev.label)}</option>`;
+            });
+            html += '</optgroup>';
+        });
+        els.event.innerHTML = html;
         if (prev && [...els.event.options].some(o => o.value === prev)) {
             els.event.value = prev;
         } else if (data.events && data.events.length) {
             els.event.value = String(data.events[0].sport_id);
         }
+    }
+
+    function eventGroupSpans(headers) {
+        const spans = [];
+        (headers || []).forEach(eh => {
+            const key = eh.event_group || 'sports_competition';
+            const label = key === 'socio_cultural' ? 'Socio-Cultural Events' : 'Sports Competition';
+            if (!spans.length || spans[spans.length - 1].key !== key) {
+                spans.push({ key, label, count: 1 });
+            } else {
+                spans[spans.length - 1].count++;
+            }
+        });
+        return spans;
     }
 
     function renderOverall() {
@@ -197,7 +227,12 @@ $styleVersion = is_file($stylePath) ? (string) filemtime($stylePath) : APP_VERSI
         }
         els.overall.innerHTML = groups.map(g => {
             const labels = g.sport_labels || [];
-            const headers = labels.map(l => `<th class="live-event-col" title="${esc(l)}">${esc(l)}</th>`).join('');
+            const eventHeaders = g.event_headers || [];
+            const spans = eventGroupSpans(eventHeaders);
+            const nameHeaders = (eventHeaders.length ? eventHeaders : labels.map(l => ({ name: l }))).map(eh => {
+                const title = eh.label || eh.name || '';
+                return `<th class="live-event-col" title="${esc(title)}">${esc(eh.name || title)}</th>`;
+            }).join('');
             const rows = (g.standings || []).map(r => {
                 const pts = labels.map(l => `<td class="live-event-col">${esc(r.sports && r.sports[l] != null ? r.sports[l] : 0)}</td>`).join('');
                 return `<tr>
@@ -210,6 +245,7 @@ $styleVersion = is_file($stylePath) ? (string) filemtime($stylePath) : APP_VERSI
             const leader = g.champion
                 ? `<span class="live-leader">Points lead: <strong style="color:${esc(g.champion.color)}">${esc(g.champion.team_name)}</strong> (${esc(g.champion.total)} pts)</span>`
                 : '';
+            const headRowspan = spans.length ? 2 : 1;
             return `<article class="live-block">
                 <header class="live-block-head">
                     <h2>${esc(g.division_name)}</h2>
@@ -219,11 +255,12 @@ $styleVersion = is_file($stylePath) ? (string) filemtime($stylePath) : APP_VERSI
                     <table class="live-table">
                         <thead>
                             <tr>
-                                <th class="live-sticky live-sticky-1">#</th>
-                                <th class="live-sticky live-sticky-2">Team</th>
-                                ${headers}
-                                <th>Total</th>
+                                <th class="live-sticky live-sticky-1" rowspan="${headRowspan}">#</th>
+                                <th class="live-sticky live-sticky-2" rowspan="${headRowspan}">Team</th>
+                                ${spans.length ? spans.map(s => `<th colspan="${s.count}" class="live-event-col">${esc(s.label)}</th>`).join('') : nameHeaders}
+                                <th rowspan="${headRowspan}">Total</th>
                             </tr>
+                            ${spans.length ? `<tr>${nameHeaders}</tr>` : ''}
                         </thead>
                         <tbody>${rows || '<tr><td colspan="' + (labels.length + 3) + '" class="live-empty-cell">No teams.</td></tr>'}</tbody>
                     </table>

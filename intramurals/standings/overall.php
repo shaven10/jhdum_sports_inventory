@@ -15,7 +15,19 @@ if ($export === 'excel') {
     fprintf($out, chr(0xEF) . chr(0xBB) . chr(0xBF));
     foreach ($byDivision as $group) {
         $labels = $group['sport_labels'] ?? [];
+        $eventHeaders = $group['event_headers'] ?? [];
         fputcsv($out, [strtoupper((string) $group['division_name']) . ' (' . count($labels) . ' events)']);
+        if ($eventHeaders) {
+            $groupRow = ['', ''];
+            foreach (eventHeaderGroupSpans($eventHeaders) as $span) {
+                $groupRow[] = $span['label'];
+                for ($i = 1; $i < (int) $span['count']; $i++) {
+                    $groupRow[] = '';
+                }
+            }
+            $groupRow = array_merge($groupRow, ['', '', '', '', '']);
+            fputcsv($out, $groupRow);
+        }
         $headers = array_merge(['Rank', 'Team'], $labels, ['Total Points', 'Gold', 'Silver', 'Bronze', 'Total Medals']);
         fputcsv($out, $headers);
         foreach ($group['standings'] as $r) {
@@ -68,7 +80,7 @@ require __DIR__ . '/../_season_bar.php';
 <div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2 no-print">
     <div>
         <h1><i class="bi bi-award"></i> Overall Intramurals Standing</h1>
-        <p class="text-muted mb-0">Medal tally and placement points by division — event columns match each division’s activated events</p>
+        <p class="text-muted mb-0">Medal tally and placement points by division — Sports Competition and Socio-Cultural events both count</p>
     </div>
     <div class="d-flex gap-2 flex-wrap">
         <?php if (canManageIntramurals()): ?>
@@ -76,7 +88,7 @@ require __DIR__ . '/../_season_bar.php';
         <a href="<?= BASE_URL ?>/admin/divisions/index.php" class="btn btn-outline-secondary"><i class="bi bi-diagram-3"></i> Divisions</a>
         <?php endif; ?>
         <?php if (canManageEventRankings()): ?>
-        <a href="<?= BASE_URL ?>/intramurals/rankings/index.php" class="btn btn-outline-warning"><i class="bi bi-list-ol"></i> Manual Entry of Ranks</a>
+        <a href="<?= BASE_URL ?>/intramurals/scoring/index.php" class="btn btn-outline-warning"><i class="bi bi-pencil-square"></i> Scores & Rankings</a>
         <?php endif; ?>
         <a href="<?= BASE_URL ?>/intramurals/standings/index.php" class="btn btn-outline-primary">Per-Sport Standings</a>
         <a href="?export=medals" class="btn btn-outline-warning"><i class="bi bi-trophy"></i> Medal Excel</a>
@@ -105,6 +117,8 @@ $divStandings = $group['standings'] ?? [];
 $divLabels = $group['sport_labels'] ?? [];
 $eventHeaders = $group['event_headers'] ?? [];
 $activatedCount = (int) ($group['activated_event_count'] ?? count($divLabels));
+$groupSpans = eventHeaderGroupSpans($eventHeaders);
+$headerRowspan = $groupSpans ? 3 : 2;
 ?>
 <section class="mb-5 overall-division-block">
     <div class="d-flex justify-content-between align-items-end flex-wrap gap-2 mb-3">
@@ -202,6 +216,26 @@ $activatedCount = (int) ($group['activated_event_count'] ?? count($divLabels));
             <div class="standings-scroll-wrap">
                 <table class="table table-bordered table-hover mb-0">
                     <thead class="table-light">
+                        <?php if ($groupSpans): ?>
+                        <tr class="event-header-group">
+                            <th rowspan="<?= (int) $headerRowspan ?>" class="sticky-col">#</th>
+                            <th rowspan="<?= (int) $headerRowspan ?>" class="sticky-col sticky-col-2">Team</th>
+                            <?php foreach ($groupSpans as $span): ?>
+                            <th colspan="<?= (int) $span['count'] ?>" class="event-col-header event-group-header <?= $span['key'] === 'socio_cultural' ? 'table-info' : 'table-primary' ?>">
+                                <?= sanitize($span['label']) ?>
+                            </th>
+                            <?php endforeach; ?>
+                            <th rowspan="<?= (int) $headerRowspan ?>">Total</th>
+                            <th rowspan="<?= (int) $headerRowspan ?>" class="medal-tally-col gold">G</th>
+                            <th rowspan="<?= (int) $headerRowspan ?>" class="medal-tally-col silver">S</th>
+                            <th rowspan="<?= (int) $headerRowspan ?>" class="medal-tally-col bronze">B</th>
+                        </tr>
+                        <tr class="event-header-sport">
+                            <?php foreach ($eventHeaders as $eh): ?>
+                            <th class="event-col-header event-col-name"><?= sanitize($eh['name']) ?></th>
+                            <?php endforeach; ?>
+                        </tr>
+                        <?php else: ?>
                         <tr class="event-header-sport">
                             <th rowspan="2" class="sticky-col">#</th>
                             <th rowspan="2" class="sticky-col sticky-col-2">Team</th>
@@ -213,6 +247,7 @@ $activatedCount = (int) ($group['activated_event_count'] ?? count($divLabels));
                             <th rowspan="2" class="medal-tally-col silver">S</th>
                             <th rowspan="2" class="medal-tally-col bronze">B</th>
                         </tr>
+                        <?php endif; ?>
                         <tr class="event-header-category">
                             <?php foreach ($eventHeaders as $eh): ?>
                             <th class="event-col-header event-col-cat"><?= sanitize($eh['category']) ?></th>

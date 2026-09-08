@@ -47,7 +47,7 @@ if (canManageIntramurals()) {
     $teams = [];
 }
 
-$allSports = $db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll();
+$allSports = $db->query('SELECT * FROM intramural_sports ORDER BY ' . intramuralSportsOrderBy())->fetchAll();
 // Coaches may only assign their coached events
 $sports = $allSports;
 if ($isCoach && $athleteTeamId) {
@@ -391,10 +391,7 @@ require __DIR__ . '/../_season_bar.php';
                     <div class="mb-2">
                         <label class="form-label">Event / Sport</label>
                         <select name="sport_id" class="form-select" required>
-                            <option value="">Select</option>
-                            <?php foreach ($sports as $s): ?>
-                            <option value="<?= $s['id'] ?>"><?= sanitize(sportLabel($s)) ?></option>
-                            <?php endforeach; ?>
+                            <?= renderSportSelectOptions($sports, null, true, 'Select') ?>
                         </select>
                     </div>
                     <div class="mb-2">

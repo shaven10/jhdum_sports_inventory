@@ -142,12 +142,18 @@ try {
             'label' => sportLabel($block['sport']),
             'name' => (string) ($block['sport']['name'] ?? ''),
             'category' => (string) ($block['sport']['category'] ?? ''),
+            'event_group' => sportEventGroupOf($block['sport'] ?? []),
+            'event_group_label' => sportEventGroupLabel(sportEventGroupOf($block['sport'] ?? [])),
             'manual_ranks' => !empty($block['manual_ranks']),
             'divisions' => $eventDivisions,
         ];
     }
 
     usort($events, static function (array $a, array $b): int {
+        $groupCmp = sportEventGroupSortKey($a['event_group'] ?? null) <=> sportEventGroupSortKey($b['event_group'] ?? null);
+        if ($groupCmp !== 0) {
+            return $groupCmp;
+        }
         $cmp = strcasecmp((string) ($a['name'] ?? ''), (string) ($b['name'] ?? ''));
         if ($cmp !== 0) {
             return $cmp;

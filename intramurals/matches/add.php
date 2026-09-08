@@ -13,7 +13,7 @@ requireWritableSeason();
 
 $db = getDB();
 $seasonId = getCurrentSeasonId();
-$sports = $db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll();
+$sports = $db->query('SELECT * FROM intramural_sports ORDER BY ' . intramuralSportsOrderBy())->fetchAll();
 $teams = $db->query('SELECT * FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll();
 $errors = [];
 
@@ -70,10 +70,7 @@ foreach ($sports as $s) {
             <div class="col-md-6">
                 <label class="form-label">Sport *</label>
                 <select name="sport_id" id="matchSportId" class="form-select" required>
-                    <option value="">Select sport</option>
-                    <?php foreach ($sports as $s): ?>
-                    <option value="<?= $s['id'] ?>" <?= post('sport_id') == $s['id'] ? 'selected' : '' ?>><?= sanitize(sportLabel($s)) ?></option>
-                    <?php endforeach; ?>
+                    <?= renderSportSelectOptions($sports, post('sport_id'), true, 'Select event') ?>
                 </select>
                 <div id="sportFormatHint" class="form-text mt-2"></div>
             </div>

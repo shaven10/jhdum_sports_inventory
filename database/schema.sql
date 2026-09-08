@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS equipment (
     image VARCHAR(255) DEFAULT NULL,
     low_stock_threshold INT NOT NULL DEFAULT 3,
     is_active TINYINT(1) NOT NULL DEFAULT 1,
+    is_borrowable TINYINT(1) NOT NULL DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (category_id) REFERENCES equipment_categories(id) ON DELETE RESTRICT
@@ -360,6 +361,7 @@ CREATE TABLE IF NOT EXISTS intramural_sports (
     name VARCHAR(100) NOT NULL,
     description TEXT,
     category ENUM('men', 'women', 'mixed') NOT NULL DEFAULT 'men',
+    event_group ENUM('sports_competition', 'socio_cultural') NOT NULL DEFAULT 'sports_competition',
     players_per_event INT DEFAULT NULL,
     scoring_method ENUM('points', 'sets', 'games', 'time') NOT NULL DEFAULT 'points',
     rules TEXT,
@@ -376,6 +378,7 @@ CREATE TABLE IF NOT EXISTS intramural_sports (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uq_sport_name_category (name, category),
+    INDEX idx_sport_event_group (event_group),
     FOREIGN KEY (point_scheme_id) REFERENCES intramural_point_schemes(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
@@ -552,6 +555,41 @@ CREATE TABLE IF NOT EXISTS intramural_event_ranks (
     FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
+-- Judging rubrics for socio-cultural events (criteria + panel scores that determine ranks)
+CREATE TABLE IF NOT EXISTS intramural_event_rubric_criteria (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    sport_id INT NOT NULL,
+    name VARCHAR(150) NOT NULL,
+    description TEXT DEFAULT NULL,
+    max_points DECIMAL(8,2) NOT NULL DEFAULT 10.00,
+    sort_order INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_rubric_criterion (sport_id, name),
+    INDEX idx_rubric_sport_order (sport_id, sort_order),
+    FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS intramural_event_rubric_scores (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    season_id INT NOT NULL,
+    sport_id INT NOT NULL,
+    division_id INT NOT NULL DEFAULT 0,
+    team_id INT NOT NULL,
+    criterion_id INT NOT NULL,
+    score DECIMAL(8,2) NOT NULL DEFAULT 0,
+    scored_by INT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_rubric_score (season_id, sport_id, division_id, team_id, criterion_id),
+    INDEX idx_rubric_score_event (season_id, sport_id, division_id),
+    FOREIGN KEY (season_id) REFERENCES intramural_seasons(id) ON DELETE CASCADE,
+    FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE,
+    FOREIGN KEY (team_id) REFERENCES intramural_teams(id) ON DELETE CASCADE,
+    FOREIGN KEY (criterion_id) REFERENCES intramural_event_rubric_criteria(id) ON DELETE CASCADE,
+    FOREIGN KEY (scored_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
 -- Admin can activate Event Rankings for tournament managers per event/season
 CREATE TABLE IF NOT EXISTS intramural_event_tm_ranking (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -644,6 +682,15 @@ INSERT INTO intramural_sports (name, description, category, scoring_method, poin
 ('Dance Sports', 'Dance sports', 'women', 'points', 2, 3, 8, 'round_robin', NULL),
 ('Mass Power Dance', 'Mass power dance', 'men', 'points', 1, 3, 20, 'round_robin', NULL),
 ('Mass Power Dance', 'Mass power dance', 'women', 'points', 1, 3, 20, 'round_robin', NULL);
+
+UPDATE intramural_sports SET event_group = 'socio_cultural' WHERE name IN ('Mass Power Dance');
+
+INSERT INTO intramural_sports (name, description, category, event_group, scoring_method, point_scheme_id, win_points, players_per_event, tournament_format, format_notes) VALUES
+('Visual Arts', 'Visual arts competition', 'mixed', 'socio_cultural', 'points', 1, 3, 4, 'rank_first_to_last', 'Placement by judging or manual ranks. Results count toward overall standing and medal tally.'),
+('Literary Arts', 'Extemporaneous speaking, storytelling, dagliang talumpati, pagkukuwento', 'mixed', 'socio_cultural', 'points', 1, 3, 8, 'rank_first_to_last', 'Placement by judging or manual ranks. Results count toward overall standing and medal tally.'),
+('Quiz Bowl', 'Quiz bowl', 'mixed', 'socio_cultural', 'points', 1, 3, 5, 'rank_first_to_last', 'Placement by judging or manual ranks. Results count toward overall standing and medal tally.'),
+('Music', 'Solo (Pop), Duet (Pop), Kundiman', 'mixed', 'socio_cultural', 'points', 1, 3, 8, 'rank_first_to_last', 'Placement by judging or manual ranks. Results count toward overall standing and medal tally.'),
+('Dance Arts', 'Folk, Street, and Contemporary dance', 'mixed', 'socio_cultural', 'points', 1, 3, 12, 'rank_first_to_last', 'Placement by judging or manual ranks. Results count toward overall standing and medal tally.');
 
 -- Link users.team_id after teams exist
 ALTER TABLE users

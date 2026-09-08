@@ -53,6 +53,7 @@ $adminSections = [
         'description' => 'Configure policies, appearance, and data tools.',
         'cards' => [
             ['title' => 'System Settings', 'desc' => 'Borrowing rules and campus info', 'href' => BASE_URL . '/settings/index.php', 'icon' => 'bi-gear-fill', 'color' => 'secondary'],
+            ['title' => 'Borrowable Equipment', 'desc' => 'Choose which items students may request', 'href' => BASE_URL . '/settings/borrowable.php', 'icon' => 'bi-box-arrow-up', 'color' => 'warning'],
             ['title' => 'Theme Manager', 'desc' => 'Colors and visual presets', 'href' => BASE_URL . '/settings/theme.php', 'icon' => 'bi-palette-fill', 'color' => 'info'],
             ['title' => 'Equipment Categories', 'desc' => 'Inventory category list', 'href' => BASE_URL . '/settings/categories.php', 'icon' => 'bi-tags-fill', 'color' => 'success'],
             ['title' => 'Courses', 'desc' => 'Athlete course / program dropdown list', 'href' => BASE_URL . '/admin/courses/index.php', 'icon' => 'bi-mortarboard-fill', 'color' => 'primary'],

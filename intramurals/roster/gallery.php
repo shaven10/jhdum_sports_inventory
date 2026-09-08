@@ -21,7 +21,7 @@ $teamId = get('team');
 $category = get('category');
 applyUnitManagerTeamScope($teamId);
 
-$sports = filterSportsForUser(filterSportsForCoach($db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll()));
+$sports = filterSportsForUser(filterSportsForCoach($db->query('SELECT * FROM intramural_sports ORDER BY ' . intramuralSportsOrderBy())->fetchAll()));
 $teams = filterTeamsForCoach($db->query('SELECT id, name, color FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll());
 $categoryOptions = sportCategoryOptions();
 $lockTeamFilter = hasRole('unit_manager') && !canManageIntramurals() && getUserTeamId();
@@ -152,9 +152,7 @@ require __DIR__ . '/../_season_bar.php';
             <label class="form-label">Event</label>
             <select name="sport" class="form-select">
                 <option value="">All Events</option>
-                <?php foreach ($sports as $s): ?>
-                <option value="<?= (int) $s['id'] ?>" <?= $sportId === (string) $s['id'] ? 'selected' : '' ?>><?= sanitize(sportLabel($s)) ?></option>
-                <?php endforeach; ?>
+                <?= renderSportSelectOptions($sports, $sportId) ?>
             </select>
         </div>
         <div class="col-md-2">

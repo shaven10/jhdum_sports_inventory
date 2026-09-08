@@ -143,7 +143,7 @@ function resolveSportScopeLabel($sportFilter): string
 
     $db = getDB();
     $placeholders = implode(',', array_fill(0, count($ids), '?'));
-    $sportStmt = $db->prepare("SELECT name, category FROM intramural_sports WHERE id IN ($placeholders) ORDER BY name, category");
+    $sportStmt = $db->prepare("SELECT name, category FROM intramural_sports WHERE id IN ($placeholders) ORDER BY " . intramuralSportsOrderBy());
     $sportStmt->execute($ids);
     $rows = $sportStmt->fetchAll();
     if (!$rows) {

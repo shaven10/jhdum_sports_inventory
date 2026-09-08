@@ -232,11 +232,7 @@ require __DIR__ . '/../_season_bar.php';
             <label class="form-label">Finished Event</label>
             <select name="sport" class="form-select" required>
                 <option value="">Select finished event…</option>
-                <?php foreach ($finishedEvents as $s): ?>
-                <option value="<?= (int) $s['id'] ?>" <?= $sportId === (int) $s['id'] ? 'selected' : '' ?>>
-                    <?= sanitize(sportLabel($s)) ?>
-                </option>
-                <?php endforeach; ?>
+                <?= renderSportSelectOptions($finishedEvents, $sportId, false) ?>
             </select>
         </div>
         <div class="col-md-3">

@@ -6,7 +6,7 @@ ensureEventRanksTable();
 ensureIntramuralDivisionsSchema();
 
 if (!canManageEventRankings()) {
-    flash('error', 'Manual entry of ranks is not available for your account. Ask an administrator to activate ranking for your assigned events.');
+    flash('error', 'You do not have permission to enter scores and rankings.');
     redirect(getHomeUrl());
 }
 
@@ -15,15 +15,7 @@ $seasonId = getCurrentSeasonId();
 $season = getCurrentSeason();
 $sportId = (int) (get('sport') ?: post('sport_id'));
 $divisionParam = get('division', post('division_id', ''));
-$sports = filterSportsForUser($db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll());
-
-if (isTournamentManager() && !isAdmin() && !isSecretariat()) {
-    $enabledIds = getTmRankingEnabledSportIds($seasonId ? (int) $seasonId : null);
-    $sports = array_values(array_filter(
-        $sports,
-        static fn(array $s): bool => in_array((int) $s['id'], $enabledIds, true)
-    ));
-}
+$sports = filterSportsForUser($db->query('SELECT * FROM intramural_sports ORDER BY ' . intramuralSportsOrderBy())->fetchAll());
 
 $teams = $db->query('SELECT * FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll();
 $teamMap = [];
@@ -36,9 +28,9 @@ if (!$sportId && $sports) {
 } elseif ($sportId && !canViewEvent($sportId)) {
     flash('error', 'You do not have permission to rank this event.');
     redirect(BASE_URL . '/intramurals/rankings/index.php');
-} elseif ($sportId && !canManageEventRankings($sportId) && isTournamentManager() && !isAdmin() && !isSecretariat()) {
-    flash('error', 'Ranking is not activated for this event. Contact an administrator.');
-    redirect(BASE_URL . '/intramurals/rankings/index.php');
+} elseif ($sportId && !canManageEventRankings($sportId)) {
+    flash('error', 'You do not have permission to rank this event.');
+    redirect(BASE_URL . '/intramurals/scoring/index.php');
 }
 
 $sport = null;
@@ -181,9 +173,10 @@ echo renderResultsLockAlerts();
 <div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2">
     <div>
         <h1><i class="bi bi-list-ol"></i> Manual Entry of Ranks</h1>
-        <p class="text-muted mb-0">Rank teams per division for events without a match schedule — Champion / runners-up feed the medal tally</p>
+        <p class="text-muted mb-0">Rank teams per division for events without a match schedule — or open <a href="<?= BASE_URL ?>/intramurals/scoring/index.php">Scores & Rankings</a> to update match scores and ranks together</p>
     </div>
     <div class="d-flex gap-2 flex-wrap">
+        <a href="<?= BASE_URL ?>/intramurals/scoring/index.php" class="btn btn-primary"><i class="bi bi-pencil-square"></i> Scores & Rankings</a>
         <a href="<?= BASE_URL ?>/intramurals/standings/overall.php" class="btn btn-outline-warning"><i class="bi bi-trophy"></i> Medal Tally</a>
         <a href="<?= BASE_URL ?>/intramurals/standings/index.php<?= $sportId ? '?sport=' . $sportId : '' ?>" class="btn btn-outline-primary">Per-Sport Standings</a>
     </div>
@@ -215,9 +208,7 @@ echo renderResultsLockAlerts();
             <div class="col-md-5">
                 <label class="form-label" for="rankSport">Event</label>
                 <select name="sport" id="rankSport" class="form-select" onchange="this.form.submit()" <?= empty($sports) ? 'disabled' : '' ?>>
-                    <?php foreach ($sports as $s): ?>
-                    <option value="<?= (int) $s['id'] ?>" <?= $sportId === (int) $s['id'] ? 'selected' : '' ?>><?= sanitize(sportLabel($s)) ?></option>
-                    <?php endforeach; ?>
+                    <?= renderSportSelectOptions($sports, $sportId) ?>
                 </select>
             </div>
             <div class="col-md-4">
@@ -364,10 +355,8 @@ echo renderResultsLockAlerts();
             Results are locked<?= $sportId ? ' for this event' : '' ?>. Unlock in Admin → Lock Results to edit ranks.
             <?php elseif (!empty($hasScheduledMatches)): ?>
             Manual ranking is disabled while this division has scheduled matches.
-            <?php elseif (isTournamentManager() && !isAdmin() && !isSecretariat()): ?>
-            Ranking is not activated for this event. Ask an administrator to enable it under Admin → TM Ranking Access.
             <?php else: ?>
-            You can view ranks. Only administrators, secretariat, or activated tournament managers can edit manual ranks.
+            You can view ranks. Only administrators, secretariat, and tournament managers for this event can edit ranks.
             <?php endif; ?>
         </div>
         <?php endif; ?>

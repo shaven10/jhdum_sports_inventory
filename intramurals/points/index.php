@@ -102,12 +102,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
 
 $editId = (int) get('edit');
 $schemes = getAllPointSchemes(false);
-$sports = $db->query('SELECT s.id, s.name, s.category, s.point_scheme_id,
+$sports = $db->query('SELECT s.id, s.name, s.category, s.event_group, s.point_scheme_id,
         ps.name as scheme_name, ps.is_active as scheme_active,
         ps.points_1, ps.points_2, ps.points_3, ps.points_4, ps.points_5, ps.points_6
     FROM intramural_sports s
     LEFT JOIN intramural_point_schemes ps ON s.point_scheme_id = ps.id
-    ORDER BY s.name, s.category')->fetchAll();
+    ORDER BY ' . intramuralSportsOrderBy('s'))->fetchAll();
 $activeSchemes = getAllPointSchemes(true);
 $eventPointRows = [];
 foreach ($sports as $sport) {
@@ -369,7 +369,10 @@ require __DIR__ . '/../_season_bar.php';
                         <tr><th>Event</th><th>Point Scheme</th><th>Values</th></tr>
                     </thead>
                     <tbody>
-                        <?php foreach ($sports as $sport): ?>
+                        <?php foreach (groupSportsByEventGroup($sports) as $groupKey => $groupSports): ?>
+                        <?php if ($groupSports === []) continue; ?>
+                        <tr class="table-secondary"><td colspan="3" class="fw-semibold"><?= sanitize(sportEventGroupLabel($groupKey)) ?></td></tr>
+                        <?php foreach ($groupSports as $sport): ?>
                         <?php
                             $current = null;
                             foreach ($activeSchemes as $as) {
@@ -394,8 +397,9 @@ require __DIR__ . '/../_season_bar.php';
                             <td class="small text-muted"><?= $current ? sanitize(formatSchemePoints($current)) : '10/7/5/3/2/1' ?></td>
                         </tr>
                         <?php endforeach; ?>
+                        <?php endforeach; ?>
                         <?php if (empty($sports)): ?>
-                        <tr><td colspan="3" class="text-muted">No sports to assign.</td></tr>
+                        <tr><td colspan="3" class="text-muted">No events to assign.</td></tr>
                         <?php endif; ?>
                     </tbody>
                 </table>
@@ -532,7 +536,7 @@ require __DIR__ . '/../_season_bar.php';
 <div class="alert alert-info mb-0 no-print">
     <strong>How ranking works:</strong> Match results determine each event’s finish order (Champion, 1st Runner Up, …).
     <?php if (canManageEventRankings()): ?>
-    Staff can use <a href="<?= BASE_URL ?>/intramurals/rankings/index.php">Manual Entry of Ranks</a> for events that do not have scheduled matches.
+    Staff can use <a href="<?= BASE_URL ?>/intramurals/scoring/index.php">Scores & Rankings</a> for match scores and for events that do not have scheduled matches.
     <?php endif; ?>
     Overall intramurals standing sums the <em>placement points</em> from each event’s assigned scheme.
     Change scheme values anytime — rankings recalculate automatically.

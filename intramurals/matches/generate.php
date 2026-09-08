@@ -16,7 +16,7 @@ ensureIntramuralDivisionsSchema();
 ensureMatchDivisionColumn();
 
 $divisions = getDivisions(true);
-$allSports = filterSportsForUser($db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll());
+$allSports = filterSportsForUser($db->query('SELECT * FROM intramural_sports ORDER BY ' . intramuralSportsOrderBy())->fetchAll());
 $allTeams = $db->query('SELECT * FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll();
 
 $divisionFilter = post('division_filter', get('division', 'all'));
@@ -661,7 +661,10 @@ $renderSlotSelects = static function (string $namePrefix, array $slotMap, array 
                             <?php if (empty($sports)): ?>
                             <p class="text-muted small mb-0">No events for this division. Assign events under Admin → Divisions.</p>
                             <?php endif; ?>
-                            <?php foreach ($sports as $s): ?>
+                            <?php foreach (groupSportsByEventGroup($sports) as $groupKey => $groupSports): ?>
+                            <?php if ($groupSports === []) continue; ?>
+                            <div class="text-uppercase small fw-semibold text-muted mt-2 mb-1"><?= sanitize(sportEventGroupLabel($groupKey)) ?></div>
+                            <?php foreach ($groupSports as $s): ?>
                             <div class="form-check">
                                 <input class="form-check-input sport-check" type="checkbox" name="sport_ids[]" value="<?= $s['id'] ?>" id="sport<?= $s['id'] ?>"
                                     <?= in_array((int) $s['id'], $selectedSportIds, true) ? 'checked' : '' ?>
@@ -680,6 +683,7 @@ $renderSlotSelects = static function (string $namePrefix, array $slotMap, array 
                                     <span class="badge bg-light text-dark border ms-1" title="Estimated game duration"><i class="bi bi-stopwatch"></i> <?= sanitize(formatGameDurationMinutes(getSportGameDurationMinutes($s))) ?></span>
                                 </label>
                             </div>
+                            <?php endforeach; ?>
                             <?php endforeach; ?>
                         </div>
                     </div>

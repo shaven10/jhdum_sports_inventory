@@ -57,6 +57,7 @@ require_once __DIR__ . '/../includes/header.php';
     <div><h1><i class="bi bi-gear"></i> System Settings</h1></div>
     <div class="d-flex gap-2 flex-wrap">
         <a href="<?= BASE_URL ?>/admin/index.php" class="btn btn-outline-secondary"><i class="bi bi-shield-lock"></i> Admin Panel</a>
+        <a href="<?= BASE_URL ?>/settings/borrowable.php" class="btn btn-outline-warning"><i class="bi bi-box-arrow-up"></i> Borrowable Equipment</a>
         <a href="<?= BASE_URL ?>/settings/database.php" class="btn btn-outline-primary"><i class="bi bi-database-gear"></i> Database Tools</a>
         <a href="<?= BASE_URL ?>/settings/theme.php" class="btn btn-outline-secondary"><i class="bi bi-palette"></i> Theme Manager</a>
     </div>
@@ -67,6 +68,7 @@ require_once __DIR__ . '/../includes/header.php';
 <form method="POST">
 <?= csrfField() ?>
 <h5 class="mb-3">Borrowing Policies</h5>
+<p class="text-muted small">Limits for student requests. Choose which catalog items may be borrowed under <a href="<?= BASE_URL ?>/settings/borrowable.php">Borrowable Equipment</a>.</p>
 <div class="row g-3 mb-4">
     <div class="col-md-4">
         <label class="form-label">Max Borrow Days</label>

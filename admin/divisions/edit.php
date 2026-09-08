@@ -12,7 +12,7 @@ if (!$division) {
 }
 
 $errors = [];
-$sports = $db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll();
+$sports = $db->query('SELECT * FROM intramural_sports ORDER BY ' . intramuralSportsOrderBy())->fetchAll();
 $teams = $db->query('SELECT id, name, short_name, department, division_id, is_active FROM intramural_teams ORDER BY is_active DESC, name ASC')->fetchAll();
 $selectedSportIds = getDivisionSportIds($id);
 $selectedTeamIds = [];
@@ -165,9 +165,12 @@ require_once __DIR__ . '/../../includes/header.php';
                 <?php endif; ?>
                 <div class="card-body" style="max-height: 28rem; overflow-y: auto;">
                     <?php if (empty($sports)): ?>
-                    <p class="text-muted mb-0">No events exist yet. Add sports under Intramurals first.</p>
+                    <p class="text-muted mb-0">No events exist yet. Add events under Intramurals first.</p>
                     <?php else: ?>
-                    <?php foreach ($sports as $s): ?>
+                    <?php foreach (groupSportsByEventGroup($sports) as $groupKey => $groupSports): ?>
+                    <?php if ($groupSports === []) continue; ?>
+                    <div class="text-uppercase small fw-semibold text-muted mt-2 mb-1"><?= sanitize(sportEventGroupLabel($groupKey)) ?></div>
+                    <?php foreach ($groupSports as $s): ?>
                     <?php $sid = (int) $s['id']; ?>
                     <div class="form-check mb-2">
                         <input class="form-check-input" type="checkbox" name="sport_ids[]" value="<?= $sid ?>"
@@ -176,6 +179,7 @@ require_once __DIR__ . '/../../includes/header.php';
                             <?= sanitize(sportLabel($s)) ?>
                         </label>
                     </div>
+                    <?php endforeach; ?>
                     <?php endforeach; ?>
                     <?php endif; ?>
                 </div>

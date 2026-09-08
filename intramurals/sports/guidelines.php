@@ -40,7 +40,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
     }
 }
 
-$sports = $db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll();
+$sports = $db->query('SELECT * FROM intramural_sports ORDER BY ' . intramuralSportsOrderBy())->fetchAll();
 
 $pageTitle = 'Sport Guidelines';
 require_once __DIR__ . '/../../includes/header.php';
@@ -70,11 +70,16 @@ require __DIR__ . '/../_season_bar.php';
     <div class="col-md-6 col-lg-4">
         <label class="form-label" for="guidelineSportFilter">Jump to sport</label>
         <select id="guidelineSportFilter" class="form-select">
-            <option value="">All sports</option>
-            <?php foreach ($sports as $s): ?>
-            <option value="sport-<?= (int) $s['id'] ?>" <?= $focusSportId === (int) $s['id'] ? 'selected' : '' ?>>
-                <?= sanitize(sportLabel($s)) ?>
-            </option>
+            <option value="">All events</option>
+            <?php foreach (groupSportsByEventGroup($sports) as $groupKey => $groupSports): ?>
+            <?php if ($groupSports === []) continue; ?>
+            <optgroup label="<?= sanitize(sportEventGroupLabel($groupKey)) ?>">
+                <?php foreach ($groupSports as $s): ?>
+                <option value="sport-<?= (int) $s['id'] ?>" <?= $focusSportId === (int) $s['id'] ? 'selected' : '' ?>>
+                    <?= sanitize(sportLabel($s)) ?>
+                </option>
+                <?php endforeach; ?>
+            </optgroup>
             <?php endforeach; ?>
         </select>
     </div>

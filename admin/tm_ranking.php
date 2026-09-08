@@ -12,7 +12,7 @@ $accessMap = [];
 $managerNames = [];
 
 if ($seasonId) {
-    $sports = $db->query('SELECT id, name, category FROM intramural_sports ORDER BY name, category')->fetchAll() ?: [];
+    $sports = $db->query('SELECT id, name, category, event_group FROM intramural_sports ORDER BY ' . intramuralSportsOrderBy())->fetchAll() ?: [];
     $accessMap = getTmRankingAccessMap($seasonId);
 
     $mgrStmt = $db->prepare(
@@ -76,6 +76,7 @@ require_once __DIR__ . '/../includes/header.php';
         <h1><i class="bi bi-list-ol"></i> TM Ranking Access</h1>
         <p class="text-muted mb-0">
             Activate Manual Entry of Ranks for tournament managers on specific events<?= $season ? ' · ' . sanitize(seasonLabel($season)) : '' ?>.
+            Tournament managers already enter scores and ranks for assigned events under <a href="<?= BASE_URL ?>/intramurals/scoring/index.php">Scores & Rankings</a>.
         </p>
     </div>
     <a href="<?= BASE_URL ?>/admin/index.php" class="btn btn-outline-secondary">Back to Admin</a>
@@ -106,7 +107,7 @@ require_once __DIR__ . '/../includes/header.php';
                 <p class="mb-1"><strong>How it works</strong></p>
                 <ul class="mb-0 small text-muted">
                     <li>Assign a tournament manager to the event under Sports → Tournament Managers.</li>
-                    <li>Activate ranking here so that manager can open <strong>Manual Entry of Ranks</strong> for that event only.</li>
+                    <li>That manager can open <strong>Scores & Rankings</strong> for assigned events (match scores and official ranks).</li>
                     <li>Manual ranking still requires no scheduled matches and unlocked results.</li>
                 </ul>
             </div>

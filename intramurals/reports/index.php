@@ -18,7 +18,7 @@ $sportId = get('sport');
 $teamId = get('team');
 $export = get('export');
 
-$sports = filterSportsForUser($db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll());
+$sports = filterSportsForUser($db->query('SELECT * FROM intramural_sports ORDER BY ' . intramuralSportsOrderBy())->fetchAll());
 $teams = $db->query('SELECT * FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll();
 
 $titleMap = [
@@ -257,9 +257,7 @@ require __DIR__ . '/../_season_bar.php';
             <label class="form-label">Sport</label>
             <select name="sport" class="form-select">
                 <option value="">All / Default</option>
-                <?php foreach ($sports as $s): ?>
-                <option value="<?= $s['id'] ?>" <?= $sportId === (string) $s['id'] ? 'selected' : '' ?>><?= sanitize(sportLabel($s)) ?></option>
-                <?php endforeach; ?>
+                <?= renderSportSelectOptions($sports, $sportId) ?>
             </select>
         </div>
         <div class="col-md-3">

@@ -129,6 +129,84 @@ function fetchActiveStudentByStudentId(string $studentId): array
 }
 
 /**
+ * Search enrolled active students by name (or other registrar search fields).
+ *
+ * @return array{ok:bool, students:list<array>, message:string, http_status:?int}
+ */
+function searchActiveStudentsByName(string $query, int $perPage = 25): array
+{
+    $query = trim($query);
+    if ($query === '') {
+        return ['ok' => false, 'students' => [], 'message' => 'Enter a student name to search.', 'http_status' => null];
+    }
+    if (strlen($query) < 2) {
+        return ['ok' => false, 'students' => [], 'message' => 'Enter at least 2 characters of the student name.', 'http_status' => null];
+    }
+
+    if (!isRegistrarStudentLoginConfigured()) {
+        return [
+            'ok' => false,
+            'students' => [],
+            'message' => 'Registrar student lookup is not configured. Set the API key in System Settings.',
+            'http_status' => null,
+        ];
+    }
+
+    $params = http_build_query([
+        'search' => $query,
+        'per_page' => max(1, min(100, $perPage)),
+        'page' => 1,
+    ]);
+    $url = registrarApiBaseUrl() . '/active-students.php?' . $params;
+    $response = registrarApiGet($url);
+    if (!$response['ok']) {
+        $message = (string) $response['message'];
+        if (($response['http_status'] ?? null) === 401) {
+            $message = 'Student records lookup is temporarily unavailable. Please contact the Sports Development Office.';
+        }
+
+        return ['ok' => false, 'students' => [], 'message' => $message, 'http_status' => $response['http_status']];
+    }
+
+    $payload = $response['body'];
+    if (empty($payload['ok'])) {
+        return [
+            'ok' => false,
+            'students' => [],
+            'message' => (string) ($payload['error'] ?? 'Could not search student records.'),
+            'http_status' => $response['http_status'],
+        ];
+    }
+
+    $rows = $payload['data']['students'] ?? [];
+    if (!is_array($rows)) {
+        $rows = [];
+    }
+
+    $students = [];
+    foreach ($rows as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        if (empty($row['is_active']) || ($row['enrollment_status'] ?? '') !== 'enrolled') {
+            continue;
+        }
+        $students[] = $row;
+    }
+
+    if ($students === []) {
+        return [
+            'ok' => true,
+            'students' => [],
+            'message' => 'No enrolled students matched that name.',
+            'http_status' => $response['http_status'],
+        ];
+    }
+
+    return ['ok' => true, 'students' => $students, 'message' => 'OK', 'http_status' => $response['http_status']];
+}
+
+/**
  * Verify Registrar API connectivity and key validity (admin diagnostics).
  *
  * @return array{ok:bool, message:string, http_status:?int, key_prefix:string}

@@ -1021,6 +1021,50 @@ function updateEquipmentQuantities(int $equipmentId): void
     }
 }
 
+/** Admin-controlled flag: which catalog items students may request to borrow. */
+function ensureEquipmentBorrowableColumn(): void
+{
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    try {
+        $db = getDB();
+        $stmt = $db->prepare('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
+        $stmt->execute(['equipment', 'is_borrowable']);
+        if ((int) $stmt->fetchColumn() === 0) {
+            $db->exec('ALTER TABLE equipment ADD COLUMN is_borrowable TINYINT(1) NOT NULL DEFAULT 1 AFTER is_active');
+        }
+    } catch (Throwable $e) {
+        // equipment table may not exist yet on a fresh install.
+    }
+}
+
+function isEquipmentBorrowable(?array $equipment): bool
+{
+    if (!$equipment) {
+        return false;
+    }
+    if (!array_key_exists('is_borrowable', $equipment)) {
+        return true;
+    }
+
+    return (int) $equipment['is_borrowable'] === 1;
+}
+
+function setEquipmentBorrowable(int $equipmentId, bool $allowed): bool
+{
+    ensureEquipmentBorrowableColumn();
+    if ($equipmentId <= 0) {
+        return false;
+    }
+    $stmt = getDB()->prepare('UPDATE equipment SET is_borrowable = ? WHERE id = ?');
+
+    return $stmt->execute([$allowed ? 1 : 0, $equipmentId]);
+}
+
 function checkOverdueRequests(): void
 {
     $db = getDB();

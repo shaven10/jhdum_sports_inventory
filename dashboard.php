@@ -140,6 +140,10 @@ if (canBorrowEquipment()) {
 }
 if ($showCompetition) {
     $dashboardActions .= '<a href="' . BASE_URL . '/intramurals/matches/index.php" class="btn btn-light"><i class="bi bi-list-check"></i> Match Results</a>';
+    if (canUseScoringDesk()) {
+        $dashboardActions .= '<a href="' . BASE_URL . '/intramurals/scoring/index.php" class="btn btn-light"><i class="bi bi-pencil-square"></i> Scores & Rankings</a>';
+        $dashboardActions .= '<a href="' . BASE_URL . '/intramurals/rubrics/index.php" class="btn btn-outline-light"><i class="bi bi-clipboard-check"></i> Event Rubrics</a>';
+    }
     $dashboardActions .= '<a href="' . BASE_URL . '/intramurals/standings/overall.php" class="btn btn-outline-light"><i class="bi bi-award"></i> Overall Standing</a>';
 }
 if ($showCoachPanel && canViewIntramurals()) {

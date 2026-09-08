@@ -76,6 +76,9 @@ function requireInventoryModule(): void
         flash('error', 'Your account does not have access to the Inventory module.');
         redirect(getHomeUrl());
     }
+    if (function_exists('ensureEquipmentBorrowableColumn')) {
+        ensureEquipmentBorrowableColumn();
+    }
 }
 
 function login(string $username, string $password): array
@@ -947,6 +950,12 @@ function canModifyRoster(?int $teamId = null, ?int $sportId = null): bool
     return canManageTeamRoster($teamId, $sportId);
 }
 
+/** Bulk Excel/CSV roster import is admin-only. */
+function canImportRoster(): bool
+{
+    return isAdmin();
+}
+
 /** Any roster workflow (import, register, assign) when not locked. */
 function canModifyRosterAny(): bool
 {
@@ -987,20 +996,76 @@ function isPublishStaff(): bool
 /** Manual event rankings / medal placement entry. */
 function canManageEventRankings(?int $sportId = null): bool
 {
-    if (isAdmin() || isSecretariat()) {
+    if (isAdmin() || isSecretariat() || canManageIntramurals()) {
         return true;
     }
     if (!isTournamentManager()) {
         return false;
     }
     if ($sportId !== null && $sportId > 0) {
-        return canManageEventMatches($sportId) && isTmRankingEnabled($sportId);
+        return canManageEventMatches($sportId);
     }
-    $enabled = getTmRankingEnabledSportIds();
-    if ($enabled === []) {
+    return !empty(getTmSportIds());
+}
+
+/** Score updates and ranking entry desk (admin, secretariat, assigned tournament managers). */
+function canUseScoringDesk(): bool
+{
+    if (isAdmin() || isSecretariat() || canManageIntramurals()) {
+        return true;
+    }
+    return isTournamentManager() && !empty(getTmSportIds());
+}
+
+function requireScoringDeskAccess(): void
+{
+    requireLogin();
+    if (!canUseScoringDesk()) {
+        flash('error', 'You do not have permission to enter scores and rankings.');
+        redirect(getHomeUrl());
+    }
+}
+
+/** View socio-cultural event rubrics (criteria and judging sheets). */
+function canViewEventRubrics(?int $sportId = null): bool
+{
+    if (!canUseScoringDesk()) {
         return false;
     }
-    return (bool) array_intersect(getTmSportIds(), $enabled);
+    if ($sportId !== null && $sportId > 0) {
+        return canViewEvent($sportId);
+    }
+    return true;
+}
+
+/** Create / edit / delete rubric criteria for an event. */
+function canManageEventRubricCriteria(?int $sportId = null): bool
+{
+    if (isAdmin() || isSecretariat() || canManageIntramurals()) {
+        return true;
+    }
+    if (!isTournamentManager()) {
+        return false;
+    }
+    if ($sportId !== null && $sportId > 0) {
+        return canManageEventMatches($sportId);
+    }
+    return !empty(getTmSportIds());
+}
+
+/** Enter panel scores against rubric criteria. */
+function canScoreEventRubrics(?int $sportId = null): bool
+{
+    return canManageEventRankings($sportId);
+}
+
+function requireRubricsAccess(?int $sportId = null): void
+{
+    requireLogin();
+    if (!canViewEventRubrics($sportId)) {
+        flash('error', 'You do not have permission to access event rubrics.');
+        redirect(getHomeUrl());
+    }
 }
 
 function canManageMatches(): bool

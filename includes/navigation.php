@@ -35,6 +35,9 @@ function buildAppNavigation(): array
             $items[] = ['label' => 'Transactions', 'href' => BASE_URL . '/transactions/index.php', 'icon' => 'bi-arrow-left-right'];
             $items[] = ['label' => 'Maintenance', 'href' => BASE_URL . '/equipment/maintenance.php', 'icon' => 'bi-tools'];
         }
+        if (isAdmin()) {
+            $items[] = ['label' => 'Borrowable Equipment', 'href' => BASE_URL . '/settings/borrowable.php', 'icon' => 'bi-box-arrow-up'];
+        }
         if (canViewReports() && canManageInventory()) {
             $items[] = ['type' => 'header', 'label' => 'Reports'];
             $items[] = ['label' => 'Inventory Report', 'href' => BASE_URL . '/reports/inventory.php', 'icon' => 'bi-file-earmark-bar-graph'];
@@ -56,7 +59,7 @@ function buildAppNavigation(): array
         ];
     }
 
-    if (canViewCompetitionDashboard() && !isPublication()) {
+    if (canViewCompetitionDashboard() && !isPublication() && !(canViewIntramurals() && !(isCoach() && !canManageIntramurals()))) {
         $items = [
             ['label' => 'Match Results', 'href' => BASE_URL . '/intramurals/matches/index.php', 'icon' => 'bi-list-check'],
         ];
@@ -67,7 +70,8 @@ function buildAppNavigation(): array
             $items[] = ['label' => 'Per-Sport Standings', 'href' => BASE_URL . '/intramurals/standings/index.php', 'icon' => 'bi-bar-chart-steps'];
         }
         if (canManageEventRankings()) {
-            $items[] = ['label' => 'Manual Entry of Ranks', 'href' => BASE_URL . '/intramurals/rankings/index.php', 'icon' => 'bi-list-ol'];
+            $items[] = ['label' => 'Scores & Rankings', 'href' => BASE_URL . '/intramurals/scoring/index.php', 'icon' => 'bi-pencil-square'];
+            $items[] = ['label' => 'Event Rubrics', 'href' => BASE_URL . '/intramurals/rubrics/index.php', 'icon' => 'bi-clipboard-check'];
         }
         if (isTournamentManager() && !canManageIntramurals()) {
             $items[] = ['type' => 'header', 'label' => 'Reports'];
@@ -79,65 +83,82 @@ function buildAppNavigation(): array
     }
 
     if (canViewIntramurals()) {
-        $items = [
-            [
-                'label' => isCoach() && !canManageIntramurals() ? 'Dashboard' : 'Intramurals Home',
-                'href' => BASE_URL . '/intramurals/index.php',
-                'icon' => 'bi-speedometer2',
-            ],
-        ];
-        if (canManageIntramurals()) {
-            $items[] = ['label' => 'Seasons / Years', 'href' => BASE_URL . '/intramurals/seasons/index.php', 'icon' => 'bi-calendar3'];
-        }
-
         if (isCoach() && !canManageIntramurals()) {
-            $items[] = ['type' => 'header', 'label' => 'My Assignments'];
+            $items = [
+                [
+                    'label' => 'Dashboard',
+                    'href' => BASE_URL . '/intramurals/index.php',
+                    'icon' => 'bi-speedometer2',
+                ],
+                ['type' => 'header', 'label' => 'My Assignments'],
+            ];
             if (hasCoachAssignments()) {
                 $items[] = ['label' => 'My Teams & Events', 'href' => BASE_URL . '/intramurals/teams/index.php', 'icon' => 'bi-shield'];
                 $items[] = ['label' => 'Athletes', 'href' => BASE_URL . '/intramurals/athletes/index.php', 'icon' => 'bi-people'];
                 $items[] = ['label' => 'Rosters', 'href' => BASE_URL . '/intramurals/roster/index.php', 'icon' => 'bi-person-lines-fill'];
-                $items[] = ['label' => 'Import Roster', 'href' => BASE_URL . '/intramurals/roster/import.php', 'icon' => 'bi-upload'];
                 $items[] = ['label' => 'Entry Form Gallery', 'href' => BASE_URL . '/intramurals/roster/gallery.php', 'icon' => 'bi-images'];
                 $items[] = ['label' => 'Team Athlete List', 'href' => BASE_URL . '/intramurals/roster/team_list.php', 'icon' => 'bi-people'];
             } else {
                 $items[] = ['type' => 'text', 'label' => 'No event assignments yet. Ask your unit manager under Teams → Event Coaches.'];
             }
             $items[] = ['label' => 'Sport Guidelines', 'href' => BASE_URL . '/intramurals/sports/guidelines.php', 'icon' => 'bi-journal-text'];
+            $nav[] = ['type' => 'group', 'label' => 'Intramurals', 'icon' => 'bi-trophy-fill', 'items' => $items];
         } else {
-            $items[] = ['type' => 'header', 'label' => 'Participants'];
-            $items[] = ['label' => 'Athletes', 'href' => BASE_URL . '/intramurals/athletes/index.php', 'icon' => 'bi-people'];
-            $items[] = ['label' => 'Teams', 'href' => BASE_URL . '/intramurals/teams/index.php', 'icon' => 'bi-shield'];
-            $items[] = ['label' => 'Sports / Events', 'href' => BASE_URL . '/intramurals/sports/index.php', 'icon' => 'bi-trophy'];
+            $intramuralsItems = [
+                ['label' => 'Intramurals Home', 'href' => BASE_URL . '/intramurals/index.php', 'icon' => 'bi-speedometer2'],
+            ];
             if (canManageIntramurals()) {
-                $items[] = ['label' => 'Tournament Managers', 'href' => BASE_URL . '/intramurals/sports/managers.php', 'icon' => 'bi-person-gear'];
-                $items[] = ['label' => 'Sport Guidelines', 'href' => BASE_URL . '/intramurals/sports/guidelines.php', 'icon' => 'bi-journal-text'];
+                $intramuralsItems[] = ['label' => 'Seasons / Years', 'href' => BASE_URL . '/intramurals/seasons/index.php', 'icon' => 'bi-calendar3'];
             }
-            $items[] = ['label' => 'Rosters', 'href' => BASE_URL . '/intramurals/roster/index.php', 'icon' => 'bi-person-lines-fill'];
-            if (canManageTeamAthletes() || canManageTeamRoster()) {
-                $items[] = ['label' => 'Import Roster', 'href' => BASE_URL . '/intramurals/roster/import.php', 'icon' => 'bi-upload'];
+            $intramuralsItems[] = ['label' => 'Point System', 'href' => BASE_URL . '/intramurals/points/index.php', 'icon' => 'bi-calculator'];
+            if (canManageIntramurals()) {
+                $intramuralsItems[] = ['label' => 'Sport Guidelines', 'href' => BASE_URL . '/intramurals/sports/guidelines.php', 'icon' => 'bi-journal-text'];
             }
-            $items[] = ['label' => 'Entry Form Gallery', 'href' => BASE_URL . '/intramurals/roster/gallery.php', 'icon' => 'bi-images'];
-            $items[] = ['label' => 'Team Athlete List', 'href' => BASE_URL . '/intramurals/roster/team_list.php', 'icon' => 'bi-people'];
+            $nav[] = ['type' => 'group', 'label' => 'Intramurals', 'icon' => 'bi-trophy-fill', 'items' => $intramuralsItems];
 
-            $items[] = ['type' => 'header', 'label' => 'Competition'];
-            $items[] = ['label' => 'Matches', 'href' => BASE_URL . '/intramurals/matches/index.php', 'icon' => 'bi-calendar-event'];
+            $participantItems = [
+                ['label' => 'Athletes', 'href' => BASE_URL . '/intramurals/athletes/index.php', 'icon' => 'bi-people'],
+                ['label' => 'Teams', 'href' => BASE_URL . '/intramurals/teams/index.php', 'icon' => 'bi-shield'],
+                ['label' => 'Sports / Events', 'href' => BASE_URL . '/intramurals/sports/index.php', 'icon' => 'bi-trophy'],
+            ];
+            if (canManageIntramurals()) {
+                $participantItems[] = ['label' => 'Tournament Managers', 'href' => BASE_URL . '/intramurals/sports/managers.php', 'icon' => 'bi-person-gear'];
+            }
+            $participantItems[] = ['label' => 'Rosters', 'href' => BASE_URL . '/intramurals/roster/index.php', 'icon' => 'bi-person-lines-fill'];
+            if (isAdmin()) {
+                $participantItems[] = ['label' => 'Import Roster', 'href' => BASE_URL . '/intramurals/roster/import.php', 'icon' => 'bi-upload'];
+            }
+            $participantItems[] = ['label' => 'Entry Form Gallery', 'href' => BASE_URL . '/intramurals/roster/gallery.php', 'icon' => 'bi-images'];
+            $participantItems[] = ['label' => 'Team Athlete List', 'href' => BASE_URL . '/intramurals/roster/team_list.php', 'icon' => 'bi-people'];
+            $nav[] = ['type' => 'group', 'label' => 'Participants', 'icon' => 'bi-people', 'items' => $participantItems];
+
+            $competitionItems = [
+                ['label' => 'Matches', 'href' => BASE_URL . '/intramurals/matches/index.php', 'icon' => 'bi-calendar-event'],
+            ];
+            if (canUseScoringDesk()) {
+                $competitionItems[] = ['label' => 'Scores & Rankings', 'href' => BASE_URL . '/intramurals/scoring/index.php', 'icon' => 'bi-pencil-square'];
+                $competitionItems[] = ['label' => 'Event Rubrics', 'href' => BASE_URL . '/intramurals/rubrics/index.php', 'icon' => 'bi-clipboard-check'];
+            }
             if (canGenerateMatches()) {
-                $items[] = ['label' => 'Generate Matches', 'href' => BASE_URL . '/intramurals/matches/generate.php', 'icon' => 'bi-magic'];
+                $competitionItems[] = ['label' => 'Generate Matches', 'href' => BASE_URL . '/intramurals/matches/generate.php', 'icon' => 'bi-magic'];
             }
-            $items[] = ['label' => 'Calendar', 'href' => BASE_URL . '/intramurals/matches/calendar.php', 'icon' => 'bi-calendar3'];
+            $competitionItems[] = ['label' => 'Calendar', 'href' => BASE_URL . '/intramurals/matches/calendar.php', 'icon' => 'bi-calendar3'];
             if (canViewStandings()) {
-                $items[] = ['label' => 'Standings', 'href' => BASE_URL . '/intramurals/standings/index.php', 'icon' => 'bi-bar-chart-steps'];
-                $items[] = ['label' => 'Overall Standing', 'href' => BASE_URL . '/intramurals/standings/overall.php', 'icon' => 'bi-award'];
+                $competitionItems[] = ['label' => 'Standings', 'href' => BASE_URL . '/intramurals/standings/index.php', 'icon' => 'bi-bar-chart-steps'];
+                $competitionItems[] = ['label' => 'Overall Standing', 'href' => BASE_URL . '/intramurals/standings/overall.php', 'icon' => 'bi-award'];
             }
-            if (canManageEventRankings()) {
-                $items[] = ['label' => 'Manual Entry of Ranks', 'href' => BASE_URL . '/intramurals/rankings/index.php', 'icon' => 'bi-list-ol'];
-            }
-            $items[] = ['label' => 'Point System', 'href' => BASE_URL . '/intramurals/points/index.php', 'icon' => 'bi-calculator'];
-            $items[] = ['type' => 'header', 'label' => 'Reports'];
-            $items[] = ['label' => 'Intramurals Reports', 'href' => BASE_URL . '/intramurals/reports/index.php', 'icon' => 'bi-printer'];
-            $items[] = ['label' => 'Certificate of Recognition', 'href' => BASE_URL . '/intramurals/reports/certificates.php', 'icon' => 'bi-award'];
+            $nav[] = ['type' => 'group', 'label' => 'Competition', 'icon' => 'bi-calendar-event', 'items' => $competitionItems];
+
+            $nav[] = [
+                'type' => 'group',
+                'label' => 'Reports',
+                'icon' => 'bi-printer',
+                'items' => [
+                    ['label' => 'Intramurals Reports', 'href' => BASE_URL . '/intramurals/reports/index.php', 'icon' => 'bi-printer'],
+                    ['label' => 'Certificate of Recognition', 'href' => BASE_URL . '/intramurals/reports/certificates.php', 'icon' => 'bi-award'],
+                ],
+            ];
         }
-        $nav[] = ['type' => 'group', 'label' => 'Intramurals', 'icon' => 'bi-trophy-fill', 'items' => $items];
     }
 
     if (isSecretariat()) {
@@ -147,6 +168,8 @@ function buildAppNavigation(): array
             'icon' => 'bi-calendar3',
             'items' => [
                 ['label' => 'All Matches & Results', 'href' => BASE_URL . '/intramurals/matches/index.php', 'icon' => 'bi-list-check'],
+                ['label' => 'Scores & Rankings', 'href' => BASE_URL . '/intramurals/scoring/index.php', 'icon' => 'bi-pencil-square'],
+                ['label' => 'Event Rubrics', 'href' => BASE_URL . '/intramurals/rubrics/index.php', 'icon' => 'bi-clipboard-check'],
                 ['label' => 'Generate Matches', 'href' => BASE_URL . '/intramurals/matches/generate.php', 'icon' => 'bi-magic'],
                 ['label' => 'Calendar', 'href' => BASE_URL . '/intramurals/matches/calendar.php', 'icon' => 'bi-calendar3'],
                 ['label' => 'Official Rosters', 'href' => BASE_URL . '/intramurals/roster/index.php', 'icon' => 'bi-person-lines-fill'],
@@ -155,7 +178,6 @@ function buildAppNavigation(): array
                 ['type' => 'header', 'label' => 'Standings'],
                 ['label' => 'Team Standings', 'href' => BASE_URL . '/intramurals/standings/index.php', 'icon' => 'bi-bar-chart-steps'],
                 ['label' => 'Overall Standing', 'href' => BASE_URL . '/intramurals/standings/overall.php', 'icon' => 'bi-award'],
-                ['label' => 'Manual Entry of Ranks', 'href' => BASE_URL . '/intramurals/rankings/index.php', 'icon' => 'bi-list-ol'],
                 ['type' => 'header', 'label' => 'More'],
                 ['label' => 'Reports', 'href' => BASE_URL . '/intramurals/reports/index.php', 'icon' => 'bi-printer'],
                 ['label' => 'Certificate of Recognition', 'href' => BASE_URL . '/intramurals/reports/certificates.php', 'icon' => 'bi-award'],
@@ -179,6 +201,8 @@ function buildAppNavigation(): array
     } elseif (isTournamentManager() && !canManageIntramurals()) {
         $items = [
             ['label' => 'Matches & Results', 'href' => BASE_URL . '/intramurals/matches/index.php', 'icon' => 'bi-list-check'],
+            ['label' => 'Scores & Rankings', 'href' => BASE_URL . '/intramurals/scoring/index.php', 'icon' => 'bi-pencil-square'],
+            ['label' => 'Event Rubrics', 'href' => BASE_URL . '/intramurals/rubrics/index.php', 'icon' => 'bi-clipboard-check'],
         ];
         if (canGenerateMatches()) {
             $items[] = ['label' => 'Generate Matches', 'href' => BASE_URL . '/intramurals/matches/generate.php', 'icon' => 'bi-magic'];
@@ -201,7 +225,6 @@ function buildAppNavigation(): array
         $items = array_merge($items, [
             ['label' => 'Athletes', 'href' => BASE_URL . '/intramurals/athletes/index.php', 'icon' => 'bi-people'],
             ['label' => 'Rosters', 'href' => BASE_URL . '/intramurals/roster/index.php', 'icon' => 'bi-person-lines-fill'],
-            ['label' => 'Import Roster', 'href' => BASE_URL . '/intramurals/roster/import.php', 'icon' => 'bi-upload'],
             ['label' => 'Entry Form Gallery', 'href' => BASE_URL . '/intramurals/roster/gallery.php', 'icon' => 'bi-images'],
             ['label' => 'Team Athlete List', 'href' => BASE_URL . '/intramurals/roster/team_list.php', 'icon' => 'bi-people'],
             ['label' => 'Incident Reports', 'href' => BASE_URL . '/incidents/index.php', 'icon' => 'bi-flag'],
@@ -218,19 +241,11 @@ function buildAppNavigation(): array
             'label' => 'Admin',
             'icon' => 'bi-shield-lock',
             'items' => [
-                ['label' => 'Admin Panel', 'href' => BASE_URL . '/admin/index.php', 'icon' => 'bi-grid-1x2'],
                 ['type' => 'header', 'label' => 'People'],
                 ['label' => 'Users', 'href' => BASE_URL . '/users/index.php', 'icon' => 'bi-people'],
                 ['label' => 'Working Committees', 'href' => BASE_URL . '/admin/committees/index.php', 'icon' => 'bi-person-badge'],
                 ['label' => 'Incident Reports', 'href' => BASE_URL . '/admin/incidents/index.php', 'icon' => 'bi-flag'],
-                ['type' => 'header', 'label' => 'System'],
                 ['label' => 'Announcements', 'href' => BASE_URL . '/admin/announcements/index.php', 'icon' => 'bi-megaphone'],
-                ['label' => 'System Settings', 'href' => BASE_URL . '/settings/index.php', 'icon' => 'bi-gear'],
-                ['label' => 'Theme Manager', 'href' => BASE_URL . '/settings/theme.php', 'icon' => 'bi-palette'],
-                ['label' => 'Equipment Categories', 'href' => BASE_URL . '/settings/categories.php', 'icon' => 'bi-tags'],
-                ['label' => 'Courses', 'href' => BASE_URL . '/admin/courses/index.php', 'icon' => 'bi-mortarboard'],
-                ['label' => 'Database Tools', 'href' => BASE_URL . '/settings/database.php', 'icon' => 'bi-database-gear'],
-                ['label' => 'Audit Logs', 'href' => BASE_URL . '/audit/index.php', 'icon' => 'bi-journal-check'],
                 ['type' => 'header', 'label' => 'Competition Admin'],
                 ['label' => 'Seasons / Years', 'href' => BASE_URL . '/intramurals/seasons/index.php', 'icon' => 'bi-calendar3'],
                 ['label' => 'Roster Lock', 'href' => BASE_URL . '/intramurals/roster/lock.php', 'icon' => 'bi-lock'],
@@ -240,6 +255,27 @@ function buildAppNavigation(): array
                 ['label' => 'Delete Athletes', 'href' => BASE_URL . '/admin/athletes/delete.php', 'icon' => 'bi-person-x'],
                 ['label' => 'Team Positions', 'href' => BASE_URL . '/admin/team_positions/index.php', 'icon' => 'bi-list-ol'],
                 ['label' => 'Certificate of Recognition', 'href' => BASE_URL . '/intramurals/reports/certificates.php', 'icon' => 'bi-award'],
+            ],
+        ];
+
+        $nav[] = [
+            'type' => 'group',
+            'label' => 'Admin Tools',
+            'icon' => 'bi-tools',
+            'items' => [
+                ['label' => 'Admin Panel', 'href' => BASE_URL . '/admin/index.php', 'icon' => 'bi-grid-1x2'],
+                ['type' => 'header', 'label' => 'Configuration'],
+                ['label' => 'System Settings', 'href' => BASE_URL . '/settings/index.php', 'icon' => 'bi-gear'],
+                ['label' => 'Borrowable Equipment', 'href' => BASE_URL . '/settings/borrowable.php', 'icon' => 'bi-box-arrow-up'],
+                ['label' => 'Theme Manager', 'href' => BASE_URL . '/settings/theme.php', 'icon' => 'bi-palette'],
+                ['label' => 'Equipment Categories', 'href' => BASE_URL . '/settings/categories.php', 'icon' => 'bi-tags'],
+                ['label' => 'Courses', 'href' => BASE_URL . '/admin/courses/index.php', 'icon' => 'bi-mortarboard'],
+                ['type' => 'header', 'label' => 'Public Site'],
+                ['label' => 'Landing Page', 'href' => BASE_URL . '/admin/landing.php', 'icon' => 'bi-house-door'],
+                ['label' => 'Live Standings', 'href' => BASE_URL . '/admin/live_board.php', 'icon' => 'bi-broadcast'],
+                ['type' => 'header', 'label' => 'Maintenance'],
+                ['label' => 'Database Tools', 'href' => BASE_URL . '/settings/database.php', 'icon' => 'bi-database-gear'],
+                ['label' => 'Audit Logs', 'href' => BASE_URL . '/audit/index.php', 'icon' => 'bi-journal-check'],
             ],
         ];
     }

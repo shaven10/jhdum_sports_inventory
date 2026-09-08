@@ -28,6 +28,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && canManageIntramurals()) {
         $id = (int) post('id');
         $name = post('name');
         $category = post('category', 'men');
+        $eventGroup = normalizeSportEventGroup(post('event_group', 'sports_competition'));
         $description = post('description');
         $scoring = post('scoring_method', 'points');
         $rules = post('rules');
@@ -52,6 +53,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && canManageIntramurals()) {
         if (!array_key_exists($category, sportCategoryOptions())) {
             $errors[] = 'Invalid category.';
         }
+        if (!array_key_exists($eventGroup, sportEventGroupOptions())) {
+            $errors[] = 'Invalid event group.';
+        }
         if (!array_key_exists($tournamentFormat, tournamentFormatLabels())) {
             $errors[] = 'Invalid tournament format.';
         }
@@ -65,20 +69,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && canManageIntramurals()) {
         if (empty($errors)) {
             if ($action === 'add') {
                 try {
-                    $stmt = $db->prepare('INSERT INTO intramural_sports (name, description, category, players_per_event, scoring_method, rules, guidelines, schedule_notes, venue, game_duration_minutes, tournament_format, format_notes, win_points, draw_points, loss_points, point_scheme_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-                    $stmt->execute([$name, $description, $category, $playersPerEvent, $scoring, $rules, $guidelines !== '' ? $guidelines : null, $scheduleNotes, $venue ?: null, $gameDurationMinutes, $tournamentFormat, $formatNotes ?: null, $winPoints, $drawPoints, $lossPoints, $pointSchemeId]);
-                    auditLog($_SESSION['user_id'], 'create', 'intramural_sport', (int) $db->lastInsertId(), null, ['name' => $name, 'category' => $category, 'tournament_format' => $tournamentFormat, 'venue' => $venue]);
-                    flash('success', 'Sport added successfully.');
+                    $stmt = $db->prepare('INSERT INTO intramural_sports (name, description, category, event_group, players_per_event, scoring_method, rules, guidelines, schedule_notes, venue, game_duration_minutes, tournament_format, format_notes, win_points, draw_points, loss_points, point_scheme_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+                    $stmt->execute([$name, $description, $category, $eventGroup, $playersPerEvent, $scoring, $rules, $guidelines !== '' ? $guidelines : null, $scheduleNotes, $venue ?: null, $gameDurationMinutes, $tournamentFormat, $formatNotes ?: null, $winPoints, $drawPoints, $lossPoints, $pointSchemeId]);
+                    $newSportId = (int) $db->lastInsertId();
+                    if ($eventGroup === 'socio_cultural') {
+                        seedDefaultRubricForSport($newSportId, $name);
+                    }
+                    auditLog($_SESSION['user_id'], 'create', 'intramural_sport', $newSportId, null, ['name' => $name, 'category' => $category, 'event_group' => $eventGroup, 'tournament_format' => $tournamentFormat, 'venue' => $venue]);
+                    flash('success', 'Event added successfully.');
                     redirect(BASE_URL . '/intramurals/sports/index.php');
                 } catch (PDOException $e) {
                     $errors[] = 'Sport with this name and category already exists.';
                 }
             } else {
                 try {
-                    $stmt = $db->prepare('UPDATE intramural_sports SET name=?, description=?, category=?, players_per_event=?, scoring_method=?, rules=?, schedule_notes=?, venue=?, game_duration_minutes=?, tournament_format=?, format_notes=?, win_points=?, draw_points=?, loss_points=?, point_scheme_id=? WHERE id=?');
-                    $stmt->execute([$name, $description, $category, $playersPerEvent, $scoring, $rules, $scheduleNotes, $venue ?: null, $gameDurationMinutes, $tournamentFormat, $formatNotes ?: null, $winPoints, $drawPoints, $lossPoints, $pointSchemeId, $id]);
-                    auditLog($_SESSION['user_id'], 'update', 'intramural_sport', $id, null, ['name' => $name, 'tournament_format' => $tournamentFormat, 'venue' => $venue]);
-                    flash('success', 'Sport updated successfully.');
+                    $stmt = $db->prepare('UPDATE intramural_sports SET name=?, description=?, category=?, event_group=?, players_per_event=?, scoring_method=?, rules=?, schedule_notes=?, venue=?, game_duration_minutes=?, tournament_format=?, format_notes=?, win_points=?, draw_points=?, loss_points=?, point_scheme_id=? WHERE id=?');
+                    $stmt->execute([$name, $description, $category, $eventGroup, $playersPerEvent, $scoring, $rules, $scheduleNotes, $venue ?: null, $gameDurationMinutes, $tournamentFormat, $formatNotes ?: null, $winPoints, $drawPoints, $lossPoints, $pointSchemeId, $id]);
+                    if ($eventGroup === 'socio_cultural') {
+                        seedDefaultRubricForSport($id, $name);
+                    }
+                    auditLog($_SESSION['user_id'], 'update', 'intramural_sport', $id, null, ['name' => $name, 'event_group' => $eventGroup, 'tournament_format' => $tournamentFormat, 'venue' => $venue]);
+                    flash('success', 'Event updated successfully.');
                     redirect(BASE_URL . '/intramurals/sports/index.php');
                 } catch (PDOException $e) {
                     $errors[] = 'Could not update sport (duplicate name/category?).';
@@ -94,6 +105,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && canManageIntramurals()) {
                 'data' => [
                     'name' => $name,
                     'category' => $category,
+                    'event_group' => $eventGroup,
                     'description' => $description,
                     'scoring_method' => $scoring,
                     'rules' => $rules,
@@ -118,7 +130,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && canManageIntramurals()) {
         $id = (int) post('id');
         $db->prepare('DELETE FROM intramural_sports WHERE id = ?')->execute([$id]);
         auditLog($_SESSION['user_id'], 'delete', 'intramural_sport', $id);
-        flash('success', 'Sport removed.');
+        flash('success', 'Event removed.');
         redirect(BASE_URL . '/intramurals/sports/index.php');
     }
 }
@@ -143,12 +155,13 @@ $sports = $db->query("SELECT s.*, ps.name as scheme_name, ps.points_1, ps.points
     FROM intramural_sports s
     LEFT JOIN intramural_point_schemes ps ON s.point_scheme_id = ps.id
     $tmJoin
-    ORDER BY s.name, s.category")->fetchAll();
+    ORDER BY " . intramuralSportsOrderBy('s'))->fetchAll();
 $pointSchemes = getAllPointSchemes(true);
 
 $formDefaults = [
     'name' => '',
     'category' => 'men',
+    'event_group' => 'sports_competition',
     'description' => '',
     'scoring_method' => 'points',
     'rules' => '',
@@ -182,6 +195,7 @@ if ($formState) {
             $formData = [
                 'name' => $sport['name'],
                 'category' => $sport['category'],
+                'event_group' => sportEventGroupOf($sport),
                 'description' => $sport['description'] ?? '',
                 'scoring_method' => $sport['scoring_method'],
                 'rules' => $sport['rules'] ?? '',
@@ -202,19 +216,20 @@ if ($formState) {
     }
 }
 
-$pageTitle = 'Sports Management';
+$pageTitle = 'Events';
 $canManageSports = canManageIntramurals();
 $viewOnlySports = isSportsCatalogViewOnly();
 $sportColumnCount = 10 + ($canManageSports ? 1 : 0);
+$sportsByGroup = groupSportsByEventGroup($sports);
 require_once __DIR__ . '/../../includes/header.php';
 require __DIR__ . '/../_season_bar.php';
 ?>
 
 <div class="page-header d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
     <div>
-        <h1 class="mb-1"><i class="bi bi-trophy"></i> Sports Management</h1>
+        <h1 class="mb-1"><i class="bi bi-trophy"></i> Events</h1>
         <p class="text-muted mb-0">
-            <?= count($sports) ?> sport<?= count($sports) === 1 ? '' : 's' ?> · tournament styles and placement point schemes
+            <?= count($sports) ?> event<?= count($sports) === 1 ? '' : 's' ?> · Sports Competition and Socio-Cultural · same roster, matches, ranks, and overall standing
             <?php if ($viewOnlySports): ?>
             <span class="badge bg-secondary ms-1">View only</span>
             <?php endif; ?>
@@ -224,11 +239,14 @@ require __DIR__ . '/../_season_bar.php';
         <?php if ($canManageSports): ?>
         <a href="<?= BASE_URL ?>/intramurals/points/index.php" class="btn btn-sm btn-outline-primary"><i class="bi bi-calculator"></i> Point System</a>
         <?php endif; ?>
-        <a href="<?= BASE_URL ?>/intramurals/sports/guidelines.php" class="btn btn-sm btn-outline-primary"><i class="bi bi-journal-text"></i> Sport Guidelines</a>
+        <a href="<?= BASE_URL ?>/intramurals/sports/guidelines.php" class="btn btn-sm btn-outline-primary"><i class="bi bi-journal-text"></i> Event Guidelines</a>
+        <?php if (canViewEventRubrics()): ?>
+        <a href="<?= BASE_URL ?>/intramurals/rubrics/index.php" class="btn btn-sm btn-outline-warning"><i class="bi bi-clipboard-check"></i> Event Rubrics</a>
+        <?php endif; ?>
         <?php if ($canManageSports): ?>
         <a href="<?= BASE_URL ?>/intramurals/sports/managers.php" class="btn btn-sm btn-outline-primary"><i class="bi bi-person-workspace"></i> Tournament Managers</a>
         <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#sportModal" data-sport-mode="add">
-            <i class="bi bi-plus-lg"></i> Add Sport
+            <i class="bi bi-plus-lg"></i> Add Event
         </button>
         <?php endif; ?>
         <a href="<?= $viewOnlySports ? sanitize(getHomeUrl()) : BASE_URL . '/intramurals/index.php' ?>" class="btn btn-sm btn-outline-secondary">Back</a>
@@ -241,7 +259,7 @@ require __DIR__ . '/../_season_bar.php';
             <table class="table table-hover mb-0 align-middle">
                 <thead class="table-light">
                     <tr>
-                        <th>Sport</th>
+                        <th>Event</th>
                         <th>Category</th>
                         <th>Players/Event</th>
                         <th>Venue</th>
@@ -256,14 +274,28 @@ require __DIR__ . '/../_season_bar.php';
                 </thead>
                 <tbody>
                     <?php if (empty($sports)): ?>
-                    <tr><td colspan="<?= (int) $sportColumnCount ?>" class="text-center text-muted py-4">No sports yet.</td></tr>
+                    <tr><td colspan="<?= (int) $sportColumnCount ?>" class="text-center text-muted py-4">No events yet.</td></tr>
                     <?php else: ?>
-                    <?php foreach ($sports as $s): ?>
+                    <?php foreach ($sportsByGroup as $groupKey => $groupSports): ?>
+                    <?php if ($groupSports === []) continue; ?>
+                    <tr class="table-secondary">
+                        <td colspan="<?= (int) $sportColumnCount ?>" class="fw-semibold">
+                            <?php if ($groupKey === 'socio_cultural'): ?>
+                            <i class="bi bi-palette"></i>
+                            <?php else: ?>
+                            <i class="bi bi-trophy"></i>
+                            <?php endif; ?>
+                            <?= sanitize(sportEventGroupLabel($groupKey)) ?>
+                            <span class="badge bg-dark bg-opacity-25 text-dark ms-1"><?= count($groupSports) ?></span>
+                        </td>
+                    </tr>
+                    <?php foreach ($groupSports as $s): ?>
                     <?php
                     $sportPayload = htmlspecialchars(json_encode([
                         'id' => (int) $s['id'],
                         'name' => $s['name'],
                         'category' => $s['category'],
+                        'event_group' => sportEventGroupOf($s),
                         'description' => $s['description'] ?? '',
                         'scoring_method' => $s['scoring_method'],
                         'rules' => $s['rules'] ?? '',
@@ -317,6 +349,13 @@ require __DIR__ . '/../_season_bar.php';
                         <td><?= (int) $s['match_count'] ?></td>
                         <?php if ($canManageSports): ?>
                         <td class="text-end text-nowrap">
+                            <?php if (isSocioCulturalSport($s)): ?>
+                            <a href="<?= BASE_URL ?>/intramurals/rubrics/edit.php?sport=<?= (int) $s['id'] ?>"
+                               class="btn btn-sm btn-outline-warning"
+                               title="Event rubric">
+                                <i class="bi bi-clipboard-check"></i>
+                            </a>
+                            <?php endif; ?>
                             <a href="<?= BASE_URL ?>/intramurals/sports/guidelines.php?sport=<?= (int) $s['id'] ?>"
                                class="btn btn-sm btn-outline-secondary"
                                title="Guidelines">
@@ -328,7 +367,7 @@ require __DIR__ . '/../_season_bar.php';
                                     data-bs-target="#sportModal"
                                     data-sport-mode="copy"
                                     data-sport="<?= $sportPayload ?>"
-                                    title="Copy sport">
+                                    title="Copy event">
                                 <i class="bi bi-copy"></i>
                             </button>
                             <button type="button"
@@ -337,18 +376,19 @@ require __DIR__ . '/../_season_bar.php';
                                     data-bs-target="#sportModal"
                                     data-sport-mode="edit"
                                     data-sport="<?= $sportPayload ?>"
-                                    title="Edit sport">
+                                    title="Edit event">
                                 <i class="bi bi-pencil"></i>
                             </button>
                             <form method="POST" class="d-inline">
                                 <?= csrfField() ?>
                                 <input type="hidden" name="id" value="<?= $s['id'] ?>">
                                 <input type="hidden" name="action" value="delete">
-                                <button type="submit" class="btn btn-sm btn-outline-danger" data-confirm="Remove this sport? Related registrations and matches will also be deleted." title="Remove"><i class="bi bi-trash"></i></button>
+                                <button type="submit" class="btn btn-sm btn-outline-danger" data-confirm="Remove this event? Related registrations and matches will also be deleted." title="Remove"><i class="bi bi-trash"></i></button>
                             </form>
                         </td>
                         <?php endif; ?>
                     </tr>
+                    <?php endforeach; ?>
                     <?php endforeach; ?>
                     <?php endif; ?>
                 </tbody>
@@ -367,18 +407,27 @@ require __DIR__ . '/../_season_bar.php';
                 <input type="hidden" name="id" id="sportId" value="">
                 <input type="hidden" name="guidelines" id="sportGuidelines" value="">
                 <div class="modal-header">
-                    <h5 class="modal-title" id="sportModalLabel"><i class="bi bi-plus-lg"></i> Add Sport</h5>
+                    <h5 class="modal-title" id="sportModalLabel"><i class="bi bi-plus-lg"></i> Add Event</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
                     <div id="sportCopyNotice" class="alert alert-info d-none">
-                        <i class="bi bi-copy"></i> Creating a copy — review the name and category, then save to add the new event.
+                        <i class="bi bi-copy"></i> Creating a copy — review the name, group, and category, then save to add the new event.
                     </div>
                     <div id="sportFormErrors" class="alert alert-danger d-none"></div>
                     <div class="row g-3">
                         <div class="col-md-8">
-                            <label class="form-label" for="sportNameInput">Sport Name *</label>
+                            <label class="form-label" for="sportNameInput">Event Name *</label>
                             <input type="text" name="name" id="sportNameInput" class="form-control" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label" for="sportEventGroup">Event Group *</label>
+                            <select name="event_group" id="sportEventGroup" class="form-select" required>
+                                <?php foreach (sportEventGroupOptions() as $val => $label): ?>
+                                <option value="<?= $val ?>"><?= sanitize($label) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <div class="form-text">Socio-cultural events use the same workflow and count in overall standing / medal tally.</div>
                         </div>
                         <div class="col-md-4">
                             <label class="form-label" for="sportCategory">Category *</label>
@@ -482,7 +531,7 @@ require __DIR__ . '/../_season_bar.php';
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-primary" id="sportFormSubmit">Add Sport</button>
+                    <button type="submit" class="btn btn-primary" id="sportFormSubmit">Add Event</button>
                 </div>
             </form>
         </div>
@@ -543,6 +592,7 @@ require __DIR__ . '/../_season_bar.php';
 
     function fillSportForm(data) {
         nameInput.value = data.name || '';
+        document.getElementById('sportEventGroup').value = data.event_group || 'sports_competition';
         document.getElementById('sportCategory').value = data.category || 'men';
         document.getElementById('playersPerEvent').value = data.players_per_event ?? '';
         document.getElementById('scoringMethod').value = data.scoring_method || 'points';
@@ -606,17 +656,17 @@ require __DIR__ . '/../_season_bar.php';
         }
 
         if (mode === 'add') {
-            modalTitle.innerHTML = '<i class="bi bi-plus-lg"></i> Add Sport';
-            formSubmit.textContent = 'Add Sport';
+            modalTitle.innerHTML = '<i class="bi bi-plus-lg"></i> Add Event';
+            formSubmit.textContent = 'Add Event';
             fillSportForm({});
         } else if (mode === 'copy') {
-            modalTitle.innerHTML = '<i class="bi bi-copy"></i> Copy Sport';
+            modalTitle.innerHTML = '<i class="bi bi-copy"></i> Copy Event';
             formSubmit.textContent = 'Create Copy';
             const suggested = suggestCopyFields(data);
             fillSportForm(Object.assign({}, data, suggested, { id: '' }));
         } else {
-            modalTitle.innerHTML = '<i class="bi bi-pencil"></i> Edit Sport';
-            formSubmit.textContent = 'Update Sport';
+            modalTitle.innerHTML = '<i class="bi bi-pencil"></i> Edit Event';
+            formSubmit.textContent = 'Update Event';
             allowAutoSds = false;
             fillSportForm(data);
         }
@@ -641,6 +691,14 @@ require __DIR__ . '/../_season_bar.php';
     });
 
     nameInput.addEventListener('input', syncSdsUi);
+    const eventGroupSelect = document.getElementById('sportEventGroup');
+    if (eventGroupSelect) {
+        eventGroupSelect.addEventListener('change', function () {
+            if (sportAction.value === 'add' && this.value === 'socio_cultural') {
+                document.getElementById('sportCategory').value = 'mixed';
+            }
+        });
+    }
     formatSelect.addEventListener('change', function () {
         allowAutoSds = false;
         syncSdsUi();

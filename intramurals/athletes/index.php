@@ -117,7 +117,7 @@ foreach ($athletes as &$athleteRow) {
 unset($athleteRow);
 
 $teams = filterTeamsForCoach($db->query('SELECT id, name FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll());
-$sports = filterSportsForCoach($db->query('SELECT id, name, category FROM intramural_sports ORDER BY name, category')->fetchAll());
+$sports = filterSportsForCoach($db->query('SELECT id, name, category, event_group FROM intramural_sports ORDER BY ' . intramuralSportsOrderBy())->fetchAll());
 
 $filterQuery = http_build_query(array_filter([
     'search' => $search,
@@ -134,10 +134,10 @@ require __DIR__ . '/../_season_bar.php';
 <div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2">
     <div>
         <h1><i class="bi bi-person-badge"></i> Athletes</h1>
-        <p class="text-muted mb-0">Athletes are added via roster import or manual registration</p>
+        <p class="text-muted mb-0">Register athletes by school/team and event using Student ID from the Registrar</p>
     </div>
     <div class="d-flex gap-2">
-        <?php if (canModifyRosterAny()): ?>
+        <?php if (canImportRoster()): ?>
         <a href="<?= BASE_URL ?>/intramurals/roster/import.php" class="btn btn-success"><i class="bi bi-file-earmark-arrow-up"></i> Import Roster</a>
         <?php endif; ?>
         <?php if (canModifyRosterAny() && canManageTeamAthletes()): ?>
@@ -176,9 +176,7 @@ require __DIR__ . '/../_season_bar.php';
             <label class="form-label">Event</label>
             <select name="sport" class="form-select">
                 <option value="">All Events</option>
-                <?php foreach ($sports as $s): ?>
-                <option value="<?= $s['id'] ?>" <?= $sportId === (string) $s['id'] ? 'selected' : '' ?>><?= sanitize(sportLabel($s)) ?></option>
-                <?php endforeach; ?>
+                <?= renderSportSelectOptions($sports, $sportId) ?>
             </select>
         </div>
         <div class="col-md-2">

@@ -3,8 +3,8 @@ require_once __DIR__ . '/../../includes/auth.php';
 requireIntramuralsAccess();
 ensureSportCategoryEnum();
 
-if (!canManageTeamAthletes() && !canManageTeamRoster()) {
-    flash('error', 'You do not have permission to import athlete rosters.');
+if (!canImportRoster()) {
+    flash('error', 'Only administrators can import athlete rosters.');
     redirect(BASE_URL . '/intramurals/roster/index.php');
 }
 
@@ -37,7 +37,7 @@ $isCoach = hasRole('coach') && !canManageIntramurals();
 
 $lookups = buildRosterImportLookups();
 $teams = filterTeamsForCoach($db->query('SELECT id, name, short_name FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll());
-$sports = filterSportsForCoach($db->query('SELECT id, name, category, players_per_event, venue FROM intramural_sports ORDER BY name, category')->fetchAll());
+$sports = filterSportsForCoach($db->query('SELECT id, name, category, event_group, players_per_event, venue FROM intramural_sports ORDER BY ' . intramuralSportsOrderBy())->fetchAll());
 
 $results = null;
 $errors = [];
@@ -483,15 +483,19 @@ require __DIR__ . '/../_season_bar.php';
                 <h6 class="text-muted">Events</h6>
                 <div class="table-responsive" style="max-height:260px;overflow:auto">
                     <table class="table table-sm mb-0">
-                        <thead class="table-light"><tr><th>Sport</th><th>Category</th><th>Players/Event</th><th>Venue</th></tr></thead>
+                        <thead class="table-light"><tr><th>Event</th><th>Category</th><th>Players/Event</th><th>Venue</th></tr></thead>
                         <tbody>
-                            <?php foreach ($sports as $s): ?>
+                            <?php foreach (groupSportsByEventGroup($sports) as $groupKey => $groupSports): ?>
+                            <?php if ($groupSports === []) continue; ?>
+                            <tr class="table-secondary"><td colspan="4" class="fw-semibold"><?= sanitize(sportEventGroupLabel($groupKey)) ?></td></tr>
+                            <?php foreach ($groupSports as $s): ?>
                             <tr>
                                 <td><?= sanitize($s['name']) ?></td>
                                 <td><?= sanitize($s['category']) ?></td>
                                 <td><?= !empty($s['players_per_event']) ? (int) $s['players_per_event'] : '—' ?></td>
                                 <td><?= sanitize($s['venue'] ?: '—') ?></td>
                             </tr>
+                            <?php endforeach; ?>
                             <?php endforeach; ?>
                         </tbody>
                     </table>

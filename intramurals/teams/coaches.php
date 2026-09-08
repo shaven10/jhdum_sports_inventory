@@ -21,7 +21,7 @@ if (!canEditOwnTeam($id) && !canManageIntramurals()) {
 
 $canAddCoach = canCreateCoachAccounts($id);
 $seasonId = getCurrentSeasonId();
-$sports = $db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll();
+$sports = $db->query('SELECT * FROM intramural_sports ORDER BY ' . intramuralSportsOrderBy())->fetchAll();
 $coaches = $db->query("SELECT id, first_name, last_name, username, team_id FROM users WHERE role = 'coach' AND is_active = 1 ORDER BY first_name, last_name")->fetchAll();
 
 $coachFormDefaults = [

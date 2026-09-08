@@ -13,7 +13,7 @@ $eventLocks = [];
 
 if ($seasonId) {
     $db = getDB();
-    $sports = $db->query('SELECT id, name, category FROM intramural_sports ORDER BY name, category')->fetchAll() ?: [];
+    $sports = $db->query('SELECT id, name, category, event_group FROM intramural_sports ORDER BY ' . intramuralSportsOrderBy())->fetchAll() ?: [];
     $eventLocks = getEventResultsLocksMap($seasonId);
 }
 

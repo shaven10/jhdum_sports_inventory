@@ -48,49 +48,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
         requireUnlockedResults(null, $sportId);
         $action = post('action');
         if ($action === 'live_score') {
-            if (!$teamsReady) {
-                flash('error', 'Both teams must be assigned before recording scores.');
-                redirect(BASE_URL . '/intramurals/matches/view.php?id=' . $id . ($fromDashboard ? '&from=dashboard' : ''));
+            $result = recordIntramuralMatchScore(
+                $id,
+                (int) post('score_a'),
+                (int) post('score_b'),
+                post('status', 'ongoing')
+            );
+            if (!empty($result['ok'])) {
+                flash('success', $result['message'] ?: 'Score updated.');
+            } else {
+                flash('error', $result['error'] ?: 'Could not update score.');
             }
-            if (isDecidingRubberDisabled($db, $match)) {
-                $msg = decidingRubberDisabledMessage($db, $match) ?: 'This deciding rubber is disabled.';
-                flash('error', $msg);
-                redirect(BASE_URL . '/intramurals/matches/view.php?id=' . $id . ($fromDashboard ? '&from=dashboard' : ''));
-            }
-            $scoreA = (int) post('score_a');
-            $scoreB = (int) post('score_b');
-            $status = post('status', 'ongoing');
-            $winner = null;
-            if ($status === 'completed') {
-                $winner = determineMatchWinner($scoreA, $scoreB, (int) $match['team_a_id'], (int) $match['team_b_id'], 'completed');
-            }
-            $db->prepare('UPDATE intramural_matches SET score_a=?, score_b=?, status=?, winner_team_id=? WHERE id=?')
-                ->execute([$scoreA, $scoreB, $status, $winner, $id]);
-            try {
-                auditLog($_SESSION['user_id'], 'score_update', 'intramural_match', $id, null, ['score_a' => $scoreA, 'score_b' => $scoreB, 'status' => $status]);
-            } catch (PDOException $e) {
-                // Score saved; audit logging must not block live scoring.
-            }
-
-            maybeCancelUnneededDecidingRubber($db, $id);
-
-            if (in_array($status, ['completed', 'forfeit'], true)) {
-                try {
-                    notifyMatchFinished($id, (string) ($match['status'] ?? ''));
-                } catch (PDOException $e) {
-                    // Score saved; notifications must not block live scoring.
-                }
-            }
-
-            $advanceMsg = '';
-            if (in_array($status, ['completed', 'forfeit'], true) && $seasonId = getCurrentSeasonId()) {
-                $adv = advanceBracketFromResults((int) $match['sport_id'], (int) $seasonId);
-                if ((int) ($adv['updated'] ?? 0) > 0) {
-                    $advanceMsg = ' Bracket updated: ' . (int) $adv['updated'] . ' TBD slot(s) filled.';
-                }
-            }
-
-            flash('success', 'Score updated.' . $advanceMsg);
             redirect(BASE_URL . '/intramurals/matches/view.php?id=' . $id . ($fromDashboard ? '&from=dashboard' : ''));
         }
     }
@@ -132,6 +100,9 @@ echo renderResultsLockAlerts();
         <?php endif; ?>
         <?php if (canRecordScores($sportId)): ?>
         <a href="<?= BASE_URL ?>/intramurals/matches/edit.php?id=<?= $id ?>" class="btn btn-primary"><?= canManageIntramurals() ? 'Edit / Record Score' : 'Record Score' ?></a>
+        <?php endif; ?>
+        <?php if (canUseScoringDesk()): ?>
+        <a href="<?= BASE_URL ?>/intramurals/scoring/event.php?sport=<?= (int) $match['sport_id'] ?>&tab=scores" class="btn btn-outline-warning"><i class="bi bi-pencil-square"></i> Scores & Rankings</a>
         <?php endif; ?>
         <?php endif; ?>
         <?php if (canDeleteAllMatches()): ?>

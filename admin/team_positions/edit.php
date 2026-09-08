@@ -27,7 +27,7 @@ $sportIds = getDivisionSportIds($divisionId);
 $sports = [];
 if ($sportIds) {
     $placeholders = implode(',', array_fill(0, count($sportIds), '?'));
-    $stmt = $db->prepare("SELECT * FROM intramural_sports WHERE id IN ($placeholders) ORDER BY name, category");
+    $stmt = $db->prepare("SELECT * FROM intramural_sports WHERE id IN ($placeholders) ORDER BY " . intramuralSportsOrderBy());
     $stmt->execute($sportIds);
     $sports = $stmt->fetchAll() ?: [];
 }

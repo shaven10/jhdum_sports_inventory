@@ -29,7 +29,7 @@ if (isCoach() && !canManageIntramurals()) {
     requireTeamAccess($id);
 }
 
-$sports = $db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll();
+$sports = $db->query('SELECT * FROM intramural_sports ORDER BY ' . intramuralSportsOrderBy())->fetchAll();
 
 $eventCoaches = [];
 try {
@@ -140,11 +140,10 @@ require __DIR__ . '/../_season_bar.php';
                 <form method="GET" class="d-flex gap-2">
                     <input type="hidden" name="id" value="<?= $id ?>">
                     <select name="sport" class="form-select form-select-sm" onchange="this.form.submit()">
-                        <option value="">All Sports</option>
-                        <?php foreach ($sports as $s): ?>
-                        <?php if ($coachSportFilter !== null && !in_array((int) $s['id'], $coachSportFilter, true)) continue; ?>
-                        <option value="<?= $s['id'] ?>" <?= $sportFilter === (int) $s['id'] ? 'selected' : '' ?>><?= sanitize(sportLabel($s)) ?></option>
-                        <?php endforeach; ?>
+                        <option value="">All Events</option>
+                        <?= renderSportSelectOptions(array_values(array_filter($sports, static function (array $s) use ($coachSportFilter): bool {
+                            return $coachSportFilter === null || in_array((int) $s['id'], $coachSportFilter, true);
+                        })), $sportFilter) ?>
                     </select>
                 </form>
             </div>

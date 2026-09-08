@@ -95,6 +95,8 @@ function ensurePlayersPerEventColumn(): void
     ensureSportVenueColumn();
     ensureTournamentFormatEnum();
     ensureEventRanksTable();
+    ensureSportEventGroupColumn();
+    ensureEventRubricTables();
 }
 
 /** Ensure intramural_sports.venue exists for default event venues. */
@@ -1155,6 +1157,11 @@ function sportPlayersPerEventDefaults(): array
         'Frisbee' => 10,
         'Dance Sports' => 8,
         'Mass Power Dance' => 20,
+        'Visual Arts' => 4,
+        'Literary Arts' => 8,
+        'Quiz Bowl' => 5,
+        'Music' => 8,
+        'Dance Arts' => 12,
     ];
 }
 
@@ -1180,6 +1187,305 @@ function sportCategoryOptions(): array
     return ['men' => 'Men', 'women' => 'Women', 'mixed' => 'Mixed'];
 }
 
+function sportEventGroupOptions(): array
+{
+    return [
+        'sports_competition' => 'Sports Competition',
+        'socio_cultural' => 'Socio-Cultural Events',
+    ];
+}
+
+function sportEventGroupOrder(): array
+{
+    return ['sports_competition', 'socio_cultural'];
+}
+
+function normalizeSportEventGroup(?string $group): string
+{
+    $group = strtolower(trim((string) $group));
+    return array_key_exists($group, sportEventGroupOptions()) ? $group : 'sports_competition';
+}
+
+function sportEventGroupLabel(?string $group): string
+{
+    $opts = sportEventGroupOptions();
+    $key = normalizeSportEventGroup($group);
+
+    return $opts[$key];
+}
+
+function sportEventGroupSortKey(?string $group): int
+{
+    $map = array_flip(sportEventGroupOrder());
+    $key = normalizeSportEventGroup($group);
+
+    return (int) ($map[$key] ?? 99);
+}
+
+/** Names treated as socio-cultural (gender category stays separate). */
+function socioCulturalEventNameHints(): array
+{
+    return [
+        'visual arts',
+        'literary arts',
+        'quiz bowl',
+        'music',
+        'dance arts',
+        'mass power dance',
+        'opening program',
+        'power dance',
+    ];
+}
+
+function inferSportEventGroupFromName(string $name): string
+{
+    $n = strtolower(trim($name));
+    if ($n === '') {
+        return 'sports_competition';
+    }
+    foreach (socioCulturalEventNameHints() as $hint) {
+        if (str_contains($n, $hint)) {
+            return 'socio_cultural';
+        }
+    }
+
+    return 'sports_competition';
+}
+
+function sportEventGroupOf(array $sport): string
+{
+    if (isset($sport['event_group']) && (string) $sport['event_group'] !== '') {
+        return normalizeSportEventGroup((string) $sport['event_group']);
+    }
+
+    return inferSportEventGroupFromName((string) ($sport['name'] ?? ''));
+}
+
+function intramuralSportsOrderBy(string $alias = ''): string
+{
+    ensureSportEventGroupColumn();
+    $a = $alias !== '' ? rtrim($alias, '.') . '.' : '';
+
+    return "FIELD({$a}event_group, 'sports_competition', 'socio_cultural'), {$a}name, {$a}category";
+}
+
+/**
+ * @param list<array<string, mixed>> $sports
+ * @return array<string, list<array<string, mixed>>>
+ */
+function groupSportsByEventGroup(array $sports): array
+{
+    $grouped = [];
+    foreach (sportEventGroupOrder() as $key) {
+        $grouped[$key] = [];
+    }
+    foreach ($sports as $sport) {
+        $key = sportEventGroupOf($sport);
+        if (!isset($grouped[$key])) {
+            $grouped[$key] = [];
+        }
+        $grouped[$key][] = $sport;
+    }
+
+    return $grouped;
+}
+
+/**
+ * @param list<array<string, mixed>> $sports
+ * @param callable(array):string|null $optionLabel
+ */
+function renderSportSelectOptions(
+    array $sports,
+    $selectedId = null,
+    bool $includeBlank = false,
+    string $blankLabel = 'Select event',
+    ?callable $optionLabel = null
+): string {
+    $html = '';
+    $selectedInt = ($selectedId === null || $selectedId === '') ? 0 : (int) $selectedId;
+    if ($includeBlank) {
+        $html .= '<option value=""' . ($selectedInt === 0 ? ' selected' : '') . '>' . sanitize($blankLabel) . '</option>';
+    }
+    foreach (groupSportsByEventGroup($sports) as $groupKey => $groupSports) {
+        if ($groupSports === []) {
+            continue;
+        }
+        $html .= '<optgroup label="' . sanitize(sportEventGroupLabel($groupKey)) . '">';
+        foreach ($groupSports as $sport) {
+            $sid = (int) ($sport['id'] ?? 0);
+            $label = $optionLabel ? (string) $optionLabel($sport) : sportLabel($sport);
+            $sel = ($selectedInt > 0 && $sid === $selectedInt) ? ' selected' : '';
+            $html .= '<option value="' . $sid . '"' . $sel . '>' . sanitize($label) . '</option>';
+        }
+        $html .= '</optgroup>';
+    }
+
+    return $html;
+}
+
+/**
+ * @param list<array{event_group?:string}> $eventHeaders
+ * @return list<array{key:string,label:string,count:int}>
+ */
+function eventHeaderGroupSpans(array $eventHeaders): array
+{
+    $spans = [];
+    foreach ($eventHeaders as $eh) {
+        $key = sportEventGroupOf($eh);
+        $n = count($spans);
+        if ($n === 0 || $spans[$n - 1]['key'] !== $key) {
+            $spans[] = [
+                'key' => $key,
+                'label' => sportEventGroupLabel($key),
+                'count' => 1,
+            ];
+        } else {
+            $spans[$n - 1]['count']++;
+        }
+    }
+
+    return $spans;
+}
+
+function ensureSportEventGroupColumn(): void
+{
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    try {
+        $db = getDB();
+        $stmt = $db->prepare('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
+        $stmt->execute(['intramural_sports', 'event_group']);
+        if ((int) $stmt->fetchColumn() === 0) {
+            $db->exec("ALTER TABLE intramural_sports ADD COLUMN event_group ENUM('sports_competition', 'socio_cultural') NOT NULL DEFAULT 'sports_competition' AFTER category");
+            try {
+                $db->exec('ALTER TABLE intramural_sports ADD INDEX idx_sport_event_group (event_group)');
+            } catch (PDOException $e) {
+                // Index may already exist on some installs.
+            }
+        }
+        backfillSportEventGroups($db);
+        seedSocioCulturalEvents($db);
+        ensureEventRubricTables();
+    } catch (Throwable $e) {
+        // intramural_sports may not exist yet on a fresh install.
+    }
+}
+
+function backfillSportEventGroups(PDO $db): void
+{
+    try {
+        $rows = $db->query('SELECT id, name, event_group FROM intramural_sports')->fetchAll();
+    } catch (Throwable $e) {
+        return;
+    }
+    $upd = $db->prepare('UPDATE intramural_sports SET event_group = ? WHERE id = ?');
+    foreach ($rows as $row) {
+        $inferred = inferSportEventGroupFromName((string) ($row['name'] ?? ''));
+        if ($inferred === 'socio_cultural' && normalizeSportEventGroup($row['event_group'] ?? '') !== 'socio_cultural') {
+            $upd->execute(['socio_cultural', (int) $row['id']]);
+        }
+    }
+}
+
+/** Canonical socio-cultural events (mixed; same roster / rank / standings workflow as sports). */
+function intramuralSocioCulturalEventDefinitions(): array
+{
+    return [
+        ['name' => 'Visual Arts', 'description' => 'Visual arts competition', 'players_per_event' => 4, 'venue' => 'BEED Rooms & Open Grounds'],
+        ['name' => 'Literary Arts', 'description' => 'Extemporaneous speaking, storytelling, dagliang talumpati, pagkukuwento', 'players_per_event' => 8, 'venue' => 'Research Office'],
+        ['name' => 'Quiz Bowl', 'description' => 'Quiz bowl', 'players_per_event' => 5, 'venue' => 'AVR'],
+        ['name' => 'Music', 'description' => 'Solo (Pop), Duet (Pop), Kundiman', 'players_per_event' => 8, 'venue' => 'Function Hall'],
+        ['name' => 'Dance Arts', 'description' => 'Folk, Street, and Contemporary dance', 'players_per_event' => 12, 'venue' => null],
+    ];
+}
+
+function seedSocioCulturalEvents(PDO $db, bool $onlyMissing = true): int
+{
+    $schemeMap = [];
+    try {
+        foreach ($db->query('SELECT id, name FROM intramural_point_schemes')->fetchAll() as $row) {
+            $schemeMap[$row['name']] = (int) $row['id'];
+        }
+    } catch (Throwable $e) {
+        return 0;
+    }
+    $schemeId = $schemeMap['Major Team Sports'] ?? (reset($schemeMap) ?: null);
+
+    $findAny = $db->prepare('SELECT id FROM intramural_sports WHERE name = ? LIMIT 1');
+    $findCat = $db->prepare('SELECT id FROM intramural_sports WHERE name = ? AND category = ?');
+    $insert = $db->prepare('INSERT INTO intramural_sports (name, description, category, event_group, players_per_event, scoring_method, tournament_format, format_notes, venue, win_points, draw_points, loss_points, point_scheme_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 3, 1, 0, ?)');
+    $markGroup = $db->prepare("UPDATE intramural_sports SET event_group = 'socio_cultural' WHERE name = ?");
+    $created = 0;
+    $createdIds = [];
+    $notes = 'Placement by judging or manual ranks. Results count toward overall standing and medal tally.';
+
+    foreach (intramuralSocioCulturalEventDefinitions() as $def) {
+        $markGroup->execute([$def['name']]);
+        $findAny->execute([$def['name']]);
+        if ($findAny->fetchColumn()) {
+            continue;
+        }
+        if ($onlyMissing) {
+            $findCat->execute([$def['name'], 'mixed']);
+            if ($findCat->fetchColumn()) {
+                continue;
+            }
+        }
+        $insert->execute([
+            $def['name'],
+            $def['description'],
+            'mixed',
+            'socio_cultural',
+            $def['players_per_event'],
+            'points',
+            'rank_first_to_last',
+            $notes,
+            $def['venue'] ?? null,
+            $schemeId,
+        ]);
+        $created++;
+        $createdIds[] = (int) $db->lastInsertId();
+    }
+
+    attachSportsToAllDivisions($createdIds);
+
+    return $created;
+}
+
+/** Add newly created events to every division so they appear in overall standing. */
+function attachSportsToAllDivisions(array $sportIds): void
+{
+    $sportIds = array_values(array_unique(array_filter(array_map('intval', $sportIds))));
+    if ($sportIds === []) {
+        return;
+    }
+    try {
+        ensureIntramuralDivisionsSchema();
+        $db = getDB();
+        $divs = $db->query('SELECT id FROM intramural_divisions')->fetchAll();
+        if (!$divs) {
+            return;
+        }
+        $ins = $db->prepare('INSERT IGNORE INTO intramural_division_sports (division_id, sport_id) VALUES (?, ?)');
+        foreach ($divs as $div) {
+            $divId = (int) $div['id'];
+            $existing = getDivisionSportIds($divId);
+            if ($existing === []) {
+                continue;
+            }
+            foreach ($sportIds as $sid) {
+                $ins->execute([$divId, $sid]);
+            }
+        }
+    } catch (Throwable $e) {
+        // Divisions schema may not exist yet.
+    }
+}
+
 function ensureSportCategoryEnum(): void
 {
     static $checked = false;
@@ -1195,6 +1501,7 @@ function ensureSportCategoryEnum(): void
     }
 
     removeInactiveSports();
+    ensureSportEventGroupColumn();
 }
 
 /** Remove soft-deactivated sports and drop legacy is_active column. */
@@ -1238,7 +1545,7 @@ function intramuralSportDefinitions(): array
         ['name' => 'Softball', 'description' => 'Softball', 'scoring_method' => 'points', 'scheme' => 'Major Team Sports', 'win_points' => 3, 'players_per_event' => 15, 'tournament_format' => 'round_robin', 'format_notes' => null],
         ['name' => 'Frisbee', 'description' => 'Ultimate frisbee', 'scoring_method' => 'points', 'scheme' => 'Major Team Sports', 'win_points' => 3, 'players_per_event' => 10, 'tournament_format' => 'round_robin', 'format_notes' => null],
         ['name' => 'Dance Sports', 'description' => 'Dance sports', 'scoring_method' => 'points', 'scheme' => 'Racket & Dance Sports', 'win_points' => 3, 'players_per_event' => 8, 'tournament_format' => 'round_robin', 'format_notes' => null],
-        ['name' => 'Mass Power Dance', 'description' => 'Mass power dance', 'scoring_method' => 'points', 'scheme' => 'Major Team Sports', 'win_points' => 3, 'players_per_event' => 20, 'tournament_format' => 'round_robin', 'format_notes' => null],
+        ['name' => 'Mass Power Dance', 'description' => 'Mass power dance', 'scoring_method' => 'points', 'scheme' => 'Major Team Sports', 'win_points' => 3, 'players_per_event' => 20, 'tournament_format' => 'round_robin', 'format_notes' => null, 'event_group' => 'socio_cultural'],
     ];
 }
 
@@ -1250,13 +1557,15 @@ function seedIntramuralSports(PDO $db, bool $onlyMissing = true): int
         $schemeMap[$row['name']] = (int) $row['id'];
     }
 
+    ensureSportEventGroupColumn();
     $find = $db->prepare('SELECT id FROM intramural_sports WHERE name = ? AND category = ?');
-    $insert = $db->prepare('INSERT INTO intramural_sports (name, description, category, players_per_event, scoring_method, tournament_format, format_notes, win_points, draw_points, loss_points, point_scheme_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?)');
-    $update = $db->prepare('UPDATE intramural_sports SET description=?, players_per_event=?, scoring_method=?, tournament_format=?, format_notes=?, win_points=?, point_scheme_id=? WHERE id=?');
+    $insert = $db->prepare('INSERT INTO intramural_sports (name, description, category, event_group, players_per_event, scoring_method, tournament_format, format_notes, win_points, draw_points, loss_points, point_scheme_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?)');
+    $update = $db->prepare('UPDATE intramural_sports SET description=?, event_group=?, players_per_event=?, scoring_method=?, tournament_format=?, format_notes=?, win_points=?, point_scheme_id=? WHERE id=?');
     $created = 0;
 
     foreach (intramuralSportDefinitions() as $def) {
         $schemeId = $schemeMap[$def['scheme']] ?? null;
+        $eventGroup = normalizeSportEventGroup($def['event_group'] ?? inferSportEventGroupFromName($def['name']));
 
         foreach (array_keys(sportCategoryOptions()) as $category) {
             $find->execute([$def['name'], $category]);
@@ -1266,6 +1575,7 @@ function seedIntramuralSports(PDO $db, bool $onlyMissing = true): int
                 if (!$onlyMissing) {
                     $update->execute([
                         $def['description'],
+                        $eventGroup,
                         $def['players_per_event'],
                         $def['scoring_method'],
                         $def['tournament_format'],
@@ -1282,6 +1592,7 @@ function seedIntramuralSports(PDO $db, bool $onlyMissing = true): int
                 $def['name'],
                 $def['description'],
                 $category,
+                $eventGroup,
                 $def['players_per_event'],
                 $def['scoring_method'],
                 $def['tournament_format'],
@@ -1299,8 +1610,12 @@ function seedIntramuralSports(PDO $db, bool $onlyMissing = true): int
 /** Convert legacy mixed sports to men and add women counterparts. */
 function migrateMixedSportCategories(PDO $db): void
 {
+    ensureSportEventGroupColumn();
     $mixed = $db->query("SELECT * FROM intramural_sports WHERE category = 'mixed'")->fetchAll();
     foreach ($mixed as $sport) {
+        if (sportEventGroupOf($sport) === 'socio_cultural') {
+            continue;
+        }
         $db->prepare("UPDATE intramural_sports SET category = 'men' WHERE id = ?")->execute([$sport['id']]);
     }
 
@@ -4472,6 +4787,89 @@ function determineMatchWinner(?int $scoreA, ?int $scoreB, int $teamAId, int $tea
 }
 
 /**
+ * Record or update a match score. Caller must already authorize the user.
+ *
+ * @return array{ok:bool,error:?string,message:string}
+ */
+function recordIntramuralMatchScore(int $matchId, int $scoreA, int $scoreB, string $status): array
+{
+    $db = getDB();
+    $scoreA = max(0, $scoreA);
+    $scoreB = max(0, $scoreB);
+    if (!in_array($status, ['ongoing', 'completed', 'forfeit'], true)) {
+        $status = 'ongoing';
+    }
+
+    $stmt = $db->prepare('SELECT * FROM intramural_matches WHERE id = ?');
+    $stmt->execute([$matchId]);
+    $match = $stmt->fetch();
+    if (!$match) {
+        return ['ok' => false, 'error' => 'Match not found.', 'message' => ''];
+    }
+
+    $teamA = (int) ($match['team_a_id'] ?? 0);
+    $teamB = (int) ($match['team_b_id'] ?? 0);
+    if ($teamA <= 0 || $teamB <= 0) {
+        return ['ok' => false, 'error' => 'Both teams must be assigned before recording scores.', 'message' => ''];
+    }
+    if ((string) ($match['status'] ?? '') === 'cancelled') {
+        return ['ok' => false, 'error' => 'Cancelled matches cannot be scored.', 'message' => ''];
+    }
+
+    maybeCancelUnneededDecidingRubber($db, $matchId);
+    $stmt->execute([$matchId]);
+    $match = $stmt->fetch();
+    if (isDecidingRubberDisabled($db, $match)) {
+        $msg = decidingRubberDisabledMessage($db, $match) ?: 'This deciding rubber is disabled.';
+        return ['ok' => false, 'error' => $msg, 'message' => ''];
+    }
+
+    $winner = determineMatchWinner(
+        $scoreA,
+        $scoreB,
+        $teamA,
+        $teamB,
+        $status,
+        !empty($match['forfeit_team_id']) ? (int) $match['forfeit_team_id'] : null
+    );
+
+    $previousStatus = (string) ($match['status'] ?? '');
+    $db->prepare('UPDATE intramural_matches SET score_a=?, score_b=?, status=?, winner_team_id=? WHERE id=?')
+        ->execute([$scoreA, $scoreB, $status, $winner, $matchId]);
+
+    try {
+        auditLog((int) ($_SESSION['user_id'] ?? 0), 'score_update', 'intramural_match', $matchId, null, [
+            'score_a' => $scoreA,
+            'score_b' => $scoreB,
+            'status' => $status,
+        ]);
+    } catch (Throwable $e) {
+        // Score saved; audit logging must not block scoring.
+    }
+
+    maybeCancelUnneededDecidingRubber($db, $matchId);
+
+    if (in_array($status, ['completed', 'forfeit'], true)) {
+        try {
+            notifyMatchFinished($matchId, $previousStatus);
+        } catch (Throwable $e) {
+            // Score saved; notifications must not block scoring.
+        }
+    }
+
+    $advanceMsg = '';
+    $seasonId = getCurrentSeasonId();
+    if (in_array($status, ['completed', 'forfeit'], true) && $seasonId) {
+        $adv = advanceBracketFromResults((int) $match['sport_id'], (int) $seasonId);
+        if ((int) ($adv['updated'] ?? 0) > 0) {
+            $advanceMsg = ' Bracket updated: ' . (int) $adv['updated'] . ' TBD slot(s) filled.';
+        }
+    }
+
+    return ['ok' => true, 'error' => null, 'message' => 'Score updated.' . $advanceMsg];
+}
+
+/**
  * Notify secretariat (all finished matches) and unit managers (only when their team played).
  * Skips if the match was already finished before this update.
  */
@@ -7023,7 +7421,7 @@ function computeSportStandings(?int $sportId = null, ?int $seasonId = null): arr
             $sports = $db->query('SELECT s.*, ps.name as scheme_name, ps.points_1, ps.points_2, ps.points_3, ps.points_4, ps.points_5, ps.points_6
                 FROM intramural_sports s
                 LEFT JOIN intramural_point_schemes ps ON s.point_scheme_id = ps.id
-                ORDER BY s.name, s.category')->fetchAll();
+                ORDER BY ' . intramuralSportsOrderBy('s'))->fetchAll();
         }
     } catch (Throwable $e) {
         if ($sportId) {
@@ -7031,7 +7429,7 @@ function computeSportStandings(?int $sportId = null, ?int $seasonId = null): arr
             $sports->execute([$sportId]);
             $sports = $sports->fetchAll();
         } else {
-            $sports = $db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll();
+            $sports = $db->query('SELECT * FROM intramural_sports ORDER BY ' . intramuralSportsOrderBy())->fetchAll();
         }
     }
 
@@ -7268,6 +7666,7 @@ function computeSportStandings(?int $sportId = null, ?int $seasonId = null): arr
  */
 function computeOverallStandings(): array
 {
+    ensureSportEventGroupColumn();
     $all = computeSportStandings(null);
     $db = getDB();
     ensureIntramuralDivisionsSchema();
@@ -7332,6 +7731,11 @@ function computeOverallStandings(): array
     usort($sportLabels, static function (string $labelA, string $labelB) use ($sportIdByLabel, $all): int {
         $sidA = (int) ($sportIdByLabel[$labelA] ?? 0);
         $sidB = (int) ($sportIdByLabel[$labelB] ?? 0);
+        $groupA = sportEventGroupSortKey($all[$sidA]['sport']['event_group'] ?? inferSportEventGroupFromName((string) ($all[$sidA]['sport']['name'] ?? $labelA)));
+        $groupB = sportEventGroupSortKey($all[$sidB]['sport']['event_group'] ?? inferSportEventGroupFromName((string) ($all[$sidB]['sport']['name'] ?? $labelB)));
+        if ($groupA !== $groupB) {
+            return $groupA <=> $groupB;
+        }
         $nameA = strtolower((string) ($all[$sidA]['sport']['name'] ?? $labelA));
         $nameB = strtolower((string) ($all[$sidB]['sport']['name'] ?? $labelB));
         $cmp = strcmp($nameA, $nameB);
@@ -7500,10 +7904,23 @@ function computeOverallStandings(): array
 
         $eventHeaders = [];
         foreach ($divSportLabels as $label) {
+            $sid = (int) ($sportIdByLabel[$label] ?? 0);
+            $sportRow = $all[$sid]['sport'] ?? [];
+            $eventGroup = sportEventGroupOf($sportRow ?: ['name' => $label]);
             if (preg_match('/^(.+?)\s*\(([^)]+)\)$/', $label, $m)) {
-                $eventHeaders[] = ['name' => $m[1], 'category' => $m[2], 'label' => $label];
+                $eventHeaders[] = [
+                    'name' => $m[1],
+                    'category' => $m[2],
+                    'label' => $label,
+                    'event_group' => $eventGroup,
+                ];
             } else {
-                $eventHeaders[] = ['name' => $label, 'category' => '', 'label' => $label];
+                $eventHeaders[] = [
+                    'name' => $label,
+                    'category' => '',
+                    'label' => $label,
+                    'event_group' => $eventGroup,
+                ];
             }
         }
 
@@ -8061,7 +8478,7 @@ function getFinishedEventsForCertificates(?int $seasonId = null): array
     }
 
     $db = getDB();
-    $sports = filterSportsForUser($db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll() ?: []);
+    $sports = filterSportsForUser($db->query('SELECT * FROM intramural_sports ORDER BY ' . intramuralSportsOrderBy())->fetchAll() ?: []);
     $out = [];
     foreach ($sports as $sport) {
         $sid = (int) $sport['id'];
@@ -8419,6 +8836,263 @@ function checkTeamEventRosterCapacity(int $teamId, int $sportId, int $seasonId, 
     ];
 }
 
+function mapRegistrarSexToAthleteGender(?string $sex): string
+{
+    $sex = strtoupper(trim((string) $sex));
+    return match ($sex) {
+        'F', 'FEMALE' => 'female',
+        'M', 'MALE' => 'male',
+        default => 'other',
+    };
+}
+
+function mapRegistrarYearLevelToAthlete(?string $yearLevel): ?string
+{
+    $yearLevel = trim((string) $yearLevel);
+    if ($yearLevel === '') {
+        return null;
+    }
+    foreach (athleteYearLevelOptions() as $option) {
+        if (strcasecmp($option, $yearLevel) === 0) {
+            return $option;
+        }
+    }
+    if (preg_match('/^(\d)/', $yearLevel, $m)) {
+        $map = [
+            '1' => '1st Year',
+            '2' => '2nd Year',
+            '3' => '3rd Year',
+            '4' => '4th Year',
+            '5' => '5th Year',
+        ];
+        return $map[$m[1]] ?? null;
+    }
+
+    return null;
+}
+
+function mapRegistrarCourseToAthleteDepartment(?string $course): ?string
+{
+    $course = trim((string) $course);
+    if ($course === '') {
+        return null;
+    }
+    foreach (athleteCourseOptions() as $option) {
+        if (strcasecmp($option, $course) === 0) {
+            return $option;
+        }
+    }
+    if (function_exists('mb_substr')) {
+        return mb_substr($course, 0, 150);
+    }
+
+    return substr($course, 0, 150);
+}
+
+/**
+ * Look up an enrolled student via Registrar API, create/update the athlete profile,
+ * and add them to a team event roster (enforcing players_per_event).
+ *
+ * @return array{ok:bool, message:string, athlete:?array, created:bool}
+ */
+function registerAthleteFromRegistrarToEvent(string $studentId, int $teamId, int $sportId, int $seasonId): array
+{
+    $studentId = trim($studentId);
+    if ($studentId === '') {
+        return ['ok' => false, 'message' => 'Please enter a student ID.', 'athlete' => null, 'created' => false];
+    }
+    if ($teamId <= 0 || $sportId <= 0 || $seasonId <= 0) {
+        return ['ok' => false, 'message' => 'Select a school/team and event first.', 'athlete' => null, 'created' => false];
+    }
+    if (!canManageTeamAthletes($teamId)) {
+        return ['ok' => false, 'message' => 'You can only register athletes for your team.', 'athlete' => null, 'created' => false];
+    }
+    if (!teamCanPlaySport($teamId, $sportId)) {
+        return ['ok' => false, 'message' => 'That event is not available for this team\'s division.', 'athlete' => null, 'created' => false];
+    }
+
+    $cap = checkTeamEventRosterCapacity($teamId, $sportId, $seasonId, 1);
+    if (!$cap['ok']) {
+        return ['ok' => false, 'message' => $cap['message'], 'athlete' => null, 'created' => false];
+    }
+
+    $lookup = fetchActiveStudentByStudentId($studentId);
+    if (!$lookup['ok'] || empty($lookup['student'])) {
+        $message = (string) ($lookup['message'] ?? 'Could not verify that student ID.');
+        $message = str_replace(
+            'Only active enrolled students can borrow equipment.',
+            'Only active enrolled students can be registered as athletes.',
+            $message
+        );
+        $message = str_replace(
+            'Student login is not configured yet. Please contact the Sports Development Office.',
+            'Registrar student lookup is not configured. Set the API key in System Settings.',
+            $message
+        );
+
+        return ['ok' => false, 'message' => $message, 'athlete' => null, 'created' => false];
+    }
+
+    $student = $lookup['student'];
+    $apiStudentId = trim((string) ($student['student_id'] ?? $studentId));
+    $firstName = formatAthleteName((string) ($student['first_name'] ?? ''));
+    $lastName = formatAthleteName((string) ($student['last_name'] ?? ''));
+    if ($lastName === '' && !empty($student['full_name'])) {
+        $parts = preg_split('/,\s*/', (string) $student['full_name'], 2);
+        if (is_array($parts) && count($parts) === 2) {
+            $lastName = formatAthleteName($parts[0]);
+            $firstName = formatAthleteName($parts[1]) ?: $firstName;
+        }
+    }
+    if ($firstName === '') {
+        $firstName = 'STUDENT';
+    }
+    if ($lastName === '') {
+        $lastName = formatAthleteName($apiStudentId) ?: 'UNKNOWN';
+    }
+
+    $gender = mapRegistrarSexToAthleteGender($student['sex'] ?? $student['gender'] ?? '');
+    $department = mapRegistrarCourseToAthleteDepartment($student['course'] ?? '');
+    $yearLevel = mapRegistrarYearLevelToAthlete($student['year_level'] ?? '');
+    $email = trim((string) ($student['email'] ?? ''));
+    if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $email = '';
+    }
+    $phone = trim((string) ($student['phone'] ?? ''));
+    if (function_exists('mb_substr')) {
+        $firstName = mb_substr($firstName, 0, 50);
+        $lastName = mb_substr($lastName, 0, 50);
+        $phone = $phone !== '' ? mb_substr($phone, 0, 20) : '';
+        $apiStudentId = mb_substr($apiStudentId, 0, 30);
+    } else {
+        $firstName = substr($firstName, 0, 50);
+        $lastName = substr($lastName, 0, 50);
+        $phone = $phone !== '' ? substr($phone, 0, 20) : '';
+        $apiStudentId = substr($apiStudentId, 0, 30);
+    }
+
+    $db = getDB();
+    $sportStmt = $db->prepare('SELECT id, name, category FROM intramural_sports WHERE id = ?');
+    $sportStmt->execute([$sportId]);
+    $sport = $sportStmt->fetch();
+    if (!$sport) {
+        return ['ok' => false, 'message' => 'Event not found.', 'athlete' => null, 'created' => false];
+    }
+
+    $sportCategory = strtolower((string) ($sport['category'] ?? ''));
+    if ($sportCategory === 'men' && $gender === 'female') {
+        return ['ok' => false, 'message' => athleteFullName(['first_name' => $firstName, 'last_name' => $lastName]) . ' cannot be added to a men\'s event.', 'athlete' => null, 'created' => false];
+    }
+    if ($sportCategory === 'women' && $gender === 'male') {
+        return ['ok' => false, 'message' => athleteFullName(['first_name' => $firstName, 'last_name' => $lastName]) . ' cannot be added to a women\'s event.', 'athlete' => null, 'created' => false];
+    }
+
+    $existing = findAthleteByStudentIdOrName($db, $apiStudentId, $firstName, $lastName, $teamId);
+    $created = false;
+
+    try {
+        if ($existing) {
+            $athleteId = (int) $existing['id'];
+            $db->prepare('UPDATE intramural_athletes SET first_name = ?, last_name = ?, gender = ?, department = ?, year_level = ?, team_id = ?, email = ?, phone = ?, is_active = 1 WHERE id = ?')
+                ->execute([
+                    $firstName,
+                    $lastName,
+                    $gender,
+                    $department,
+                    $yearLevel,
+                    $teamId,
+                    $email !== '' ? $email : ($existing['email'] ?? null),
+                    $phone !== '' ? $phone : ($existing['phone'] ?? null),
+                    $athleteId,
+                ]);
+        } else {
+            $code = generateAthleteCode();
+            $db->prepare('INSERT INTO intramural_athletes (athlete_code, student_id, first_name, last_name, gender, birthdate, department, year_level, team_id, photo, email, phone) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, NULL, ?, ?)')
+                ->execute([
+                    $code,
+                    $apiStudentId,
+                    $firstName,
+                    $lastName,
+                    $gender,
+                    $department,
+                    $yearLevel,
+                    $teamId,
+                    $email !== '' ? $email : null,
+                    $phone !== '' ? $phone : null,
+                ]);
+            $athleteId = (int) $db->lastInsertId();
+            if ($athleteId <= 0) {
+                $stmt = $db->prepare('SELECT id FROM intramural_athletes WHERE student_id = ? ORDER BY id DESC LIMIT 1');
+                $stmt->execute([$apiStudentId]);
+                $athleteId = (int) ($stmt->fetchColumn() ?: 0);
+            }
+            if ($athleteId <= 0) {
+                return ['ok' => false, 'message' => 'Could not save the athlete profile.', 'athlete' => null, 'created' => false];
+            }
+            $created = true;
+        }
+
+        $already = $db->prepare('SELECT r.id, r.team_id, t.name AS team_name
+            FROM intramural_registrations r
+            LEFT JOIN intramural_teams t ON t.id = r.team_id
+            WHERE r.athlete_id = ? AND r.sport_id = ? AND r.season_id = ?
+            LIMIT 1');
+        $already->execute([$athleteId, $sportId, $seasonId]);
+        $existingReg = $already->fetch();
+        if ($existingReg) {
+            if ((int) $existingReg['team_id'] === $teamId) {
+                return [
+                    'ok' => false,
+                    'message' => athleteFullName(['first_name' => $firstName, 'last_name' => $lastName]) . ' is already on this event roster.',
+                    'athlete' => null,
+                    'created' => $created,
+                ];
+            }
+
+            return [
+                'ok' => false,
+                'message' => athleteFullName(['first_name' => $firstName, 'last_name' => $lastName])
+                    . ' is already registered in this event for '
+                    . ($existingReg['team_name'] ?: 'another team') . '.',
+                'athlete' => null,
+                'created' => $created,
+            ];
+        }
+
+        $cap = checkTeamEventRosterCapacity($teamId, $sportId, $seasonId, 1, $athleteId);
+        if (!$cap['ok']) {
+            return ['ok' => false, 'message' => $cap['message'], 'athlete' => null, 'created' => $created];
+        }
+
+        $db->prepare('INSERT INTO intramural_registrations (season_id, athlete_id, sport_id, team_id, event_category, jersey_number, position) VALUES (?, ?, ?, ?, NULL, NULL, NULL)')
+            ->execute([$seasonId, $athleteId, $sportId, $teamId]);
+
+        $athlete = $db->prepare('SELECT * FROM intramural_athletes WHERE id = ?');
+        $athlete->execute([$athleteId]);
+        $athleteRow = $athlete->fetch() ?: null;
+
+        auditLog(
+            (int) ($_SESSION['user_id'] ?? 0),
+            $created ? 'create' : 'update',
+            'intramural_athlete',
+            $athleteId,
+            null,
+            ['student_id' => $apiStudentId, 'sport_id' => $sportId, 'team_id' => $teamId, 'source' => 'registrar_api']
+        );
+
+        return [
+            'ok' => true,
+            'message' => athleteFullName(['first_name' => $firstName, 'last_name' => $lastName]) . ' was added to the event roster.',
+            'athlete' => $athleteRow,
+            'created' => $created,
+        ];
+    } catch (PDOException $e) {
+        error_log('registerAthleteFromRegistrarToEvent failed: ' . $e->getMessage());
+
+        return ['ok' => false, 'message' => 'Could not add this athlete to the event. Please try again.', 'athlete' => null, 'created' => $created];
+    }
+}
+
 function rosterImportSampleRows(): array
 {
     return [
@@ -8449,7 +9123,7 @@ function buildRosterImportTemplateRows(?int $scopedTeamId = null): array
         $teams = $db->query('SELECT name FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll();
     }
 
-    $sports = $db->query('SELECT name, category, players_per_event FROM intramural_sports ORDER BY name, category')->fetchAll();
+    $sports = $db->query('SELECT name, category, players_per_event FROM intramural_sports ORDER BY ' . intramuralSportsOrderBy() . '')->fetchAll();
 
     foreach ($teams as $team) {
         foreach ($sports as $sport) {
@@ -8489,7 +9163,7 @@ function getActiveSportEventRows(): array
     $eventRows = [];
 
     try {
-        foreach ($db->query('SELECT name, category, players_per_event, scoring_method, tournament_format, venue FROM intramural_sports ORDER BY name, category')->fetchAll() as $s) {
+        foreach ($db->query('SELECT name, category, players_per_event, scoring_method, tournament_format, venue FROM intramural_sports ORDER BY ' . intramuralSportsOrderBy() . '')->fetchAll() as $s) {
             $eventRows[] = [
                 $s['name'],
                 $s['category'],
@@ -8666,7 +9340,7 @@ function downloadAthleteImportTemplate(string $format = 'xlsx', ?int $scopedTeam
 
     $sportRows = [];
     try {
-        foreach ($db->query('SELECT name, category FROM intramural_sports ORDER BY name, category')->fetchAll() as $s) {
+        foreach ($db->query('SELECT name, category FROM intramural_sports ORDER BY ' . intramuralSportsOrderBy() . '')->fetchAll() as $s) {
             $sportRows[] = [$s['name'], $s['category']];
         }
     } catch (Throwable $e) {
@@ -9194,3 +9868,419 @@ function resolveImportSport(array $lookups, string $sportName, string $category 
 
     return null;
 }
+
+/** Socio-cultural judging rubrics (criteria + panel scores) that feed official ranks. */
+function ensureEventRubricTables(): void
+{
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    try {
+        $db = getDB();
+        $tableStmt = $db->prepare('SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?');
+        $tableStmt->execute(['intramural_event_rubric_criteria']);
+        if ((int) $tableStmt->fetchColumn() === 0) {
+            $db->exec("CREATE TABLE intramural_event_rubric_criteria (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                sport_id INT NOT NULL,
+                name VARCHAR(150) NOT NULL,
+                description TEXT DEFAULT NULL,
+                max_points DECIMAL(8,2) NOT NULL DEFAULT 10.00,
+                sort_order INT NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_rubric_criterion (sport_id, name),
+                INDEX idx_rubric_sport_order (sport_id, sort_order),
+                FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB");
+        }
+
+        $tableStmt->execute(['intramural_event_rubric_scores']);
+        if ((int) $tableStmt->fetchColumn() === 0) {
+            $db->exec("CREATE TABLE intramural_event_rubric_scores (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                season_id INT NOT NULL,
+                sport_id INT NOT NULL,
+                division_id INT NOT NULL DEFAULT 0,
+                team_id INT NOT NULL,
+                criterion_id INT NOT NULL,
+                score DECIMAL(8,2) NOT NULL DEFAULT 0,
+                scored_by INT DEFAULT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_rubric_score (season_id, sport_id, division_id, team_id, criterion_id),
+                INDEX idx_rubric_score_event (season_id, sport_id, division_id),
+                FOREIGN KEY (season_id) REFERENCES intramural_seasons(id) ON DELETE CASCADE,
+                FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE,
+                FOREIGN KEY (team_id) REFERENCES intramural_teams(id) ON DELETE CASCADE,
+                FOREIGN KEY (criterion_id) REFERENCES intramural_event_rubric_criteria(id) ON DELETE CASCADE,
+                FOREIGN KEY (scored_by) REFERENCES users(id) ON DELETE SET NULL
+            ) ENGINE=InnoDB");
+        }
+
+        repairZeroIdIntramuralSports($db);
+        seedDefaultRubricsForSocioEvents($db);
+    } catch (Throwable $e) {
+        // Tables may not exist yet on a fresh install.
+    }
+}
+
+/** AUTO_INCREMENT rows should never use id 0 (event pickers treat 0 as “none”). */
+function repairZeroIdIntramuralSports(PDO $db): void
+{
+    try {
+        $row = $db->query('SELECT id, name FROM intramural_sports WHERE id = 0 LIMIT 1')->fetch();
+    } catch (Throwable $e) {
+        return;
+    }
+    if (!$row) {
+        return;
+    }
+    $next = (int) $db->query('SELECT COALESCE(MAX(id), 0) + 1 FROM intramural_sports')->fetchColumn();
+    if ($next <= 0) {
+        $next = 1;
+    }
+    try {
+        $db->prepare('UPDATE intramural_sports SET id = ? WHERE id = 0')->execute([$next]);
+        $db->exec('ALTER TABLE intramural_sports AUTO_INCREMENT = ' . ($next + 1));
+    } catch (Throwable $e) {
+        // Leave the row in place if related keys block the id change.
+    }
+}
+
+function formatRubricPoints($value): string
+{
+    $n = (float) $value;
+    if (abs($n - round($n)) < 0.001) {
+        return (string) (int) round($n);
+    }
+
+    return rtrim(rtrim(number_format($n, 2, '.', ''), '0'), '.');
+}
+
+/**
+ * Default criteria templates for known socio-cultural events (points total 100).
+ *
+ * @return list<array{name:string,description:string,max_points:float}>
+ */
+function defaultRubricCriteriaForEventName(string $name): array
+{
+    $n = strtolower(trim($name));
+    if (str_contains($n, 'visual')) {
+        return [
+            ['name' => 'Originality & Creativity', 'description' => 'Fresh concept and imaginative treatment of the theme.', 'max_points' => 25],
+            ['name' => 'Technique / Craftsmanship', 'description' => 'Control of medium, finish, and execution.', 'max_points' => 25],
+            ['name' => 'Composition / Design', 'description' => 'Balance, layout, and visual structure.', 'max_points' => 20],
+            ['name' => 'Relevance to Theme', 'description' => 'Clear connection to the assigned theme or prompt.', 'max_points' => 15],
+            ['name' => 'Overall Impact', 'description' => 'Lasting impression and presentation.', 'max_points' => 15],
+        ];
+    }
+    if (str_contains($n, 'literary')) {
+        return [
+            ['name' => 'Content & Organization', 'description' => 'Substance, structure, and coherence of the piece.', 'max_points' => 25],
+            ['name' => 'Delivery / Interpretation', 'description' => 'Voice, timing, and connection with the audience.', 'max_points' => 25],
+            ['name' => 'Language & Diction', 'description' => 'Word choice, grammar, and style.', 'max_points' => 20],
+            ['name' => 'Originality', 'description' => 'Fresh ideas and distinctive voice.', 'max_points' => 15],
+            ['name' => 'Overall Impact', 'description' => 'Persuasiveness and lasting impression.', 'max_points' => 15],
+        ];
+    }
+    if (str_contains($n, 'quiz')) {
+        return [
+            ['name' => 'Easy Round', 'description' => 'Points earned in the easy round.', 'max_points' => 30],
+            ['name' => 'Average Round', 'description' => 'Points earned in the average round.', 'max_points' => 30],
+            ['name' => 'Difficult Round', 'description' => 'Points earned in the difficult round.', 'max_points' => 40],
+        ];
+    }
+    if (str_contains($n, 'music')) {
+        return [
+            ['name' => 'Vocal / Musical Quality', 'description' => 'Tone, pitch, and musicality.', 'max_points' => 25],
+            ['name' => 'Technique', 'description' => 'Control, timing, and musical skill.', 'max_points' => 20],
+            ['name' => 'Interpretation / Expression', 'description' => 'Feeling, dynamics, and fidelity to the piece.', 'max_points' => 20],
+            ['name' => 'Stage Presence', 'description' => 'Poise, confidence, and audience connection.', 'max_points' => 15],
+            ['name' => 'Overall Performance', 'description' => 'Cohesion and lasting impression.', 'max_points' => 20],
+        ];
+    }
+    if (str_contains($n, 'dance')) {
+        return [
+            ['name' => 'Choreography', 'description' => 'Creativity, structure, and use of space.', 'max_points' => 25],
+            ['name' => 'Technique / Execution', 'description' => 'Skill, precision, and control of movement.', 'max_points' => 25],
+            ['name' => 'Synchronization / Teamwork', 'description' => 'Unity, timing, and ensemble work.', 'max_points' => 20],
+            ['name' => 'Costume & Props', 'description' => 'Appropriateness, visual effect, and use of props.', 'max_points' => 15],
+            ['name' => 'Overall Impact', 'description' => 'Energy, theme, and audience impression.', 'max_points' => 15],
+        ];
+    }
+
+    return [
+        ['name' => 'Technique', 'description' => 'Skill and control of the craft.', 'max_points' => 25],
+        ['name' => 'Creativity', 'description' => 'Originality and imaginative treatment.', 'max_points' => 25],
+        ['name' => 'Execution', 'description' => 'Accuracy, finish, and consistency.', 'max_points' => 25],
+        ['name' => 'Overall Impact', 'description' => 'Lasting impression and presentation.', 'max_points' => 25],
+    ];
+}
+
+function seedDefaultRubricForSport(int $sportId, ?string $eventName = null): int
+{
+    if ($sportId <= 0) {
+        return 0;
+    }
+    $db = getDB();
+    try {
+        $countStmt = $db->prepare('SELECT COUNT(*) FROM intramural_event_rubric_criteria WHERE sport_id = ?');
+        $countStmt->execute([$sportId]);
+        if ((int) $countStmt->fetchColumn() > 0) {
+            return 0;
+        }
+    } catch (Throwable $e) {
+        return 0;
+    }
+
+    if ($eventName === null || $eventName === '') {
+        $nameStmt = $db->prepare('SELECT name FROM intramural_sports WHERE id = ?');
+        $nameStmt->execute([$sportId]);
+        $eventName = (string) ($nameStmt->fetchColumn() ?: '');
+    }
+
+    $insert = $db->prepare('INSERT INTO intramural_event_rubric_criteria (sport_id, name, description, max_points, sort_order) VALUES (?, ?, ?, ?, ?)');
+    $created = 0;
+    foreach (defaultRubricCriteriaForEventName($eventName) as $i => $row) {
+        try {
+            $insert->execute([
+                $sportId,
+                $row['name'],
+                $row['description'] !== '' ? $row['description'] : null,
+                $row['max_points'],
+                $i + 1,
+            ]);
+            $created++;
+        } catch (Throwable $e) {
+            // Unique name collision — skip.
+        }
+    }
+
+    return $created;
+}
+
+function seedDefaultRubricsForSocioEvents(?PDO $db = null): int
+{
+    $db = $db ?: getDB();
+    try {
+        $sports = $db->query("SELECT id, name FROM intramural_sports WHERE event_group = 'socio_cultural'")->fetchAll();
+    } catch (Throwable $e) {
+        return 0;
+    }
+    $created = 0;
+    foreach ($sports as $sport) {
+        $created += seedDefaultRubricForSport((int) $sport['id'], (string) $sport['name']);
+    }
+
+    return $created;
+}
+
+/**
+ * @return list<array<string, mixed>>
+ */
+function getEventRubricCriteria(int $sportId): array
+{
+    ensureEventRubricTables();
+    if ($sportId <= 0) {
+        return [];
+    }
+    $stmt = getDB()->prepare('SELECT * FROM intramural_event_rubric_criteria WHERE sport_id = ? ORDER BY sort_order ASC, id ASC');
+    $stmt->execute([$sportId]);
+
+    return $stmt->fetchAll() ?: [];
+}
+
+function eventRubricMaxTotal(array $criteria): float
+{
+    $total = 0.0;
+    foreach ($criteria as $row) {
+        $total += (float) ($row['max_points'] ?? 0);
+    }
+
+    return $total;
+}
+
+/**
+ * @return array<int, array<int, float>> team_id => criterion_id => score
+ */
+function getEventRubricScores(int $sportId, int $seasonId, ?int $divisionId = 0): array
+{
+    ensureEventRubricTables();
+    if ($sportId <= 0 || $seasonId <= 0) {
+        return [];
+    }
+    $divKey = eventRankDivisionKey($divisionId);
+    $stmt = getDB()->prepare('SELECT team_id, criterion_id, score FROM intramural_event_rubric_scores
+        WHERE sport_id = ? AND season_id = ? AND division_id = ?');
+    $stmt->execute([$sportId, $seasonId, $divKey]);
+    $out = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $out[(int) $row['team_id']][(int) $row['criterion_id']] = (float) $row['score'];
+    }
+
+    return $out;
+}
+
+/**
+ * @param array<int, array<int, mixed>> $scoresByTeam criterion scores keyed by team then criterion
+ * @return list<string>
+ */
+function saveEventRubricScores(int $sportId, int $seasonId, array $scoresByTeam, ?int $userId = null, ?int $divisionId = 0): array
+{
+    ensureEventRubricTables();
+    $divKey = eventRankDivisionKey($divisionId);
+    if ($sportId <= 0 || $seasonId <= 0) {
+        return ['Select a season and event before saving rubric scores.'];
+    }
+
+    $criteria = getEventRubricCriteria($sportId);
+    if ($criteria === []) {
+        return ['Add rubric criteria for this event before entering scores.'];
+    }
+    $maxById = [];
+    foreach ($criteria as $c) {
+        $maxById[(int) $c['id']] = (float) $c['max_points'];
+    }
+
+    $errors = [];
+    $clean = [];
+    foreach ($scoresByTeam as $teamId => $byCriterion) {
+        $teamId = (int) $teamId;
+        if ($teamId <= 0 || !is_array($byCriterion)) {
+            continue;
+        }
+        $teamDiv = eventRankDivisionKey(getTeamDivisionId($teamId));
+        if ($teamDiv !== $divKey) {
+            $errors[] = 'A team does not belong to the selected division.';
+            continue;
+        }
+        foreach ($byCriterion as $criterionId => $raw) {
+            $criterionId = (int) $criterionId;
+            if (!isset($maxById[$criterionId])) {
+                continue;
+            }
+            $raw = is_string($raw) ? trim($raw) : $raw;
+            if ($raw === '' || $raw === null) {
+                continue;
+            }
+            if (!is_numeric($raw)) {
+                $errors[] = 'Rubric scores must be numbers.';
+                continue;
+            }
+            $score = (float) $raw;
+            if ($score < 0) {
+                $errors[] = 'Rubric scores cannot be negative.';
+                continue;
+            }
+            $max = $maxById[$criterionId];
+            if ($score - $max > 0.001) {
+                $errors[] = 'A score exceeds the maximum for a criterion (' . formatRubricPoints($max) . ').';
+                continue;
+            }
+            $clean[] = [$teamId, $criterionId, round($score, 2)];
+        }
+    }
+    if ($errors) {
+        return array_values(array_unique($errors));
+    }
+
+    $db = getDB();
+    $db->beginTransaction();
+    try {
+        $db->prepare('DELETE FROM intramural_event_rubric_scores WHERE sport_id = ? AND season_id = ? AND division_id = ?')
+            ->execute([$sportId, $seasonId, $divKey]);
+        $insert = $db->prepare('INSERT INTO intramural_event_rubric_scores (season_id, sport_id, division_id, team_id, criterion_id, score, scored_by) VALUES (?, ?, ?, ?, ?, ?, ?)');
+        foreach ($clean as [$teamId, $criterionId, $score]) {
+            $insert->execute([$seasonId, $sportId, $divKey, $teamId, $criterionId, $score, $userId]);
+        }
+        $db->commit();
+    } catch (Throwable $e) {
+        $db->rollBack();
+        return ['Could not save rubric scores. ' . $e->getMessage()];
+    }
+
+    return [];
+}
+
+/**
+ * @param array<int, array<int, float>> $scores
+ * @return array<int, float>
+ */
+function eventRubricTotalsFromScores(array $criteria, array $scores): array
+{
+    $totals = [];
+    foreach ($scores as $teamId => $byCriterion) {
+        $sum = 0.0;
+        foreach ($criteria as $c) {
+            $cid = (int) $c['id'];
+            if (isset($byCriterion[$cid])) {
+                $sum += (float) $byCriterion[$cid];
+            }
+        }
+        $totals[(int) $teamId] = round($sum, 2);
+    }
+
+    return $totals;
+}
+
+/**
+ * Rank teams by rubric total (highest first). Ties keep a stable unique place.
+ *
+ * @param array<int, float> $totals
+ * @param array<int, string> $teamNames
+ * @return array<int, int> team_id => place_rank
+ */
+function ranksFromRubricTotals(array $totals, array $teamNames = []): array
+{
+    $teams = array_keys($totals);
+    usort($teams, static function ($a, $b) use ($totals, $teamNames) {
+        $diff = ($totals[$b] ?? 0) <=> ($totals[$a] ?? 0);
+        if ($diff !== 0) {
+            return $diff;
+        }
+        return strcasecmp($teamNames[$a] ?? '', $teamNames[$b] ?? '');
+    });
+    $ranks = [];
+    $place = 1;
+    foreach ($teams as $tid) {
+        $ranks[(int) $tid] = $place++;
+    }
+
+    return $ranks;
+}
+
+/**
+ * @param array<int, string> $teamNames
+ * @return list<string>
+ */
+function applyEventRanksFromRubric(int $sportId, int $seasonId, ?int $divisionId = 0, ?int $userId = null, array $teamNames = []): array
+{
+    $criteria = getEventRubricCriteria($sportId);
+    $scores = getEventRubricScores($sportId, $seasonId, $divisionId);
+    $totals = eventRubricTotalsFromScores($criteria, $scores);
+    if ($scores === []) {
+        return ['Enter rubric scores before applying ranks.'];
+    }
+    $onlyScored = [];
+    foreach ($scores as $tid => $_by) {
+        $onlyScored[(int) $tid] = $totals[(int) $tid] ?? 0.0;
+    }
+    $ranks = ranksFromRubricTotals($onlyScored, $teamNames);
+
+    return saveEventRanks($sportId, $seasonId, $ranks, $userId, $divisionId);
+}
+
+function eventHasRubricCriteria(int $sportId): bool
+{
+    return getEventRubricCriteria($sportId) !== [];
+}
+
+function isSocioCulturalSport(array $sport): bool
+{
+    return sportEventGroupOf($sport) === 'socio_cultural';
+}
+

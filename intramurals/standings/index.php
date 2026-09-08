@@ -9,7 +9,7 @@ $sportParam = get('sport');
 $sportId = ($sportParam !== '' && $sportParam !== null) ? (int) $sportParam : 0;
 $showAllSports = $sportId === 0;
 $export = get('export');
-$sports = filterSportsForUser($db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll());
+$sports = filterSportsForUser($db->query('SELECT * FROM intramural_sports ORDER BY ' . intramuralSportsOrderBy())->fetchAll());
 
 if ($sportId && !canViewEvent($sportId)) {
     flash('error', 'You do not have permission to view standings for this event.');
@@ -95,7 +95,7 @@ require __DIR__ . '/../_season_bar.php';
     </div>
     <div class="d-flex gap-2">
         <?php if (canManageEventRankings() && $sportId && $seasonId): ?>
-        <a href="<?= BASE_URL ?>/intramurals/rankings/index.php?sport=<?= (int) $sportId ?>" class="btn btn-outline-warning"><i class="bi bi-list-ol"></i> Manual Entry of Ranks</a>
+        <a href="<?= BASE_URL ?>/intramurals/scoring/event.php?sport=<?= (int) $sportId ?>&tab=rankings" class="btn btn-outline-warning"><i class="bi bi-pencil-square"></i> Scores & Rankings</a>
         <?php endif; ?>
         <a href="<?= BASE_URL ?>/intramurals/standings/overall.php" class="btn btn-outline-primary">Overall Standing</a>
         <?php if ($sportBlocks): ?>
@@ -117,18 +117,31 @@ require __DIR__ . '/../_season_bar.php';
             <label class="form-label">Sport</label>
             <select name="sport" class="form-select" onchange="this.form.submit()">
                 <option value="" <?= $showAllSports ? 'selected' : '' ?>>All Events</option>
-                <?php foreach ($sports as $s): ?>
-                <option value="<?= $s['id'] ?>" <?= $sportId === (int) $s['id'] ? 'selected' : '' ?>><?= sanitize(sportLabel($s)) ?></option>
-                <?php endforeach; ?>
+                <?= renderSportSelectOptions($sports, $showAllSports ? 0 : $sportId) ?>
             </select>
         </div>
     </form>
 </div>
 
 <?php if (!$sportBlocks): ?>
-<div class="alert alert-info">No sports available.</div>
+<div class="alert alert-info">No events available.</div>
 <?php else: ?>
-<?php foreach ($sportBlocks as $block): ?>
+<?php
+$prevEventGroup = null;
+foreach ($sportBlocks as $block):
+    $blockGroup = sportEventGroupOf($block['sport'] ?? []);
+    if ($showAllSports && $blockGroup !== $prevEventGroup):
+        $prevEventGroup = $blockGroup;
+?>
+<h2 class="h5 mt-4 mb-3">
+    <?php if ($blockGroup === 'socio_cultural'): ?>
+    <i class="bi bi-palette"></i>
+    <?php else: ?>
+    <i class="bi bi-trophy"></i>
+    <?php endif; ?>
+    <?= sanitize(sportEventGroupLabel($blockGroup)) ?>
+</h2>
+<?php endif; ?>
 <?php $divisionBlocks = $block['divisions']; ?>
 <?php $scheme = $block['scheme'] ?? getPointSchemeForSport($block['sport']); ?>
 <div class="alert alert-secondary py-2 no-print">
@@ -228,7 +241,7 @@ require __DIR__ . '/../_season_bar.php';
 
 <p class="text-muted small no-print">Event Pts (Champion → 5th Runner Up) feed the <a href="<?= BASE_URL ?>/intramurals/standings/overall.php">Overall Standing</a> by division.
 <?php if (canManageEventRankings()): ?>
-Use <a href="<?= BASE_URL ?>/intramurals/rankings/index.php<?= $sportId ? '?sport=' . (int) $sportId : '' ?>">Manual Entry of Ranks</a> to enter places per division for events without scheduled matches.
+Use <a href="<?= BASE_URL ?>/intramurals/scoring/<?= $sportId ? 'event.php?sport=' . (int) $sportId . '&tab=rankings' : 'index.php' ?>">Scores & Rankings</a> to enter places per division for events without scheduled matches.
 <?php endif; ?>
 <?php if (canManageIntramurals()): ?> Manage point values in <a href="<?= BASE_URL ?>/intramurals/points/index.php">Point System</a>.<?php endif; ?></p>
 <?= renderReportFooter($showAllSports ? 'All Events' : ($sportBlocks ? sportLabel(reset($sportBlocks)['sport']) : 'Result Tabulation')) ?>

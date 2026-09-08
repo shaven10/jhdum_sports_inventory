@@ -52,7 +52,9 @@ $intramuralsSubtitle = isSecretariat()
 
 $intramuralsActions = '';
 if (isSecretariat()) {
-    $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/matches/generate.php" class="btn btn-light"><i class="bi bi-magic"></i> Generate Matches</a>';
+    $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/scoring/index.php" class="btn btn-light"><i class="bi bi-pencil-square"></i> Scores & Rankings</a>';
+    $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/rubrics/index.php" class="btn btn-outline-light"><i class="bi bi-clipboard-check"></i> Event Rubrics</a>';
+    $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/matches/generate.php" class="btn btn-outline-light"><i class="bi bi-magic"></i> Generate Matches</a>';
     $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/matches/index.php" class="btn btn-outline-light"><i class="bi bi-calendar3"></i> All Matches</a>';
     $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/standings/overall.php" class="btn btn-outline-light"><i class="bi bi-award"></i> Overall Standing</a>';
     $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/reports/certificates.php" class="btn btn-outline-light"><i class="bi bi-award-fill"></i> Certificates</a>';
@@ -61,13 +63,15 @@ if (isSecretariat()) {
 if (canModifyRosterAny()) {
     $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/athletes/add.php" class="btn btn-light"><i class="bi bi-person-plus"></i> Register Athlete</a>';
 }
-if (canModifyRosterAny()) {
+if (canImportRoster()) {
     $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/roster/import.php" class="btn btn-light"><i class="bi bi-file-earmark-arrow-up"></i> Import Roster</a>';
 }
 if (canGenerateMatches() && !isSecretariat()) {
     $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/matches/generate.php" class="btn btn-light"><i class="bi bi-magic"></i> Generate Matches</a>';
 }
 if (isTournamentManager() && !canManageIntramurals() && canViewStandings()) {
+    $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/scoring/index.php" class="btn btn-light"><i class="bi bi-pencil-square"></i> Scores & Rankings</a>';
+    $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/rubrics/index.php" class="btn btn-outline-light"><i class="bi bi-clipboard-check"></i> Event Rubrics</a>';
     $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/standings/overall.php" class="btn btn-outline-light"><i class="bi bi-award"></i> Overall Standing</a>';
     $intramuralsActions .= '<a href="' . BASE_URL . '/intramurals/reports/index.php?type=results" class="btn btn-outline-light"><i class="bi bi-list-check"></i> Match Results</a>';
 }
@@ -156,7 +160,7 @@ if ($coachAssignments) {
                 <div class="stat-icon bg-success bg-opacity-10 text-success bi bi-trophy-fill" aria-hidden="true"></div>
                 <div>
                     <div class="stat-value"><?= $stats['total_sports'] ?></div>
-                    <div class="stat-label">Sports</div>
+                    <div class="stat-label">Events</div>
                 </div>
             </div>
         </div>
@@ -212,8 +216,9 @@ if ($coachAssignments) {
     <div class="col-lg-3 col-6"><a class="btn btn-outline-primary w-100" href="<?= BASE_URL ?>/intramurals/standings/index.php"><i class="bi bi-bar-chart-steps"></i> Standings</a></div>
     <div class="col-lg-3 col-6"><a class="btn btn-outline-primary w-100" href="<?= BASE_URL ?>/intramurals/standings/overall.php"><i class="bi bi-award"></i> Overall</a></div>
     <?php endif; ?>
-    <?php if (canManageEventRankings()): ?>
-    <div class="col-lg-3 col-6"><a class="btn btn-outline-warning w-100" href="<?= BASE_URL ?>/intramurals/rankings/index.php"><i class="bi bi-list-ol"></i> Manual Entry of Ranks</a></div>
+    <?php if (canUseScoringDesk()): ?>
+    <div class="col-lg-3 col-6"><a class="btn btn-outline-warning w-100" href="<?= BASE_URL ?>/intramurals/scoring/index.php"><i class="bi bi-pencil-square"></i> Scores & Rankings</a></div>
+    <div class="col-lg-3 col-6"><a class="btn btn-outline-warning w-100" href="<?= BASE_URL ?>/intramurals/rubrics/index.php"><i class="bi bi-clipboard-check"></i> Event Rubrics</a></div>
     <?php endif; ?>
     <?php if (canManageIntramurals()): ?>
     <div class="col-lg-3 col-6"><a class="btn btn-outline-primary w-100" href="<?= BASE_URL ?>/intramurals/points/index.php"><i class="bi bi-calculator"></i> Point System</a></div>

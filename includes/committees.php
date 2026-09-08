@@ -1132,7 +1132,7 @@ function sportMatchesCommittee(array $sport, array $committee): bool
         }
     }
 
-    $socioNames = ['visual arts', 'literary arts', 'quiz bowl', 'music', 'opening program'];
+    $socioNames = ['visual arts', 'literary arts', 'quiz bowl', 'music', 'opening program', 'dance arts'];
     foreach ($socioNames as $name) {
         if (str_contains($sportName, $name) && str_contains($committeeName, $name)) {
             return true;

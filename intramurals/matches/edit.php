@@ -28,7 +28,7 @@ $decidingRubberDisabled = isDecidingRubberDisabled($db, $match);
 $decidingRubberDisabledMsg = decidingRubberDisabledMessage($db, $match);
 $decidingRubberDisabledAlert = decidingRubberDisabledAlert($db, $match);
 
-$sports = $db->query('SELECT * FROM intramural_sports ORDER BY name, category')->fetchAll();
+$sports = $db->query('SELECT * FROM intramural_sports ORDER BY ' . intramuralSportsOrderBy())->fetchAll();
 $teams = $db->query('SELECT * FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll();
 $errors = [];
 
@@ -159,9 +159,7 @@ $dtLocal = $match['scheduled_at'] ? date('Y-m-d\TH:i', strtotime($match['schedul
             <div class="col-md-6">
                 <label class="form-label">Sport *</label>
                 <select name="sport_id" id="matchSportId" class="form-select" required>
-                    <?php foreach ($sports as $s): ?>
-                    <option value="<?= $s['id'] ?>" <?= (int) $match['sport_id'] === (int) $s['id'] ? 'selected' : '' ?>><?= sanitize(sportLabel($s)) ?></option>
-                    <?php endforeach; ?>
+                    <?= renderSportSelectOptions($sports, $match['sport_id'] ?? 0) ?>
                 </select>
                 <div id="sportFormatHint" class="form-text mt-2">
                     <?php if ($currentSport): ?>

@@ -22,6 +22,10 @@ if (!$equipment) {
     flash('error', 'Please select equipment to borrow.');
     redirect(BASE_URL . '/equipment/index.php');
 }
+if (!isEquipmentBorrowable($equipment)) {
+    flash('error', 'This equipment is not allowed for student borrowing.');
+    redirect(BASE_URL . '/equipment/index.php');
+}
 
 $maxBorrowDays = getSetting('max_borrow_days', MAX_BORROW_DAYS);
 $maxBorrowItems = getSetting('max_borrow_items', MAX_BORROW_ITEMS);
