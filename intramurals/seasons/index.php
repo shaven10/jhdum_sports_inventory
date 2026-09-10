@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
+requireIntramuralsAccess();
 requireRole(['admin', 'coordinator', 'staff']);
 
 $db = getDB();
@@ -67,6 +68,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verifyCsrf(post('csrf_token'))) {
             $db->prepare('UPDATE intramural_seasons SET is_archived = 1, is_active = 0 WHERE id = ?')->execute([$id]);
             auditLog($_SESSION['user_id'], 'archive', 'intramural_season', $id);
             flash('success', 'Season archived.');
+        }
+        redirect(BASE_URL . '/intramurals/seasons/index.php');
+    }
+
+    if ($action === 'lock_roster' && canLockRoster()) {
+        $id = (int) post('id');
+        $lockDate = trim((string) post('lock_date', date('Y-m-d')));
+        $season = getSeasonById($id);
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $lockDate)) {
+            flash('error', 'Please choose a valid lock date.');
+        } elseif ($season && setSeasonRosterLockDate($id, (int) $_SESSION['user_id'], $lockDate)) {
+            auditLog((int) $_SESSION['user_id'], 'lock_roster', 'intramural_season', $id, null, [
+                'year_label' => $season['year_label'],
+                'lock_date' => $lockDate,
+            ]);
+            if ($lockDate > date('Y-m-d')) {
+                flash('success', 'Roster lock scheduled for ' . formatDate($lockDate) . ' (' . $season['year_label'] . ').');
+            } else {
+                flash('success', 'Roster locked for ' . $season['year_label'] . ' (effective ' . formatDate($lockDate) . ').');
+            }
+        } else {
+            flash('error', 'Could not set roster lock date.');
+        }
+        redirect(BASE_URL . '/intramurals/seasons/index.php');
+    }
+
+    if ($action === 'unlock_roster' && canLockRoster()) {
+        $id = (int) post('id');
+        $season = getSeasonById($id);
+        if ($season && unlockSeasonRoster($id)) {
+            auditLog((int) $_SESSION['user_id'], 'unlock_roster', 'intramural_season', $id, null, ['year_label' => $season['year_label']]);
+            flash('success', 'Roster unlocked for ' . $season['year_label'] . '.');
+        } else {
+            flash('error', 'Could not unlock roster.');
         }
         redirect(BASE_URL . '/intramurals/seasons/index.php');
     }
@@ -155,6 +190,7 @@ require_once __DIR__ . '/../../includes/header.php';
                                 <th>Name</th>
                                 <th>Period</th>
                                 <th>Status</th>
+                                <th>Roster</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
@@ -177,6 +213,18 @@ require_once __DIR__ . '/../../includes/header.php';
                                     <span class="badge bg-light text-dark border">Inactive</span>
                                     <?php endif; ?>
                                 </td>
+                                <td>
+                                    <?php if (!empty($s['roster_locked'])): ?>
+                                    <span class="badge bg-warning text-dark"><i class="bi bi-lock-fill"></i> Locked</span>
+                                    <?php if (!empty($s['roster_lock_date'])): ?>
+                                    <div class="small text-muted"><?= sanitize(formatDate($s['roster_lock_date'])) ?></div>
+                                    <?php endif; ?>
+                                    <?php elseif (!empty($s['roster_lock_date']) && $s['roster_lock_date'] > date('Y-m-d')): ?>
+                                    <span class="badge bg-info text-dark"><i class="bi bi-calendar-event"></i> Locks <?= sanitize(formatDate($s['roster_lock_date'])) ?></span>
+                                    <?php else: ?>
+                                    <span class="badge bg-light text-dark border">Open</span>
+                                    <?php endif; ?>
+                                </td>
                                 <td class="text-nowrap">
                                     <a href="?edit=<?= $s['id'] ?>" class="btn btn-sm btn-outline-primary">Edit</a>
                                     <a href="<?= BASE_URL ?>/intramurals/index.php?season_id=<?= $s['id'] ?>" class="btn btn-sm btn-outline-secondary">View</a>
@@ -187,6 +235,25 @@ require_once __DIR__ . '/../../includes/header.php';
                                         <input type="hidden" name="id" value="<?= $s['id'] ?>">
                                         <button class="btn btn-sm btn-success" data-confirm="Set this as the active intramurals year?">Set Active</button>
                                     </form>
+                                    <?php endif; ?>
+                                    <?php if (canLockRoster() && !empty($s['is_active'])): ?>
+                                        <?php if (!empty($s['roster_locked']) || (!empty($s['roster_lock_date']) && $s['roster_lock_date'] > date('Y-m-d'))): ?>
+                                        <form method="POST" class="d-inline">
+                                            <?= csrfField() ?>
+                                            <input type="hidden" name="action" value="unlock_roster">
+                                            <input type="hidden" name="id" value="<?= $s['id'] ?>">
+                                            <button class="btn btn-sm btn-outline-success" data-confirm="Unlock roster for this season?">Unlock</button>
+                                        </form>
+                                        <?php endif; ?>
+                                        <?php if (empty($s['roster_locked'])): ?>
+                                        <form method="POST" class="d-inline-flex align-items-center gap-1">
+                                            <?= csrfField() ?>
+                                            <input type="hidden" name="action" value="lock_roster">
+                                            <input type="hidden" name="id" value="<?= $s['id'] ?>">
+                                            <input type="date" name="lock_date" class="form-control form-control-sm" style="width:10.5rem" required value="<?= sanitize($s['roster_lock_date'] ?? date('Y-m-d')) ?>">
+                                            <button class="btn btn-sm btn-outline-warning" data-confirm="Save roster lock date? Today or past dates lock immediately; future dates schedule automatic locking.">Set Lock Date</button>
+                                        </form>
+                                        <?php endif; ?>
                                     <?php endif; ?>
                                     <?php if (empty($s['is_active']) && empty($s['is_archived'])): ?>
                                     <form method="POST" class="d-inline">
@@ -207,7 +274,7 @@ require_once __DIR__ . '/../../includes/header.php';
                             </tr>
                             <?php endforeach; ?>
                             <?php if (empty($seasons)): ?>
-                            <tr><td colspan="5" class="text-muted p-3">No seasons yet.</td></tr>
+                            <tr><td colspan="6" class="text-muted p-3">No seasons yet.</td></tr>
                             <?php endif; ?>
                         </tbody>
                     </table>

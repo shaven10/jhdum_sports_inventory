@@ -13,6 +13,10 @@ $perPage = 12;
 $where = ['e.is_active = 1'];
 $params = [];
 
+if (canBorrowEquipment() && !canManageInventory()) {
+    $where[] = 'e.is_borrowable = 1';
+}
+
 if ($search) {
     $where[] = '(e.name LIKE ? OR e.description LIKE ? OR e.barcode LIKE ?)';
     $params[] = "%$search%";
@@ -62,6 +66,9 @@ require_once __DIR__ . '/../includes/header.php';
     </div>
     <?php if (canManageInventory()): ?>
     <div class="d-flex gap-2">
+        <?php if (isAdmin()): ?>
+        <a href="<?= BASE_URL ?>/settings/borrowable.php" class="btn btn-outline-warning"><i class="bi bi-box-arrow-up"></i> Borrowable Items</a>
+        <?php endif; ?>
         <a href="<?= BASE_URL ?>/equipment/add.php" class="btn btn-primary"><i class="bi bi-plus-lg"></i> Add Equipment</a>
         <a href="<?= BASE_URL ?>/equipment/maintenance.php" class="btn btn-outline-secondary"><i class="bi bi-tools"></i> Maintenance</a>
     </div>
@@ -126,7 +133,12 @@ require_once __DIR__ . '/../includes/header.php';
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-start mb-2">
                     <span class="badge bg-secondary"><?= sanitize($eq['category_name']) ?></span>
-                    <?= statusBadge($eq['condition']) ?>
+                    <div class="d-flex gap-1">
+                        <?= statusBadge($eq['condition']) ?>
+                        <?php if (canManageInventory() && !isEquipmentBorrowable($eq)): ?>
+                        <span class="badge bg-dark">Not borrowable</span>
+                        <?php endif; ?>
+                    </div>
                 </div>
                 <h5 class="card-title"><?= sanitize($eq['name']) ?></h5>
                 <p class="card-text text-muted small"><?= sanitize(substr($eq['description'] ?? '', 0, 80)) ?></p>
@@ -140,7 +152,7 @@ require_once __DIR__ . '/../includes/header.php';
             </div>
             <div class="card-footer bg-white border-top-0 d-flex gap-2">
                 <a href="<?= BASE_URL ?>/equipment/view.php?id=<?= $eq['id'] ?>" class="btn btn-sm btn-outline-primary flex-fill">View</a>
-                <?php if ($eq['quantity_available'] > 0 && canBorrowEquipment()): ?>
+                <?php if ($eq['quantity_available'] > 0 && canBorrowEquipment() && isEquipmentBorrowable($eq)): ?>
                 <a href="<?= BASE_URL ?>/requests/create.php?equipment_id=<?= $eq['id'] ?>" class="btn btn-sm btn-primary flex-fill">Request</a>
                 <?php endif; ?>
                 <?php if (canManageInventory()): ?>

@@ -1,6 +1,11 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
-requireLogin();
+requireIntramuralsAccess();
+
+if (isTournamentManager() && !canManageIntramurals()) {
+    flash('error', 'Team roster view is not available for tournament manager accounts.');
+    redirect(BASE_URL . '/intramurals/teams/index.php');
+}
 
 $db = getDB();
 $id = (int) get('id');
@@ -20,7 +25,11 @@ if (!$team) {
     redirect(BASE_URL . '/intramurals/teams/index.php');
 }
 
-$sports = $db->query('SELECT * FROM intramural_sports WHERE is_active = 1 ORDER BY name, category')->fetchAll();
+if (isCoach() && !canManageIntramurals()) {
+    requireTeamAccess($id);
+}
+
+$sports = $db->query('SELECT * FROM intramural_sports ORDER BY ' . intramuralSportsOrderBy())->fetchAll();
 
 $eventCoaches = [];
 try {
@@ -113,6 +122,9 @@ require __DIR__ . '/../_season_bar.php';
     </div>
     <div class="d-flex gap-2 flex-wrap">
         <?php if (canEditOwnTeam($id) || canManageIntramurals()): ?>
+        <?php if (canCreateCoachAccounts($id)): ?>
+        <a href="<?= BASE_URL ?>/intramurals/teams/coaches.php?id=<?= $id ?>&add_coach=1" class="btn btn-outline-primary"><i class="bi bi-person-plus"></i> Add Coach</a>
+        <?php endif; ?>
         <a href="<?= BASE_URL ?>/intramurals/teams/coaches.php?id=<?= $id ?>" class="btn btn-primary"><i class="bi bi-person-badge"></i> Event Coaches</a>
         <a href="<?= BASE_URL ?>/intramurals/teams/edit.php?id=<?= $id ?>" class="btn btn-outline-primary">Edit Team</a>
         <?php endif; ?>
@@ -128,11 +140,10 @@ require __DIR__ . '/../_season_bar.php';
                 <form method="GET" class="d-flex gap-2">
                     <input type="hidden" name="id" value="<?= $id ?>">
                     <select name="sport" class="form-select form-select-sm" onchange="this.form.submit()">
-                        <option value="">All Sports</option>
-                        <?php foreach ($sports as $s): ?>
-                        <?php if ($coachSportFilter !== null && !in_array((int) $s['id'], $coachSportFilter, true)) continue; ?>
-                        <option value="<?= $s['id'] ?>" <?= $sportFilter === (int) $s['id'] ? 'selected' : '' ?>><?= sanitize(sportLabel($s)) ?></option>
-                        <?php endforeach; ?>
+                        <option value="">All Events</option>
+                        <?= renderSportSelectOptions(array_values(array_filter($sports, static function (array $s) use ($coachSportFilter): bool {
+                            return $coachSportFilter === null || in_array((int) $s['id'], $coachSportFilter, true);
+                        })), $sportFilter) ?>
                     </select>
                 </form>
             </div>
@@ -140,21 +151,34 @@ require __DIR__ . '/../_season_bar.php';
                 <div class="table-responsive">
                     <table class="table mb-0">
                         <thead class="table-light">
-                            <tr><th>Jersey</th><th>Athlete</th><th>Sport</th><th>Coach</th><th>Position</th><th>Event/Category</th></tr>
+                            <tr>
+                                <th>Jersey</th>
+                                <th>Student ID</th>
+                                <th>Athlete</th>
+                                <th>Gender</th>
+                                <th>Event</th>
+                                <th>Category</th>
+                                <th>Coach</th>
+                                <th>Position</th>
+                                <th>Division</th>
+                            </tr>
                         </thead>
                         <tbody>
                             <?php foreach ($members as $m): ?>
                             <tr>
-                                <td><?= sanitize($m['jersey_number'] ?: '-') ?></td>
+                                <td><?= sanitize($m['jersey_number'] ?: '—') ?></td>
+                                <td><?= sanitize($m['student_id']) ?></td>
                                 <td><a href="<?= BASE_URL ?>/intramurals/athletes/view.php?id=<?= $m['id'] ?>"><?= sanitize(athleteFullName($m)) ?></a></td>
-                                <td><?= sanitize($m['sport_name']) ?> (<?= ucfirst($m['sport_category']) ?>)</td>
+                                <td><?= sanitize(ucfirst($m['gender'] ?: '—')) ?></td>
+                                <td><strong><?= sanitize($m['sport_name']) ?></strong></td>
+                                <td><span class="badge bg-secondary"><?= sanitize(ucfirst($m['sport_category'])) ?></span></td>
                                 <td><?= $m['coach_first'] ? sanitize($m['coach_first'] . ' ' . $m['coach_last']) : '<span class="text-muted">Unassigned</span>' ?></td>
-                                <td><?= sanitize($m['position'] ?: '-') ?></td>
-                                <td><?= sanitize($m['event_category'] ?: '-') ?></td>
+                                <td><?= sanitize($m['position'] ?: '—') ?></td>
+                                <td><?= sanitize($m['event_category'] ?: '—') ?></td>
                             </tr>
                             <?php endforeach; ?>
                             <?php if (empty($members)): ?>
-                            <tr><td colspan="6" class="text-muted p-3">No sport registrations for this team yet.</td></tr>
+                            <tr><td colspan="9" class="text-muted p-3">No sport registrations for this team yet.</td></tr>
                             <?php endif; ?>
                         </tbody>
                     </table>

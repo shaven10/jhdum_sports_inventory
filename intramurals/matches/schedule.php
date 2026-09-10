@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
+requireIntramuralsAccess();
 if (!canManageMatches()) {
     flash('error', 'You do not have permission to schedule matches.');
     redirect(BASE_URL . '/intramurals/matches/index.php');
@@ -10,7 +11,8 @@ $db = getDB();
 $id = (int) get('id');
 
 $stmt = $db->prepare("SELECT m.*, s.name as sport_name, s.category as sport_category, s.tournament_format, s.format_notes,
-    ta.name as team_a_name, tb.name as team_b_name
+    ta.name as team_a_name, ta.color as team_a_color,
+    tb.name as team_b_name, tb.color as team_b_color
     FROM intramural_matches m
     JOIN intramural_sports s ON m.sport_id = s.id
     LEFT JOIN intramural_teams ta ON m.team_a_id = ta.id
@@ -24,22 +26,29 @@ if (!$match) {
     redirect(BASE_URL . '/intramurals/matches/index.php');
 }
 
+requireEventMatchAccess((int) $match['sport_id']);
+
+$fromDashboard = get('from') === 'dashboard';
+$fromQuery = $fromDashboard ? '&from=dashboard' : '';
+$viewUrl = BASE_URL . '/intramurals/matches/view.php?id=' . $id . $fromQuery;
+$backUrl = $fromDashboard ? (BASE_URL . '/dashboard.php') : $viewUrl;
+
 $teams = $db->query('SELECT * FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll();
 $errors = [];
-$isTabulator = hasRole('tabulator') && !canManageIntramurals();
+$isTabulator = isTournamentManager() && !canManageIntramurals() && !isSecretariat();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!verifyCsrf(post('csrf_token'))) {
         flash('error', 'Invalid request.');
-        redirect(BASE_URL . '/intramurals/matches/schedule.php?id=' . $id);
+        redirect(BASE_URL . '/intramurals/matches/schedule.php?id=' . $id . $fromQuery);
     }
 
     $scheduledAt = post('scheduled_at');
     $venue = post('venue');
     $referee = post('referee_name');
     $notes = post('notes', $match['notes'] ?? '');
-    $teamA = (int) post('team_a_id') ?: null;
-    $teamB = (int) post('team_b_id') ?: null;
+    $teamA = isset($_POST['team_a_id']) ? ((int) post('team_a_id') ?: null) : ((int) ($match['team_a_id'] ?? 0) ?: null);
+    $teamB = isset($_POST['team_b_id']) ? ((int) post('team_b_id') ?: null) : ((int) ($match['team_b_id'] ?? 0) ?: null);
     $clearSchedule = post('clear_schedule') === '1';
 
     if (!$clearSchedule && $scheduledAt === '') {
@@ -51,14 +60,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = 'Teams must be different.';
     }
 
-    // Keep existing teams if tabulator doesn't change TBD slots
-    if ($isTabulator) {
-        if ($match['team_a_id']) {
-            $teamA = (int) $match['team_a_id'];
-        }
-        if ($match['team_b_id']) {
-            $teamB = (int) $match['team_b_id'];
-        }
+    // Reschedule only posts team fields when a side is still TBD. Admin (and
+    // anyone else) must not wipe houses that are already assigned.
+    if (!empty($match['team_a_id'])) {
+        $teamA = (int) $match['team_a_id'];
+    }
+    if (!empty($match['team_b_id'])) {
+        $teamB = (int) $match['team_b_id'];
     }
 
     if (empty($errors)) {
@@ -77,8 +85,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'scheduled_at' => $scheduledValue,
             'venue' => $venue,
         ]);
+        if (!empty($match['season_id'])) {
+            recalculateVenueGameNumbers((int) $match['season_id']);
+        }
         flash('success', $clearSchedule ? 'Match schedule cleared.' : 'Match date & time saved.');
-        redirect(BASE_URL . '/intramurals/matches/view.php?id=' . $id);
+        redirect($viewUrl);
     }
 }
 
@@ -106,9 +117,10 @@ require __DIR__ . '/../_season_bar.php';
     <?php endif; ?>
 
     <div class="alert alert-light border mb-3">
-        <strong><?= sanitize($match['team_a_name'] ?: 'TBD') ?></strong>
+        <?= matchTeamRosterTrigger($match, 'a') ?>
         vs
-        <strong><?= sanitize($match['team_b_name'] ?: 'TBD') ?></strong>
+        <?= matchTeamRosterTrigger($match, 'b') ?>
+        <div class="small text-muted mt-1">Click a team name to view the official player list for this match.</div>
         <?php if (!empty($match['format_notes'])): ?>
         <div class="small text-muted mt-1"><?= sanitize($match['format_notes']) ?></div>
         <?php endif; ?>
@@ -126,6 +138,10 @@ require __DIR__ . '/../_season_bar.php';
 
     <form method="POST">
         <?= csrfField() ?>
+        <?php if (!empty($match['team_a_id']) && !empty($match['team_b_id'])): ?>
+        <input type="hidden" name="team_a_id" value="<?= (int) $match['team_a_id'] ?>">
+        <input type="hidden" name="team_b_id" value="<?= (int) $match['team_b_id'] ?>">
+        <?php endif; ?>
         <div class="row g-3">
             <div class="col-md-6">
                 <label class="form-label">Date &amp; Time *</label>
@@ -185,9 +201,10 @@ require __DIR__ . '/../_season_bar.php';
         </div>
         <div class="mt-4 d-flex gap-2">
             <button class="btn btn-primary">Save Schedule</button>
-            <a href="<?= BASE_URL ?>/intramurals/matches/view.php?id=<?= $id ?>" class="btn btn-outline-secondary">Cancel</a>
+            <a href="<?= sanitize($fromDashboard ? $backUrl : $viewUrl) ?>" class="btn btn-outline-secondary"><?= $fromDashboard ? 'Back' : 'Cancel' ?></a>
         </div>
     </form>
 </div></div></div></div>
 
+<?php require __DIR__ . '/_roster_dialog.php'; ?>
 <?php require_once __DIR__ . '/../../includes/footer.php'; ?>

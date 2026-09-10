@@ -6,6 +6,16 @@
 function getThemePresets(): array
 {
     return [
+        'jhcsc_official' => [
+            'name'      => 'JHCSC Official',
+            'primary'   => '#1b5e20',
+            'secondary' => '#2e7d32',
+            'accent'    => '#c62828',
+            'body_bg'   => '#f3f7f4',
+            'card_bg'   => '#ffffff',
+            'text'      => '#1b2e1d',
+            'login_gradient' => 'linear-gradient(135deg, #1b5e20 0%, #2e7d32 45%, #c62828 100%)',
+        ],
         'jhcsc_blue' => [
             'name'      => 'JHCSC Blue',
             'primary'   => '#1a5276',
@@ -91,26 +101,136 @@ function hexToRgb(string $hex): string
     return "$r, $g, $b";
 }
 
+/** Lighten or darken a hex color by a percentage (-100 to 100). */
+function adjustHexBrightness(string $hex, float $percent): string
+{
+    $hex = ltrim($hex, '#');
+    if (strlen($hex) === 3) {
+        $hex = $hex[0] . $hex[0] . $hex[1] . $hex[1] . $hex[2] . $hex[2];
+    }
+    $rgb = [
+        hexdec(substr($hex, 0, 2)),
+        hexdec(substr($hex, 2, 2)),
+        hexdec(substr($hex, 4, 2)),
+    ];
+    foreach ($rgb as &$channel) {
+        $channel = (int) round(max(0, min(255, $channel + ($channel * ($percent / 100)))));
+    }
+    unset($channel);
+    return sprintf('#%02x%02x%02x', $rgb[0], $rgb[1], $rgb[2]);
+}
+
+/** Pick readable text color (black/white) for a hex background. */
+function contrastTextColor(string $hex): string
+{
+    $hex = ltrim($hex, '#');
+    if (strlen($hex) === 3) {
+        $hex = $hex[0] . $hex[0] . $hex[1] . $hex[1] . $hex[2] . $hex[2];
+    }
+    $r = hexdec(substr($hex, 0, 2));
+    $g = hexdec(substr($hex, 2, 2));
+    $b = hexdec(substr($hex, 4, 2));
+    $luminance = (0.299 * $r + 0.587 * $g + 0.114 * $b) / 255;
+    return $luminance > 0.62 ? '#1a1a1a' : '#ffffff';
+}
+
+/**
+ * Build Bootstrap-compatible solid + outline button CSS for a theme color.
+ */
+function buildThemeButtonCss(string $name, string $color): string
+{
+    $hover = adjustHexBrightness($color, -12);
+    $active = adjustHexBrightness($color, -20);
+    $border = adjustHexBrightness($color, -8);
+    $rgb = hexToRgb($color);
+    $text = contrastTextColor($color);
+    $outlineHoverText = contrastTextColor($color);
+
+    return "
+    .btn-{$name} {
+        --bs-btn-color: {$text};
+        --bs-btn-bg: {$color};
+        --bs-btn-border-color: {$border};
+        --bs-btn-hover-color: {$text};
+        --bs-btn-hover-bg: {$hover};
+        --bs-btn-hover-border-color: {$active};
+        --bs-btn-focus-shadow-rgb: {$rgb};
+        --bs-btn-active-color: {$text};
+        --bs-btn-active-bg: {$active};
+        --bs-btn-active-border-color: {$active};
+        --bs-btn-disabled-color: {$text};
+        --bs-btn-disabled-bg: {$color};
+        --bs-btn-disabled-border-color: {$border};
+        background-color: {$color};
+        border-color: {$border};
+        color: {$text};
+    }
+    .btn-{$name}:hover,
+    .btn-{$name}:focus {
+        background-color: {$hover};
+        border-color: {$active};
+        color: {$text};
+    }
+    .btn-{$name}:active,
+    .btn-{$name}.active,
+    .show > .btn-{$name}.dropdown-toggle {
+        background-color: {$active};
+        border-color: {$active};
+        color: {$text};
+    }
+    .btn-outline-{$name} {
+        --bs-btn-color: {$color};
+        --bs-btn-border-color: {$color};
+        --bs-btn-hover-color: {$outlineHoverText};
+        --bs-btn-hover-bg: {$color};
+        --bs-btn-hover-border-color: {$color};
+        --bs-btn-focus-shadow-rgb: {$rgb};
+        --bs-btn-active-color: {$outlineHoverText};
+        --bs-btn-active-bg: {$color};
+        --bs-btn-active-border-color: {$color};
+        --bs-btn-disabled-color: {$color};
+        --bs-btn-disabled-bg: transparent;
+        --bs-btn-disabled-border-color: {$color};
+        color: {$color};
+        border-color: {$color};
+        background-color: transparent;
+    }
+    .btn-outline-{$name}:hover,
+    .btn-outline-{$name}:focus {
+        background-color: {$color};
+        border-color: {$color};
+        color: {$outlineHoverText};
+    }
+    .btn-outline-{$name}:active,
+    .btn-outline-{$name}.active,
+    .show > .btn-outline-{$name}.dropdown-toggle {
+        background-color: {$hover};
+        border-color: {$hover};
+        color: {$outlineHoverText};
+    }
+    ";
+}
+
 function getActiveTheme(): array
 {
     $presets = getThemePresets();
-    $presetKey = getSetting('theme_preset', 'jhcsc_blue');
+    $presetKey = getSetting('theme_preset', 'jhcsc_official');
 
     if ($presetKey === 'custom') {
         return [
             'preset'    => 'custom',
             'name'      => 'Custom Theme',
-            'primary'   => getSetting('theme_primary', '#1a5276'),
-            'secondary' => getSetting('theme_secondary', '#2e86c1'),
-            'accent'    => getSetting('theme_accent', '#f39c12'),
-            'body_bg'   => getSetting('theme_body_bg', '#f4f6f9'),
+            'primary'   => getSetting('theme_primary', '#1b5e20'),
+            'secondary' => getSetting('theme_secondary', '#2e7d32'),
+            'accent'    => getSetting('theme_accent', '#c62828'),
+            'body_bg'   => getSetting('theme_body_bg', '#f3f7f4'),
             'card_bg'   => getSetting('theme_card_bg', '#ffffff'),
-            'text'      => getSetting('theme_text', '#2c3e50'),
-            'login_gradient' => getSetting('theme_login_gradient', 'linear-gradient(135deg, #1a5276 0%, #2e86c1 50%, #3498db 100%)'),
+            'text'      => getSetting('theme_text', '#1b2e1d'),
+            'login_gradient' => getSetting('theme_login_gradient', 'linear-gradient(135deg, #1b5e20 0%, #2e7d32 45%, #c62828 100%)'),
         ];
     }
 
-    $theme = $presets[$presetKey] ?? $presets['jhcsc_blue'];
+    $theme = $presets[$presetKey] ?? $presets['jhcsc_official'];
     $theme['preset'] = $presetKey;
     return $theme;
 }
@@ -118,26 +238,173 @@ function getActiveTheme(): array
 function renderThemeStyles(): string
 {
     $theme = getActiveTheme();
-    $primaryRgb = hexToRgb($theme['primary']);
-    $secondaryRgb = hexToRgb($theme['secondary']);
+    $primary = $theme['primary'];
+    $secondary = $theme['secondary'];
+    $accent = $theme['accent'];
+    $primaryRgb = hexToRgb($primary);
+    $secondaryRgb = hexToRgb($secondary);
+    $accentRgb = hexToRgb($accent);
     $isDark = ($theme['preset'] ?? '') === 'dark_mode';
 
+    // Complementary status colors derived from the active theme palette
+    $success = adjustHexBrightness($secondary, -5);
+    $info = adjustHexBrightness($primary, 18);
+    $warning = $accent;
+    $danger = adjustHexBrightness($accent, -35);
+    // Keep danger readable/reddish when accent is already yellow-ish
+    if (strtolower($accent) === '#f39c12' || strtolower($accent) === '#f1c40f') {
+        $danger = '#c0392b';
+    }
+    if (($theme['preset'] ?? '') === 'crimson_red') {
+        $danger = adjustHexBrightness($primary, -10);
+        $success = '#1e8449';
+    }
+    if (($theme['preset'] ?? '') === 'forest_green' || ($theme['preset'] ?? '') === 'jhcsc_official') {
+        $success = $secondary;
+        $danger = '#c62828';
+        $warning = '#f9a825';
+        $info = adjustHexBrightness($primary, 25);
+    }
+
+    $successRgb = hexToRgb($success);
+    $infoRgb = hexToRgb($info);
+    $warningRgb = hexToRgb($warning);
+    $dangerRgb = hexToRgb($danger);
+
     $css = ":root {
-        --theme-primary: {$theme['primary']};
-        --theme-secondary: {$theme['secondary']};
-        --theme-accent: {$theme['accent']};
+        --theme-primary: {$primary};
+        --theme-secondary: {$secondary};
+        --theme-accent: {$accent};
         --theme-body-bg: {$theme['body_bg']};
         --theme-card-bg: {$theme['card_bg']};
         --theme-text: {$theme['text']};
         --theme-login-gradient: {$theme['login_gradient']};
-        --bs-primary: {$theme['primary']};
+        --theme-success: {$success};
+        --theme-info: {$info};
+        --theme-warning: {$warning};
+        --theme-danger: {$danger};
+        --bs-primary: {$primary};
         --bs-primary-rgb: {$primaryRgb};
-        --bs-secondary: {$theme['secondary']};
+        --bs-secondary: {$secondary};
         --bs-secondary-rgb: {$secondaryRgb};
-        --jhcsc-primary: {$theme['primary']};
-        --jhcsc-secondary: {$theme['secondary']};
-        --jhcsc-accent: {$theme['accent']};
+        --bs-success: {$success};
+        --bs-success-rgb: {$successRgb};
+        --bs-info: {$info};
+        --bs-info-rgb: {$infoRgb};
+        --bs-warning: {$warning};
+        --bs-warning-rgb: {$warningRgb};
+        --bs-danger: {$danger};
+        --bs-danger-rgb: {$dangerRgb};
+        --bs-link-color: {$primary};
+        --bs-link-hover-color: " . adjustHexBrightness($primary, -15) . ";
+        --jhcsc-primary: {$primary};
+        --jhcsc-secondary: {$secondary};
+        --jhcsc-accent: {$accent};
     }";
+
+    $css .= "
+    .bg-primary { background-color: rgba({$primaryRgb}, var(--bs-bg-opacity, 1)) !important; }
+    .bg-secondary { background-color: rgba({$secondaryRgb}, var(--bs-bg-opacity, 1)) !important; }
+    .bg-success { background-color: rgba({$successRgb}, var(--bs-bg-opacity, 1)) !important; }
+    .bg-info { background-color: rgba({$infoRgb}, var(--bs-bg-opacity, 1)) !important; }
+    .bg-warning { background-color: rgba({$warningRgb}, var(--bs-bg-opacity, 1)) !important; }
+    .bg-danger { background-color: rgba({$dangerRgb}, var(--bs-bg-opacity, 1)) !important; }
+    .text-primary { color: {$primary} !important; }
+    .text-secondary { color: {$secondary} !important; }
+    .text-success { color: {$success} !important; }
+    .text-info { color: {$info} !important; }
+    .text-warning { color: {$warning} !important; }
+    .text-danger { color: {$danger} !important; }
+    .border-primary { border-color: {$primary} !important; }
+    .navbar.bg-primary { background-color: rgba({$primaryRgb}, var(--bs-bg-opacity, 1)) !important; }
+    .page-link { color: {$primary}; }
+    .page-item.active .page-link {
+        background-color: {$primary};
+        border-color: {$primary};
+        color: " . contrastTextColor($primary) . ";
+    }
+    .page-link:hover { color: " . adjustHexBrightness($primary, -15) . "; }
+    .form-check-input:checked {
+        background-color: {$primary};
+        border-color: {$primary};
+    }
+    .form-control:focus,
+    .form-select:focus {
+        border-color: {$secondary};
+        box-shadow: 0 0 0 0.2rem rgba({$primaryRgb}, 0.2);
+    }
+    .badge.bg-primary { background-color: rgba({$primaryRgb}, var(--bs-bg-opacity, 1)) !important; }
+    .badge.bg-secondary { background-color: rgba({$secondaryRgb}, var(--bs-bg-opacity, 1)) !important; }
+    .badge.bg-success { background-color: rgba({$successRgb}, var(--bs-bg-opacity, 1)) !important; }
+    .badge.bg-info { background-color: rgba({$infoRgb}, var(--bs-bg-opacity, 1)) !important; color: " . contrastTextColor($info) . " !important; }
+    .badge.bg-warning { background-color: rgba({$warningRgb}, var(--bs-bg-opacity, 1)) !important; color: " . contrastTextColor($warning) . " !important; }
+    .badge.bg-danger { background-color: rgba({$dangerRgb}, var(--bs-bg-opacity, 1)) !important; }
+
+    /* Dashboard stat icons: light tint + solid glyph (never same color on solid bg) */
+    .stat-card .stat-icon.bg-primary {
+        background-color: rgba({$primaryRgb}, 0.12) !important;
+        color: {$primary} !important;
+    }
+    .stat-card .stat-icon.bg-secondary {
+        background-color: rgba({$secondaryRgb}, 0.12) !important;
+        color: {$secondary} !important;
+    }
+    .stat-card .stat-icon.bg-success {
+        background-color: rgba({$successRgb}, 0.12) !important;
+        color: {$success} !important;
+    }
+    .stat-card .stat-icon.bg-info {
+        background-color: rgba({$infoRgb}, 0.12) !important;
+        color: {$info} !important;
+    }
+    .stat-card .stat-icon.bg-warning {
+        background-color: rgba({$warningRgb}, 0.12) !important;
+        color: {$warning} !important;
+    }
+    .stat-card .stat-icon.bg-danger {
+        background-color: rgba({$dangerRgb}, 0.12) !important;
+        color: {$danger} !important;
+    }
+    .stat-card .stat-icon i,
+    .stat-card .stat-icon i::before,
+    .stat-card .stat-icon.bi::before {
+        color: inherit !important;
+    }
+    ";
+
+    $css .= buildThemeButtonCss('primary', $primary);
+    $css .= buildThemeButtonCss('secondary', $secondary);
+    $css .= buildThemeButtonCss('success', $success);
+    $css .= buildThemeButtonCss('info', $info);
+    $css .= buildThemeButtonCss('warning', $warning);
+    $css .= buildThemeButtonCss('danger', $danger);
+
+    // Soft secondary action button used widely for Print / Back
+    $css .= buildThemeButtonCss('light', $isDark ? '#2c3e50' : '#f8f9fa');
+    $css .= "
+    .btn-outline-secondary {
+        --bs-btn-color: {$secondary};
+        --bs-btn-border-color: {$secondary};
+        --bs-btn-hover-color: " . contrastTextColor($secondary) . ";
+        --bs-btn-hover-bg: {$secondary};
+        --bs-btn-hover-border-color: {$secondary};
+        --bs-btn-focus-shadow-rgb: {$secondaryRgb};
+        --bs-btn-active-color: " . contrastTextColor($secondary) . ";
+        --bs-btn-active-bg: {$secondary};
+        --bs-btn-active-border-color: {$secondary};
+        color: {$secondary};
+        border-color: {$secondary};
+    }
+    .btn-outline-secondary:hover,
+    .btn-outline-secondary:focus {
+        background-color: {$secondary};
+        border-color: {$secondary};
+        color: " . contrastTextColor($secondary) . ";
+    }
+    .btn {
+        transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+    }
+    ";
 
     if ($isDark) {
         $css .= "
@@ -172,14 +439,14 @@ function ensureThemeSettings(): void
     try {
         $db = getDB();
         $defaults = [
-            ['theme_preset', 'jhcsc_blue', 'string', 'Active theme preset'],
-            ['theme_primary', '#1a5276', 'string', 'Custom primary color'],
-            ['theme_secondary', '#2e86c1', 'string', 'Custom secondary color'],
-            ['theme_accent', '#f39c12', 'string', 'Custom accent color'],
-            ['theme_body_bg', '#f4f6f9', 'string', 'Custom body background'],
+            ['theme_preset', 'jhcsc_official', 'string', 'Active theme preset'],
+            ['theme_primary', '#1b5e20', 'string', 'Custom primary color'],
+            ['theme_secondary', '#2e7d32', 'string', 'Custom secondary color'],
+            ['theme_accent', '#c62828', 'string', 'Custom accent color'],
+            ['theme_body_bg', '#f3f7f4', 'string', 'Custom body background'],
             ['theme_card_bg', '#ffffff', 'string', 'Custom card background'],
-            ['theme_text', '#2c3e50', 'string', 'Custom text color'],
-            ['theme_login_gradient', 'linear-gradient(135deg, #1a5276 0%, #2e86c1 50%, #3498db 100%)', 'string', 'Login page gradient'],
+            ['theme_text', '#1b2e1d', 'string', 'Custom text color'],
+            ['theme_login_gradient', 'linear-gradient(135deg, #1b5e20 0%, #2e7d32 45%, #c62828 100%)', 'string', 'Login page gradient'],
         ];
 
         $check = $db->prepare('SELECT id FROM system_settings WHERE setting_key = ?');
@@ -190,6 +457,12 @@ function ensureThemeSettings(): void
             if (!$check->fetch()) {
                 $insert->execute([$key, $value, $type, $desc]);
             }
+        }
+
+        // Prefer official JHCSC palette for existing installs still on the old default blue.
+        $preset = $db->query("SELECT setting_value FROM system_settings WHERE setting_key = 'theme_preset'")->fetchColumn();
+        if ($preset === 'jhcsc_blue') {
+            $db->prepare("UPDATE system_settings SET setting_value = 'jhcsc_official' WHERE setting_key = 'theme_preset'")->execute();
         }
     } catch (Exception $e) {
         // Database may not be ready during install

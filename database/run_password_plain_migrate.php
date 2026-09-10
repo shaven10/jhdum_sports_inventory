@@ -13,8 +13,7 @@ function columnExists(PDO $db, string $table, string $column): bool
 if (!columnExists($db, 'users', 'password_plain')) {
     echo "Adding users.password_plain...\n";
     $db->exec('ALTER TABLE users ADD COLUMN password_plain VARCHAR(255) DEFAULT NULL AFTER password');
-    $db->exec("UPDATE users SET password_plain = 'admin123' WHERE password_plain IS NULL");
-    echo "Backfilled existing users with default password (admin123).\n";
+    echo "Column added. Existing users without a stored password will show — until an admin sets a new password.\n";
 } else {
     echo "users.password_plain already exists.\n";
 }

@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../includes/auth.php';
 requireRole(['admin', 'coordinator', 'staff']);
+ensureEquipmentBorrowableColumn();
 
 $id = (int) get('id');
 if (!$id) {
@@ -44,6 +45,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $location = post('location');
     $barcode = post('barcode');
     $lowStock = max(1, (int) post('low_stock_threshold'));
+    $isBorrowable = post('is_borrowable') === '1' ? 1 : 0;
 
     if (empty($name)) $errors[] = 'Equipment name is required.';
 
@@ -60,8 +62,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (empty($errors)) {
         $oldValues = $eq;
-        $stmt = $db->prepare('UPDATE equipment SET category_id=?, name=?, description=?, barcode=?, quantity_total=?, `condition`=?, location=?, image=?, low_stock_threshold=? WHERE id=?');
-        $stmt->execute([$categoryId, $name, $description, $barcode, $quantityTotal, $condition, $location, $image, $lowStock, $id]);
+        $stmt = $db->prepare('UPDATE equipment SET category_id=?, name=?, description=?, barcode=?, quantity_total=?, `condition`=?, location=?, image=?, low_stock_threshold=?, is_borrowable=? WHERE id=?');
+        $stmt->execute([$categoryId, $name, $description, $barcode, $quantityTotal, $condition, $location, $image, $lowStock, $isBorrowable, $id]);
         updateEquipmentQuantities($id);
 
         auditLog($_SESSION['user_id'], 'update', 'equipment', $id, $oldValues, ['name' => $name]);
@@ -136,6 +138,12 @@ require_once __DIR__ . '/../includes/header.php';
                             <?php if ($eq['image']): ?>
                             <small class="text-muted">Current: <?= sanitize($eq['image']) ?></small>
                             <?php endif; ?>
+                        </div>
+                        <div class="col-12">
+                            <div class="form-check">
+                                <input type="checkbox" name="is_borrowable" class="form-check-input" id="is_borrowable" value="1" <?= isEquipmentBorrowable($eq) ? 'checked' : '' ?>>
+                                <label class="form-check-label" for="is_borrowable">Allow students to borrow this equipment</label>
+                            </div>
                         </div>
                     </div>
                     <div class="mt-4 d-flex gap-2">

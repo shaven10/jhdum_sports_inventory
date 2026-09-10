@@ -38,8 +38,10 @@ require_once __DIR__ . '/../includes/header.php';
         <p class="text-muted mb-0"><?= sanitize($eq['category_name']) ?> &middot; <?= sanitize($eq['barcode']) ?></p>
     </div>
     <div class="d-flex gap-2">
-        <?php if ($eq['quantity_available'] > 0 && canBorrowEquipment()): ?>
+        <?php if ($eq['quantity_available'] > 0 && canBorrowEquipment() && isEquipmentBorrowable($eq)): ?>
         <a href="<?= BASE_URL ?>/requests/create.php?equipment_id=<?= $eq['id'] ?>" class="btn btn-primary"><i class="bi bi-clipboard-plus"></i> Request to Borrow</a>
+        <?php elseif (canBorrowEquipment() && !isEquipmentBorrowable($eq)): ?>
+        <span class="badge bg-secondary align-self-center">Not available for borrowing</span>
         <?php endif; ?>
         <?php if (canManageInventory()): ?>
         <a href="<?= BASE_URL ?>/equipment/edit.php?id=<?= $eq['id'] ?>" class="btn btn-outline-secondary"><i class="bi bi-pencil"></i> Edit</a>
@@ -62,6 +64,9 @@ require_once __DIR__ . '/../includes/header.php';
                 <p class="text-muted small"><?= sanitize($eq['description']) ?></p>
                 <p><i class="bi bi-geo-alt"></i> <?= sanitize($eq['location']) ?></p>
                 <?= statusBadge($eq['condition']) ?>
+                <?php if (!isEquipmentBorrowable($eq)): ?>
+                <span class="badge bg-dark ms-1">Not borrowable</span>
+                <?php endif; ?>
             </div>
         </div>
     </div>

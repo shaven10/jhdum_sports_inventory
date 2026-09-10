@@ -1,4 +1,5 @@
--- JHCSC Dumingag Campus Sports Equipment Inventory System
+-- J.H. Cerilles State College — Sports Development IMIS
+-- Database schema (inventory + intramurals)
 -- Database Schema
 
 CREATE DATABASE IF NOT EXISTS jhcsc_sports_inventory
@@ -9,16 +10,16 @@ USE jhcsc_sports_inventory;
 -- Users table
 CREATE TABLE IF NOT EXISTS users (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(50) NOT NULL UNIQUE,
-    email VARCHAR(100) NOT NULL UNIQUE,
+    username VARCHAR(80) NOT NULL UNIQUE,
+    email VARCHAR(190) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,
     password_plain VARCHAR(255) DEFAULT NULL,
-    first_name VARCHAR(50) NOT NULL,
-    last_name VARCHAR(50) NOT NULL,
-    student_id VARCHAR(20) DEFAULT NULL,
-    department VARCHAR(100) DEFAULT NULL,
-    phone VARCHAR(20) DEFAULT NULL,
-    role ENUM('admin', 'coordinator', 'staff', 'unit_manager', 'coach', 'tabulator', 'student') NOT NULL DEFAULT 'student',
+    first_name VARCHAR(100) NOT NULL,
+    last_name VARCHAR(100) NOT NULL,
+    student_id VARCHAR(50) DEFAULT NULL,
+    department VARCHAR(255) DEFAULT NULL,
+    phone VARCHAR(40) DEFAULT NULL,
+    role ENUM('admin', 'coordinator', 'staff', 'unit_manager', 'coach', 'tabulator', 'secretariat', 'publication', 'student') NOT NULL DEFAULT 'student',
     team_id INT DEFAULT NULL,
     avatar VARCHAR(255) DEFAULT NULL,
     is_active TINYINT(1) NOT NULL DEFAULT 1,
@@ -53,6 +54,7 @@ CREATE TABLE IF NOT EXISTS equipment (
     image VARCHAR(255) DEFAULT NULL,
     low_stock_threshold INT NOT NULL DEFAULT 3,
     is_active TINYINT(1) NOT NULL DEFAULT 1,
+    is_borrowable TINYINT(1) NOT NULL DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (category_id) REFERENCES equipment_categories(id) ON DELETE RESTRICT
@@ -143,6 +145,39 @@ CREATE TABLE IF NOT EXISTS notifications (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
+-- System announcements (staff modules only; students excluded)
+CREATE TABLE IF NOT EXISTS announcements (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    title VARCHAR(200) NOT NULL,
+    message TEXT NOT NULL,
+    type ENUM('info', 'success', 'warning', 'danger') NOT NULL DEFAULT 'info',
+    target_roles JSON DEFAULT NULL,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    created_by INT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+-- Incident reports (tournament / unit managers → admin)
+CREATE TABLE IF NOT EXISTS incident_reports (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    reporter_user_id INT NOT NULL,
+    subject VARCHAR(200) NOT NULL,
+    category VARCHAR(50) NOT NULL DEFAULT 'query',
+    message TEXT NOT NULL,
+    status ENUM('open', 'in_progress', 'resolved', 'closed') NOT NULL DEFAULT 'open',
+    admin_response TEXT DEFAULT NULL,
+    responded_by INT DEFAULT NULL,
+    responded_at DATETIME DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (reporter_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (responded_by) REFERENCES users(id) ON DELETE SET NULL,
+    INDEX idx_incident_status (status),
+    INDEX idx_incident_reporter (reporter_user_id)
+) ENGINE=InnoDB;
+
 -- Audit logs
 CREATE TABLE IF NOT EXISTS audit_logs (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -197,6 +232,8 @@ INSERT INTO users (username, email, password, password_plain, first_name, last_n
 ('admin', 'admin@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'admin123', 'System', 'Administrator', 'admin'),
 ('coordinator', 'coordinator@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'admin123', 'Sports', 'Coordinator', 'coordinator'),
 ('staff', 'staff@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'admin123', 'Sports', 'Staff', 'staff'),
+('secretariat', 'secretariat@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'admin123', 'Intramurals', 'Secretariat', 'secretariat'),
+('publication', 'publication@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'admin123', 'Intramurals', 'Publication', 'publication'),
 ('student', 'student@jhcsc.edu.ph', '$2y$10$NKHgE07F2acQPzEmaEB9FeaBB/2Y2e/acncWDo0U19wF7F7u3KK.y', 'admin123', 'Juan', 'Dela Cruz', 'student');
 
 -- Insert sample equipment
@@ -221,16 +258,18 @@ INSERT INTO system_settings (setting_key, setting_value, setting_type, descripti
 ('require_approval', '1', 'boolean', 'Require coordinator approval for borrowing requests'),
 ('notification_email', '1', 'boolean', 'Enable email notifications'),
 ('overdue_reminder_days', '1', 'integer', 'Days before due date to send reminder'),
-('campus_name', 'JHCSC Dumingag Campus', 'string', 'Campus name'),
+('campus_name', 'J.H. Cerilles State College', 'string', 'Campus name'),
 ('borrowing_policy', 'All borrowed equipment must be returned in the same condition. Late returns may result in borrowing privileges being suspended.', 'string', 'Borrowing policy text'),
-('theme_preset', 'jhcsc_blue', 'string', 'Active theme preset'),
-('theme_primary', '#1a5276', 'string', 'Custom primary color'),
-('theme_secondary', '#2e86c1', 'string', 'Custom secondary color'),
-('theme_accent', '#f39c12', 'string', 'Custom accent color'),
-('theme_body_bg', '#f4f6f9', 'string', 'Custom body background'),
+('theme_preset', 'jhcsc_official', 'string', 'Active theme preset'),
+('theme_primary', '#1b5e20', 'string', 'Custom primary color'),
+('theme_secondary', '#2e7d32', 'string', 'Custom secondary color'),
+('theme_accent', '#c62828', 'string', 'Custom accent color'),
+('theme_body_bg', '#f3f7f4', 'string', 'Custom body background'),
 ('theme_card_bg', '#ffffff', 'string', 'Custom card background'),
-('theme_text', '#2c3e50', 'string', 'Custom text color'),
-('theme_login_gradient', 'linear-gradient(135deg, #1a5276 0%, #2e86c1 50%, #3498db 100%)', 'string', 'Login page gradient');
+('theme_text', '#1b2e1d', 'string', 'Custom text color'),
+('theme_login_gradient', 'linear-gradient(135deg, #1b5e20 0%, #2e7d32 45%, #c62828 100%)', 'string', 'Login page gradient'),
+('sdo_about_title', 'About the Sports Development Office', 'string', 'Landing page SDO section title'),
+('sdo_about_content', 'The Sports Development Office (SDO) leads the campus sports program at J.H. Cerilles State College — organizing intramurals, supporting varsity teams, managing sports facilities and equipment, and promoting wellness through physical activity.\n\nOur office works with coaches, unit managers, and student-athletes to deliver fair competition, meaningful recreation, and opportunities for leadership on and off the field.', 'string', 'Landing page SDO about text');
 
 -- =====================
 -- Intramurals Module
@@ -245,9 +284,42 @@ CREATE TABLE IF NOT EXISTS intramural_seasons (
     description TEXT,
     is_active TINYINT(1) NOT NULL DEFAULT 0,
     is_archived TINYINT(1) NOT NULL DEFAULT 0,
+    roster_locked TINYINT(1) NOT NULL DEFAULT 0,
+    roster_lock_date DATE DEFAULT NULL,
+    roster_locked_at DATETIME DEFAULT NULL,
+    roster_locked_by INT DEFAULT NULL,
+    results_locked TINYINT(1) NOT NULL DEFAULT 0,
+    results_lock_date DATE DEFAULT NULL,
+    results_locked_at DATETIME DEFAULT NULL,
+    results_locked_by INT DEFAULT NULL,
+    live_board_enabled TINYINT(1) NOT NULL DEFAULT 1,
+    live_board_updated_at DATETIME DEFAULT NULL,
+    live_board_updated_by INT DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uq_season_year_label (year_label)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS intramural_season_gallery (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    season_id INT NOT NULL,
+    filename VARCHAR(255) NOT NULL,
+    caption VARCHAR(255) DEFAULT NULL,
+    sort_order INT NOT NULL DEFAULT 0,
+    uploaded_by INT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_gallery_season (season_id, sort_order)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS intramural_divisions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    description TEXT,
+    sort_order INT NOT NULL DEFAULT 0,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_division_name (name)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS intramural_teams (
@@ -257,6 +329,7 @@ CREATE TABLE IF NOT EXISTS intramural_teams (
     color VARCHAR(20) DEFAULT '#1a5276',
     logo VARCHAR(255) DEFAULT NULL,
     department VARCHAR(100) DEFAULT NULL,
+    division_id INT DEFAULT NULL,
     coach_name VARCHAR(100) DEFAULT NULL,
     unit_manager_id INT DEFAULT NULL,
     coach_user_id INT DEFAULT NULL,
@@ -265,8 +338,7 @@ CREATE TABLE IF NOT EXISTS intramural_teams (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uq_team_name (name),
-    FOREIGN KEY (unit_manager_id) REFERENCES users(id) ON DELETE SET NULL,
-    FOREIGN KEY (coach_user_id) REFERENCES users(id) ON DELETE SET NULL
+    FOREIGN KEY (division_id) REFERENCES intramural_divisions(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS intramural_point_schemes (
@@ -288,21 +360,66 @@ CREATE TABLE IF NOT EXISTS intramural_sports (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
     description TEXT,
-    category ENUM('men', 'women', 'mixed') NOT NULL DEFAULT 'mixed',
+    category ENUM('men', 'women', 'mixed') NOT NULL DEFAULT 'men',
+    event_group ENUM('sports_competition', 'socio_cultural') NOT NULL DEFAULT 'sports_competition',
+    players_per_event INT DEFAULT NULL,
     scoring_method ENUM('points', 'sets', 'games', 'time') NOT NULL DEFAULT 'points',
     rules TEXT,
+    guidelines TEXT,
     schedule_notes TEXT,
-    tournament_format ENUM('round_robin', 'single_elimination', 'single_elimination_consolation', 'double_elimination', 'group_knockout', 'rank_first_to_last', 'team_play_sds', 'custom') NOT NULL DEFAULT 'round_robin',
+    venue VARCHAR(150) DEFAULT NULL,
+    game_duration_minutes INT NOT NULL DEFAULT 60,
+    tournament_format ENUM('round_robin', 'single_elimination', 'single_elimination_consolation', 'modified_single_elimination_consolation', 'double_elimination', 'group_knockout', 'rank_first_to_last', 'team_play_sds', 'team_play_sds_consolation', 'custom') NOT NULL DEFAULT 'round_robin',
     format_notes TEXT,
     win_points INT NOT NULL DEFAULT 3,
     draw_points INT NOT NULL DEFAULT 1,
     loss_points INT NOT NULL DEFAULT 0,
     point_scheme_id INT DEFAULT NULL,
-    is_active TINYINT(1) NOT NULL DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uq_sport_name_category (name, category),
+    INDEX idx_sport_event_group (event_group),
     FOREIGN KEY (point_scheme_id) REFERENCES intramural_point_schemes(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS intramural_event_results_locks (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    season_id INT NOT NULL,
+    sport_id INT NOT NULL,
+    locked_at DATETIME DEFAULT NULL,
+    locked_by INT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_event_results_lock (season_id, sport_id),
+    INDEX idx_event_results_lock_sport (sport_id),
+    FOREIGN KEY (season_id) REFERENCES intramural_seasons(id) ON DELETE CASCADE,
+    FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE,
+    FOREIGN KEY (locked_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS intramural_division_sports (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    division_id INT NOT NULL,
+    sport_id INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_division_sport (division_id, sport_id),
+    FOREIGN KEY (division_id) REFERENCES intramural_divisions(id) ON DELETE CASCADE,
+    FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS intramural_event_team_positions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    division_id INT NOT NULL,
+    sport_id INT NOT NULL,
+    team_id INT NOT NULL,
+    position TINYINT UNSIGNED NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_div_sport_position (division_id, sport_id, position),
+    UNIQUE KEY uq_div_sport_team (division_id, sport_id, team_id),
+    FOREIGN KEY (division_id) REFERENCES intramural_divisions(id) ON DELETE CASCADE,
+    FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE,
+    FOREIGN KEY (team_id) REFERENCES intramural_teams(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS intramural_athletes (
@@ -313,7 +430,7 @@ CREATE TABLE IF NOT EXISTS intramural_athletes (
     last_name VARCHAR(50) NOT NULL,
     gender ENUM('male', 'female', 'other') NOT NULL DEFAULT 'male',
     birthdate DATE DEFAULT NULL,
-    department VARCHAR(100) DEFAULT NULL,
+    department VARCHAR(150) DEFAULT NULL,
     year_level VARCHAR(20) DEFAULT NULL,
     team_id INT DEFAULT NULL,
     photo VARCHAR(255) DEFAULT NULL,
@@ -324,6 +441,17 @@ CREATE TABLE IF NOT EXISTS intramural_athletes (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uq_athlete_student_id (student_id),
     FOREIGN KEY (team_id) REFERENCES intramural_teams(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS athlete_courses (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(150) NOT NULL,
+    code VARCHAR(40) DEFAULT NULL,
+    sort_order INT NOT NULL DEFAULT 0,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_athlete_course_name (name)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS intramural_registrations (
@@ -342,6 +470,20 @@ CREATE TABLE IF NOT EXISTS intramural_registrations (
     FOREIGN KEY (athlete_id) REFERENCES intramural_athletes(id) ON DELETE CASCADE,
     FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE,
     FOREIGN KEY (team_id) REFERENCES intramural_teams(id) ON DELETE RESTRICT
+) ENGINE=InnoDB;
+
+-- One tournament manager per event + season
+CREATE TABLE IF NOT EXISTS intramural_event_managers (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    season_id INT NOT NULL,
+    sport_id INT NOT NULL,
+    manager_user_id INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_sport_season_manager (sport_id, season_id),
+    FOREIGN KEY (season_id) REFERENCES intramural_seasons(id) ON DELETE RESTRICT,
+    FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE,
+    FOREIGN KEY (manager_user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 -- One coach account per team + event + season
@@ -364,6 +506,7 @@ CREATE TABLE IF NOT EXISTS intramural_matches (
     id INT AUTO_INCREMENT PRIMARY KEY,
     season_id INT NOT NULL,
     sport_id INT NOT NULL,
+    division_id INT DEFAULT NULL,
     round_number INT NOT NULL DEFAULT 1,
     round_label VARCHAR(80) DEFAULT NULL,
     match_order INT NOT NULL DEFAULT 0,
@@ -372,6 +515,7 @@ CREATE TABLE IF NOT EXISTS intramural_matches (
     team_b_id INT DEFAULT NULL,
     scheduled_at DATETIME DEFAULT NULL,
     venue VARCHAR(150) DEFAULT NULL,
+    game_number INT DEFAULT NULL,
     referee_name VARCHAR(100) DEFAULT NULL,
     status ENUM('scheduled', 'ongoing', 'completed', 'cancelled', 'forfeit') NOT NULL DEFAULT 'scheduled',
     score_a INT DEFAULT NULL,
@@ -384,11 +528,111 @@ CREATE TABLE IF NOT EXISTS intramural_matches (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (season_id) REFERENCES intramural_seasons(id) ON DELETE RESTRICT,
     FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE,
+    FOREIGN KEY (division_id) REFERENCES intramural_divisions(id) ON DELETE SET NULL,
     FOREIGN KEY (team_a_id) REFERENCES intramural_teams(id) ON DELETE RESTRICT,
     FOREIGN KEY (team_b_id) REFERENCES intramural_teams(id) ON DELETE RESTRICT,
     FOREIGN KEY (winner_team_id) REFERENCES intramural_teams(id) ON DELETE SET NULL,
     FOREIGN KEY (forfeit_team_id) REFERENCES intramural_teams(id) ON DELETE SET NULL,
     FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS intramural_event_ranks (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    season_id INT NOT NULL,
+    sport_id INT NOT NULL,
+    division_id INT NOT NULL DEFAULT 0,
+    team_id INT NOT NULL,
+    place_rank INT NOT NULL,
+    notes VARCHAR(255) DEFAULT NULL,
+    created_by INT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_event_rank_team (season_id, sport_id, division_id, team_id),
+    UNIQUE KEY uq_event_rank_place (season_id, sport_id, division_id, place_rank),
+    FOREIGN KEY (season_id) REFERENCES intramural_seasons(id) ON DELETE CASCADE,
+    FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE,
+    FOREIGN KEY (team_id) REFERENCES intramural_teams(id) ON DELETE CASCADE,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+-- Judging rubrics for socio-cultural events (criteria + panel scores that determine ranks)
+CREATE TABLE IF NOT EXISTS intramural_event_rubric_criteria (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    sport_id INT NOT NULL,
+    name VARCHAR(150) NOT NULL,
+    description TEXT DEFAULT NULL,
+    max_points DECIMAL(8,2) NOT NULL DEFAULT 10.00,
+    sort_order INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_rubric_criterion (sport_id, name),
+    INDEX idx_rubric_sport_order (sport_id, sort_order),
+    FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS intramural_event_rubric_scores (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    season_id INT NOT NULL,
+    sport_id INT NOT NULL,
+    division_id INT NOT NULL DEFAULT 0,
+    team_id INT NOT NULL,
+    criterion_id INT NOT NULL,
+    score DECIMAL(8,2) NOT NULL DEFAULT 0,
+    scored_by INT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_rubric_score (season_id, sport_id, division_id, team_id, criterion_id),
+    INDEX idx_rubric_score_event (season_id, sport_id, division_id),
+    FOREIGN KEY (season_id) REFERENCES intramural_seasons(id) ON DELETE CASCADE,
+    FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE,
+    FOREIGN KEY (team_id) REFERENCES intramural_teams(id) ON DELETE CASCADE,
+    FOREIGN KEY (criterion_id) REFERENCES intramural_event_rubric_criteria(id) ON DELETE CASCADE,
+    FOREIGN KEY (scored_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+-- Admin can activate Event Rankings for tournament managers per event/season
+CREATE TABLE IF NOT EXISTS intramural_event_tm_ranking (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    season_id INT NOT NULL,
+    sport_id INT NOT NULL,
+    enabled_at DATETIME DEFAULT NULL,
+    enabled_by INT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_event_tm_ranking (season_id, sport_id),
+    INDEX idx_event_tm_ranking_sport (sport_id),
+    FOREIGN KEY (season_id) REFERENCES intramural_seasons(id) ON DELETE CASCADE,
+    FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE,
+    FOREIGN KEY (enabled_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS working_committees (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    season_id INT DEFAULT NULL,
+    name VARCHAR(150) NOT NULL,
+    category ENUM('overall', 'sporting_events', 'socio_cultural') NOT NULL DEFAULT 'overall',
+    description TEXT DEFAULT NULL,
+    sort_order INT NOT NULL DEFAULT 0,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_working_committee_season_name (season_id, name),
+    INDEX idx_wc_category (category),
+    INDEX idx_wc_season (season_id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS working_committee_members (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    committee_id INT NOT NULL,
+    full_name VARCHAR(150) NOT NULL,
+    position_title VARCHAR(120) DEFAULT NULL,
+    organization VARCHAR(150) DEFAULT NULL,
+    sort_order INT NOT NULL DEFAULT 0,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_wc_member_committee (committee_id),
+    FOREIGN KEY (committee_id) REFERENCES working_committees(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 INSERT INTO intramural_seasons (name, year_label, start_date, end_date, description, is_active) VALUES
@@ -405,28 +649,48 @@ INSERT INTO intramural_point_schemes (name, description, points_1, points_2, poi
 ('Racket & Dance Sports', 'Badminton, Table Tennis, Pickleball, Lawn Tennis, Dance Sports', 8, 6, 4, 3, 2, 1),
 ('Athletics & Chess', 'Athletics and Chess', 6, 5, 4, 3, 2, 1);
 
-INSERT INTO intramural_sports (name, description, category, scoring_method, point_scheme_id, win_points) VALUES
-('Basketball 5x5', '5-on-5 basketball', 'mixed', 'points', 1, 3),
-('Basketball 3x3', '3-on-3 basketball', 'mixed', 'points', 1, 3),
-('Volleyball', 'Indoor volleyball', 'mixed', 'sets', 1, 3),
-('Sepak Takraw', 'Sepak takraw tournament', 'mixed', 'sets', 1, 3),
-('MLBB/CODM', 'Mobile Legends / Call of Duty Mobile', 'mixed', 'games', 1, 3),
-('Badminton', 'Badminton singles/doubles', 'mixed', 'games', 2, 3),
-('Table Tennis', 'Table tennis', 'mixed', 'games', 2, 3),
-('Pickleball', 'Pickleball', 'mixed', 'games', 2, 3),
-('Lawn Tennis', 'Lawn tennis', 'mixed', 'games', 2, 3),
-('Athletics', 'Track and field', 'mixed', 'points', 3, 3),
-('Chess', 'Chess', 'mixed', 'games', 3, 3),
-('Baseball', 'Baseball', 'mixed', 'points', 1, 3),
-('Softball', 'Softball', 'mixed', 'points', 1, 3),
-('Frisbee', 'Ultimate frisbee', 'mixed', 'points', 1, 3),
-('Dance Sports', 'Dance sports', 'mixed', 'points', 2, 3),
-('Mass Power Dance', 'Mass power dance', 'mixed', 'points', 1, 3);
+INSERT INTO intramural_sports (name, description, category, scoring_method, point_scheme_id, win_points, players_per_event, tournament_format, format_notes) VALUES
+('Basketball 5x5', '5-on-5 basketball', 'men', 'points', 1, 3, 12, 'round_robin', NULL),
+('Basketball 5x5', '5-on-5 basketball', 'women', 'points', 1, 3, 12, 'round_robin', NULL),
+('Basketball 3x3', '3-on-3 basketball', 'men', 'points', 1, 3, 4, 'round_robin', NULL),
+('Basketball 3x3', '3-on-3 basketball', 'women', 'points', 1, 3, 4, 'round_robin', NULL),
+('Volleyball', 'Indoor volleyball', 'men', 'sets', 1, 3, 12, 'round_robin', NULL),
+('Volleyball', 'Indoor volleyball', 'women', 'sets', 1, 3, 12, 'round_robin', NULL),
+('Sepak Takraw', 'Sepak takraw tournament', 'men', 'sets', 1, 3, 6, 'single_elimination_consolation', 'Single elimination with consolation. Each team tie is 1st, 2nd, and 3rd Regu (best of 3). Final winner = Champion, Final loser = 1st Runner Up; consolation winner = 3rd, loser = 4th.'),
+('Sepak Takraw', 'Sepak takraw tournament', 'women', 'sets', 1, 3, 6, 'single_elimination_consolation', 'Single elimination with consolation. Each team tie is 1st, 2nd, and 3rd Regu (best of 3). Final winner = Champion, Final loser = 1st Runner Up; consolation winner = 3rd, loser = 4th.'),
+('MLBB/CODM', 'Mobile Legends / Call of Duty Mobile', 'men', 'games', 1, 3, 5, 'round_robin', NULL),
+('MLBB/CODM', 'Mobile Legends / Call of Duty Mobile', 'women', 'games', 1, 3, 5, 'round_robin', NULL),
+('Badminton', 'Badminton singles/doubles', 'men', 'games', 2, 3, 6, 'team_play_sds', 'Team Play SDS — single elimination, each team tie is Singles, Doubles, Singles (best of 3)'),
+('Badminton', 'Badminton singles/doubles', 'women', 'games', 2, 3, 6, 'team_play_sds', 'Team Play SDS — single elimination, each team tie is Singles, Doubles, Singles (best of 3)'),
+('Table Tennis', 'Table tennis', 'men', 'games', 2, 3, 4, 'team_play_sds', 'Team Play SDS — single elimination, each team tie is Singles, Doubles, Singles (best of 3)'),
+('Table Tennis', 'Table tennis', 'women', 'games', 2, 3, 4, 'team_play_sds', 'Team Play SDS — single elimination, each team tie is Singles, Doubles, Singles (best of 3)'),
+('Pickleball', 'Pickleball', 'men', 'games', 2, 3, 4, 'round_robin', NULL),
+('Pickleball', 'Pickleball', 'women', 'games', 2, 3, 4, 'round_robin', NULL),
+('Lawn Tennis', 'Lawn tennis', 'men', 'games', 2, 3, 4, 'team_play_sds', 'Team Play SDS — single elimination, each team tie is Singles, Doubles, Singles (best of 3)'),
+('Lawn Tennis', 'Lawn tennis', 'women', 'games', 2, 3, 4, 'team_play_sds', 'Team Play SDS — single elimination, each team tie is Singles, Doubles, Singles (best of 3)'),
+('Athletics', 'Track and field', 'men', 'points', 3, 3, 25, 'round_robin', NULL),
+('Athletics', 'Track and field', 'women', 'points', 3, 3, 25, 'round_robin', NULL),
+('Chess', 'Chess team competition — board wins decide team match score', 'men', 'games', 3, 3, 4, 'round_robin', 'Set boards per team when generating matches (default from roster size / 4 boards)'),
+('Chess', 'Chess team competition — board wins decide team match score', 'women', 'games', 3, 3, 4, 'round_robin', 'Set boards per team when generating matches (default from roster size / 4 boards)'),
+('Baseball', 'Baseball', 'men', 'points', 1, 3, 15, 'round_robin', NULL),
+('Baseball', 'Baseball', 'women', 'points', 1, 3, 15, 'round_robin', NULL),
+('Softball', 'Softball', 'men', 'points', 1, 3, 15, 'round_robin', NULL),
+('Softball', 'Softball', 'women', 'points', 1, 3, 15, 'round_robin', NULL),
+('Frisbee', 'Ultimate frisbee', 'men', 'points', 1, 3, 10, 'round_robin', NULL),
+('Frisbee', 'Ultimate frisbee', 'women', 'points', 1, 3, 10, 'round_robin', NULL),
+('Dance Sports', 'Dance sports', 'men', 'points', 2, 3, 8, 'round_robin', NULL),
+('Dance Sports', 'Dance sports', 'women', 'points', 2, 3, 8, 'round_robin', NULL),
+('Mass Power Dance', 'Mass power dance', 'men', 'points', 1, 3, 20, 'round_robin', NULL),
+('Mass Power Dance', 'Mass power dance', 'women', 'points', 1, 3, 20, 'round_robin', NULL);
 
-UPDATE intramural_sports
-SET tournament_format = 'team_play_sds',
-    format_notes = 'Team Play SDS — single elimination; each team tie is Singles, Doubles, Singles (best of 3)'
-WHERE name IN ('Badminton', 'Table Tennis', 'Lawn Tennis');
+UPDATE intramural_sports SET event_group = 'socio_cultural' WHERE name IN ('Mass Power Dance');
+
+INSERT INTO intramural_sports (name, description, category, event_group, scoring_method, point_scheme_id, win_points, players_per_event, tournament_format, format_notes) VALUES
+('Visual Arts', 'Visual arts competition', 'mixed', 'socio_cultural', 'points', 1, 3, 4, 'rank_first_to_last', 'Placement by judging or manual ranks. Results count toward overall standing and medal tally.'),
+('Literary Arts', 'Extemporaneous speaking, storytelling, dagliang talumpati, pagkukuwento', 'mixed', 'socio_cultural', 'points', 1, 3, 8, 'rank_first_to_last', 'Placement by judging or manual ranks. Results count toward overall standing and medal tally.'),
+('Quiz Bowl', 'Quiz bowl', 'mixed', 'socio_cultural', 'points', 1, 3, 5, 'rank_first_to_last', 'Placement by judging or manual ranks. Results count toward overall standing and medal tally.'),
+('Music', 'Solo (Pop), Duet (Pop), Kundiman', 'mixed', 'socio_cultural', 'points', 1, 3, 8, 'rank_first_to_last', 'Placement by judging or manual ranks. Results count toward overall standing and medal tally.'),
+('Dance Arts', 'Folk, Street, and Contemporary dance', 'mixed', 'socio_cultural', 'points', 1, 3, 12, 'rank_first_to_last', 'Placement by judging or manual ranks. Results count toward overall standing and medal tally.');
 
 -- Link users.team_id after teams exist
 ALTER TABLE users
@@ -447,3 +711,7 @@ UPDATE intramural_teams SET unit_manager_id = (SELECT id FROM users WHERE userna
 UPDATE intramural_teams SET unit_manager_id = (SELECT id FROM users WHERE username = 'um_red'), coach_user_id = (SELECT id FROM users WHERE username = 'coach_red'), coach_name = 'Coach Red' WHERE id = 2;
 UPDATE intramural_teams SET unit_manager_id = (SELECT id FROM users WHERE username = 'um_green'), coach_user_id = (SELECT id FROM users WHERE username = 'coach_green'), coach_name = 'Coach Green' WHERE id = 3;
 UPDATE intramural_teams SET unit_manager_id = (SELECT id FROM users WHERE username = 'um_gold'), coach_user_id = (SELECT id FROM users WHERE username = 'coach_gold'), coach_name = 'Coach Gold' WHERE id = 4;
+
+ALTER TABLE intramural_teams
+    ADD CONSTRAINT fk_team_unit_manager FOREIGN KEY (unit_manager_id) REFERENCES users(id) ON DELETE SET NULL,
+    ADD CONSTRAINT fk_team_coach_user FOREIGN KEY (coach_user_id) REFERENCES users(id) ON DELETE SET NULL;

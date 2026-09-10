@@ -28,11 +28,12 @@ $password = password_hash('admin123', PASSWORD_DEFAULT);
 $exists = $db->prepare('SELECT id FROM users WHERE username = ?');
 $exists->execute(['tabulator']);
 if (!$exists->fetchColumn()) {
-    $stmt = $db->prepare('INSERT INTO users (username, email, password, first_name, last_name, department, role) VALUES (?, ?, ?, ?, ?, ?, ?)');
+    $stmt = $db->prepare('INSERT INTO users (username, email, password, password_plain, first_name, last_name, department, role) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
     $stmt->execute([
         'tabulator',
         'tabulator@jhcsc.edu.ph',
         $password,
+        'admin123',
         'Match',
         'Tabulator',
         'Sports Unit',
@@ -40,7 +41,7 @@ if (!$exists->fetchColumn()) {
     ]);
     echo "Created demo user: tabulator / admin123\n";
 } else {
-    $db->prepare("UPDATE users SET role = 'tabulator', password = ? WHERE username = 'tabulator'")->execute([$password]);
+    $db->prepare("UPDATE users SET role = 'tabulator', password = ?, password_plain = ? WHERE username = 'tabulator'")->execute([$password, 'admin123']);
     echo "Updated demo user: tabulator / admin123\n";
 }
 

@@ -35,6 +35,8 @@ require_once __DIR__ . '/../includes/header.php';
     <button onclick="printReport()" class="btn btn-outline-secondary no-print"><i class="bi bi-printer"></i> Print</button>
 </div>
 
+<?= renderReportHeader('Inventory Report', ['meta' => $category ? 'Category filter applied' : 'All categories']) ?>
+
 <div class="filter-bar no-print mb-4">
     <form method="GET" class="d-flex gap-2">
         <select name="category" class="form-select" style="max-width:250px">
@@ -76,6 +78,7 @@ require_once __DIR__ . '/../includes/header.php';
     </div>
 </div>
 
-<p class="text-muted mt-3 small">Generated on <?= date('F d, Y h:i A') ?> | <?= APP_CAMPUS ?></p>
+<p class="text-muted mt-3 small no-print">Generated on <?= date('F d, Y h:i A') ?> | <?= sanitize(APP_CAMPUS) ?></p>
+<?= renderReportFooter('Inventory Report') ?>
 
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>

@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
-requireLogin();
+requireAthletesDirectoryAccess();
 
 $db = getDB();
 $id = (int) get('id');
@@ -59,7 +59,7 @@ require __DIR__ . '/../_season_bar.php';
                 <dl class="row mb-0">
                     <dt class="col-5">Gender</dt><dd class="col-7"><?= ucfirst($athlete['gender']) ?></dd>
                     <dt class="col-5">Birthdate</dt><dd class="col-7"><?= $athlete['birthdate'] ? formatDate($athlete['birthdate']) : '-' ?></dd>
-                    <dt class="col-5">Department</dt><dd class="col-7"><?= sanitize($athlete['department'] ?: '-') ?></dd>
+                    <dt class="col-5">Course</dt><dd class="col-7"><?= sanitize($athlete['department'] ?: '-') ?></dd>
                     <dt class="col-5">Year Level</dt><dd class="col-7"><?= sanitize($athlete['year_level'] ?: '-') ?></dd>
                     <dt class="col-5">Email</dt><dd class="col-7"><?= sanitize($athlete['email'] ?: '-') ?></dd>
                     <dt class="col-5">Phone</dt><dd class="col-7"><?= sanitize($athlete['phone'] ?: '-') ?></dd>
@@ -72,19 +72,20 @@ require __DIR__ . '/../_season_bar.php';
             <div class="card-header">Sports & Events</div>
             <div class="card-body p-0">
                 <table class="table mb-0">
-                    <thead class="table-light"><tr><th>Sport</th><th>Team</th><th>Jersey</th><th>Position</th><th>Event</th></tr></thead>
+                    <thead class="table-light"><tr><th>Event</th><th>Category</th><th>Team</th><th>Jersey</th><th>Position</th><th>Division</th></tr></thead>
                     <tbody>
                         <?php foreach ($regs as $r): ?>
                         <tr>
-                            <td><?= sanitize($r['sport_name']) ?> (<?= ucfirst($r['category']) ?>)</td>
+                            <td><strong><?= sanitize($r['sport_name']) ?></strong></td>
+                            <td><span class="badge bg-secondary"><?= sanitize(ucfirst($r['category'])) ?></span></td>
                             <td style="color:<?= sanitize($r['color']) ?>"><?= sanitize($r['team_name']) ?></td>
-                            <td><?= sanitize($r['jersey_number'] ?: '-') ?></td>
-                            <td><?= sanitize($r['position'] ?: '-') ?></td>
-                            <td><?= sanitize($r['event_category'] ?: '-') ?></td>
+                            <td><?= sanitize($r['jersey_number'] ?: '—') ?></td>
+                            <td><?= sanitize($r['position'] ?: '—') ?></td>
+                            <td><?= sanitize($r['event_category'] ?: '—') ?></td>
                         </tr>
                         <?php endforeach; ?>
                         <?php if (empty($regs)): ?>
-                        <tr><td colspan="5" class="text-muted p-3">Not assigned to any sport yet.</td></tr>
+                        <tr><td colspan="6" class="text-muted p-3">Not assigned to any event yet.</td></tr>
                         <?php endif; ?>
                     </tbody>
                 </table>

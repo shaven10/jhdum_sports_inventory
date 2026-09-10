@@ -174,6 +174,8 @@ require_once __DIR__ . '/../includes/header.php';
     </div>
 </div>
 
+<?= renderReportHeader('Analytics & Infographics', ['meta' => 'Year: ' . (int) $year]) ?>
+
 <div class="row g-3 mb-4">
     <div class="col-6 col-md-4 col-xl-2">
         <div class="card analytics-stat"><div class="value"><?= (int) ($summaryStats['total_requests'] ?? 0) ?></div><div class="label">Total Requests</div></div>
@@ -278,7 +280,8 @@ require_once __DIR__ . '/../includes/header.php';
     </div>
 </div>
 
-<p class="text-muted mt-3 small">Generated on <?= date('F d, Y h:i A') ?> | <?= APP_CAMPUS ?> | Year: <?= $year ?></p>
+<p class="text-muted mt-3 small no-print">Generated on <?= date('F d, Y h:i A') ?> | <?= sanitize(APP_CAMPUS) ?> | Year: <?= $year ?></p>
+<?= renderReportFooter('Analytics Report · Year ' . (int) $year) ?>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>

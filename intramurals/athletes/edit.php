@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
-requireLogin();
+requireAthletesDirectoryAccess();
 
 $db = getDB();
 $id = (int) get('id');
@@ -15,8 +15,11 @@ if (!$athlete) {
 
 $athleteTeamId = !empty($athlete['team_id']) ? (int) $athlete['team_id'] : null;
 $canEditProfile = canManageIntramurals() || ($athleteTeamId !== null && canManageTeamAthletes($athleteTeamId));
-$canEditRoster = canManageIntramurals()
+$canViewRoster = canManageIntramurals()
     || ($athleteTeamId !== null && canManageTeamRoster($athleteTeamId));
+$rosterLockStatus = getRosterLockStatus();
+$rosterLocked = $rosterLockStatus['is_locked'];
+$canEditRoster = $canViewRoster && !$rosterLocked;
 
 if (!$canEditProfile && !$canEditRoster) {
     flash('error', 'You can only manage athletes for your assigned team/events.');
@@ -44,14 +47,18 @@ if (canManageIntramurals()) {
     $teams = [];
 }
 
-$allSports = $db->query('SELECT * FROM intramural_sports WHERE is_active = 1 ORDER BY name, category')->fetchAll();
+$allSports = $db->query('SELECT * FROM intramural_sports ORDER BY ' . intramuralSportsOrderBy())->fetchAll();
 // Coaches may only assign their coached events
 $sports = $allSports;
 if ($isCoach && $athleteTeamId) {
     $allowedSportIds = getCoachSportIdsForTeam($athleteTeamId);
     $sports = array_values(array_filter($allSports, fn($s) => in_array((int) $s['id'], $allowedSportIds, true)));
 }
+if ($athleteTeamId) {
+    $sports = filterSportsForTeamDivision($sports, $athleteTeamId);
+}
 $errors = [];
+ensureIntramuralDivisionsSchema();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!verifyCsrf(post('csrf_token'))) {
@@ -74,6 +81,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'add_sport') {
         requireWritableSeason();
+        requireUnlockedRoster();
         $sportId = (int) post('sport_id');
         $regTeamId = (int) post('reg_team_id');
         if (hasRole('unit_manager') && $userTeamId) {
@@ -89,7 +97,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('error', 'Sport, team, and an active season are required.');
         } elseif (!canManageTeamRoster($regTeamId, $sportId)) {
             flash('error', 'You can only manage events you are assigned to coach.');
+        } elseif (!teamCanPlaySport($regTeamId, $sportId)) {
+            flash('error', 'That event is not available for this team\'s division.');
         } else {
+            $cap = checkTeamEventRosterCapacity($regTeamId, $sportId, (int) $seasonId, 1, $id);
+            if (!$cap['ok']) {
+                flash('error', $cap['message']);
+            } else {
             try {
                 $db->prepare('INSERT INTO intramural_registrations (season_id, athlete_id, sport_id, team_id, event_category, jersey_number, position) VALUES (?, ?, ?, ?, ?, ?, ?)')
                     ->execute([$seasonId, $id, $sportId, $regTeamId, $eventCategory ?: null, $jersey ?: null, $position ?: null]);
@@ -98,12 +112,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } catch (PDOException $e) {
                 flash('error', 'Athlete is already registered for this sport in the current season.');
             }
+            }
         }
         redirect(BASE_URL . '/intramurals/athletes/edit.php?id=' . $id);
     }
 
     if ($action === 'remove_sport') {
         requireWritableSeason();
+        requireUnlockedRoster();
         $regId = (int) post('reg_id');
         $reg = $db->prepare('SELECT * FROM intramural_registrations WHERE id = ? AND athlete_id = ?');
         $reg->execute([$regId, $id]);
@@ -127,12 +143,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     $studentId = post('student_id');
-    $firstName = post('first_name');
-    $lastName = post('last_name');
+    $firstName = formatAthleteName(trim(post('first_name')));
+    $lastName = formatAthleteName(trim(post('last_name')));
     $gender = post('gender', 'male');
     $birthdate = post('birthdate') ?: null;
     $department = post('department');
     $yearLevel = post('year_level');
+    $allowedCourses = athleteCourseOptions();
+    if ($department === '') {
+        $errors[] = 'Course / program is required.';
+    } elseif (!in_array($department, $allowedCourses, true) && $department !== (string) ($athlete['department'] ?? '')) {
+        $errors[] = 'Please select a valid course.';
+    }
+    if ($yearLevel === '') {
+        $errors[] = 'Year level is required.';
+    } elseif (!in_array($yearLevel, athleteYearLevelOptions(), true) && $yearLevel !== (string) ($athlete['year_level'] ?? '')) {
+        $errors[] = 'Please select a valid year level.';
+    }
     $teamId = (int) post('team_id') ?: null;
     $email = post('email');
     $phone = post('phone');
@@ -164,11 +191,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if (empty($errors)) {
-        $stmt = $db->prepare('UPDATE intramural_athletes SET student_id=?, first_name=?, last_name=?, gender=?, birthdate=?, department=?, year_level=?, team_id=?, photo=?, email=?, phone=? WHERE id=?');
-        $stmt->execute([$studentId, $firstName, $lastName, $gender, $birthdate, $department, $yearLevel, $teamId, $photo, $email, $phone, $id]);
-        auditLog($_SESSION['user_id'], 'update', 'intramural_athlete', $id, null, ['student_id' => $studentId]);
-        flash('success', 'Athlete updated.');
-        redirect(BASE_URL . '/intramurals/athletes/view.php?id=' . $id);
+        try {
+            $stmt = $db->prepare('UPDATE intramural_athletes SET student_id=?, first_name=?, last_name=?, gender=?, birthdate=?, department=?, year_level=?, team_id=?, photo=?, email=?, phone=? WHERE id=?');
+            $stmt->execute([
+                $studentId,
+                $firstName,
+                $lastName,
+                $gender,
+                $birthdate ?: null,
+                $department !== '' ? $department : null,
+                $yearLevel !== '' ? $yearLevel : null,
+                $teamId,
+                $photo,
+                $email !== '' ? $email : null,
+                $phone !== '' ? $phone : null,
+                $id,
+            ]);
+            auditLog($_SESSION['user_id'], 'update', 'intramural_athlete', $id, null, ['student_id' => $studentId]);
+            flash('success', 'Athlete updated.');
+            redirect(BASE_URL . '/intramurals/athletes/view.php?id=' . $id);
+        } catch (PDOException $e) {
+            $errors[] = 'Could not save athlete information. Please check the fields and try again.';
+        }
     }
 }
 
@@ -206,17 +250,17 @@ require __DIR__ . '/../_season_bar.php';
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">First Name *</label>
-                            <input type="text" name="first_name" class="form-control" required value="<?= sanitize($athlete['first_name']) ?>">
+                            <input type="text" name="first_name" class="form-control text-uppercase" required style="text-transform: uppercase;" value="<?= sanitize($athlete['first_name']) ?>">
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">Last Name *</label>
-                            <input type="text" name="last_name" class="form-control" required value="<?= sanitize($athlete['last_name']) ?>">
+                            <input type="text" name="last_name" class="form-control text-uppercase" required style="text-transform: uppercase;" value="<?= sanitize($athlete['last_name']) ?>">
                         </div>
                         <div class="col-md-3">
                             <label class="form-label">Gender</label>
                             <select name="gender" class="form-select">
                                 <?php foreach (['male', 'female', 'other'] as $g): ?>
-                                <option value="<?= $g ?>" <?= $athlete['gender'] === $g ? 'selected' : '' ?>><?= ucfirst($g) ?></option>
+                                <option value="<?= $g ?>" <?= ($athlete['gender'] ?? '') === $g ? 'selected' : '' ?>><?= ucfirst($g) ?></option>
                                 <?php endforeach; ?>
                             </select>
                         </div>
@@ -225,8 +269,24 @@ require __DIR__ . '/../_season_bar.php';
                             <input type="date" name="birthdate" class="form-control" value="<?= sanitize($athlete['birthdate'] ?? '') ?>">
                         </div>
                         <div class="col-md-3">
-                            <label class="form-label">Year Level</label>
-                            <input type="text" name="year_level" class="form-control" value="<?= sanitize($athlete['year_level'] ?? '') ?>">
+                            <label class="form-label">Year Level <span class="text-danger">*</span></label>
+                            <select name="year_level" class="form-select" required>
+                                <option value="">Select year</option>
+                                <?php
+                                $currentYear = (string) ($athlete['year_level'] ?? '');
+                                $yearMatched = false;
+                                foreach (athleteYearLevelOptions() as $yl):
+                                    $isYear = $currentYear === $yl;
+                                    if ($isYear) {
+                                        $yearMatched = true;
+                                    }
+                                ?>
+                                <option value="<?= sanitize($yl) ?>" <?= $isYear ? 'selected' : '' ?>><?= sanitize($yl) ?></option>
+                                <?php endforeach; ?>
+                                <?php if ($currentYear !== '' && !$yearMatched): ?>
+                                <option value="<?= sanitize($currentYear) ?>" selected><?= sanitize($currentYear) ?></option>
+                                <?php endif; ?>
+                            </select>
                         </div>
                         <div class="col-md-3">
                             <label class="form-label">Team / House</label>
@@ -238,8 +298,8 @@ require __DIR__ . '/../_season_bar.php';
                             </select>
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label">Department</label>
-                            <input type="text" name="department" class="form-control" value="<?= sanitize($athlete['department'] ?? '') ?>">
+                            <label class="form-label">Course <span class="text-danger">*</span></label>
+                            <?= renderAthleteCourseSelect((string) ($athlete['department'] ?? ''), 'department', 'department', true) ?>
                         </div>
                         <div class="col-md-3">
                             <label class="form-label">Email</label>
@@ -274,13 +334,28 @@ require __DIR__ . '/../_season_bar.php';
     </div>
     <?php endif; ?>
     <div class="col-lg-5">
-        <?php if ($canEditRoster): ?>
+        <?php if ($rosterLocked && shouldShowRosterLockStatus()): ?>
+        <div class="alert alert-warning">
+            <i class="bi bi-lock-fill"></i> The roster is locked<?= !empty($rosterLockStatus['lock_date']) ? ' (effective ' . sanitize(formatDate($rosterLockStatus['lock_date'])) . ')' : '' ?>.
+            Sport assignments cannot be added or removed until an administrator unlocks it.
+        </div>
+        <?php elseif (!$rosterLocked && shouldShowRosterLockStatus() && $rosterLockStatus['is_scheduled'] && !empty($rosterLockStatus['lock_date'])): ?>
+        <div class="alert alert-info">
+            <i class="bi bi-calendar-event"></i> Roster will lock on <strong><?= sanitize(formatDate($rosterLockStatus['lock_date'])) ?></strong>. Complete sport assignments before that date.
+        </div>
+        <?php endif; ?>
+        <?php if ($canViewRoster): ?>
         <div class="card mb-3">
             <div class="card-header">Sport Assignments</div>
             <ul class="list-group list-group-flush">
                 <?php foreach ($regs as $r): ?>
-                <?php $canManageThis = canManageTeamRoster((int) $r['team_id'], (int) $r['sport_id']); ?>
-                <?php if ($isCoach && !$canManageThis) continue; ?>
+                <?php
+                $canSeeThis = canManageTeamRoster((int) $r['team_id'], (int) $r['sport_id']);
+                if ($isCoach && !$canSeeThis) {
+                    continue;
+                }
+                $canManageThis = $canEditRoster && $canSeeThis;
+                ?>
                 <li class="list-group-item">
                     <div class="d-flex justify-content-between align-items-start">
                         <div>
@@ -303,6 +378,7 @@ require __DIR__ . '/../_season_bar.php';
                 <?php endif; ?>
             </ul>
         </div>
+        <?php if ($canEditRoster): ?>
         <div class="card">
             <div class="card-header">Assign to <?= $isCoach ? 'Your Event' : 'Sport' ?></div>
             <div class="card-body">
@@ -315,10 +391,7 @@ require __DIR__ . '/../_season_bar.php';
                     <div class="mb-2">
                         <label class="form-label">Event / Sport</label>
                         <select name="sport_id" class="form-select" required>
-                            <option value="">Select</option>
-                            <?php foreach ($sports as $s): ?>
-                            <option value="<?= $s['id'] ?>"><?= sanitize(sportLabel($s)) ?></option>
-                            <?php endforeach; ?>
+                            <?= renderSportSelectOptions($sports, null, true, 'Select') ?>
                         </select>
                     </div>
                     <div class="mb-2">
@@ -339,6 +412,7 @@ require __DIR__ . '/../_season_bar.php';
                 <?php endif; ?>
             </div>
         </div>
+        <?php endif; ?>
         <?php endif; ?>
     </div>
 </div>

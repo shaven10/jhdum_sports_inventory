@@ -1,16 +1,24 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
-requireLogin();
-// Intramurals reports are available to all intramurals viewers (including tabulator / team roles)
+requireIntramuralsAccess();
+
+if (isTournamentManager() && !canManageIntramurals()) {
+    requireMatchResultsAccess();
+}
+
+if (isPublishStaff() && !canViewIntramuralsReports()) {
+    flash('error', 'You do not have permission to view intramurals reports.');
+    redirect(getHomeUrl());
+}
 
 $db = getDB();
 $seasonId = getCurrentSeasonId();
-$type = get('type', 'athletes');
+$type = get('type', isTournamentManager() && !canManageIntramurals() ? 'results' : 'athletes');
 $sportId = get('sport');
 $teamId = get('team');
 $export = get('export');
 
-$sports = $db->query('SELECT * FROM intramural_sports WHERE is_active = 1 ORDER BY name, category')->fetchAll();
+$sports = filterSportsForUser($db->query('SELECT * FROM intramural_sports ORDER BY ' . intramuralSportsOrderBy())->fetchAll());
 $teams = $db->query('SELECT * FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll();
 
 $titleMap = [
@@ -19,8 +27,17 @@ $titleMap = [
     'schedules' => 'Game Schedules',
     'results' => 'Match Results',
     'medals' => 'Medal Tally',
+    'overall' => 'Overall Standing',
     'standings' => 'Team Standings',
 ];
+if (isTournamentManager() && !canManageIntramurals()) {
+    $titleMap = array_intersect_key($titleMap, array_flip(getTabulatorReportTypes()));
+    if (!array_key_exists($type, $titleMap)) {
+        $type = 'results';
+    }
+} elseif (isPublishStaff()) {
+    // Secretariat and publication may access all report types
+}
 $reportTitle = $titleMap[$type] ?? 'Intramurals Report';
 
 $headers = [];
@@ -35,9 +52,9 @@ if ($type === 'athletes') {
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
     $data = $stmt->fetchAll();
-    $headers = ['Code', 'Student ID', 'Name', 'Gender', 'Team', 'Department', 'Year Level'];
+    $headers = ['Code', 'Student ID', 'Name', 'Gender', 'Team', 'Course', 'Year Level'];
     foreach ($data as $r) {
-        $rows[] = [$r['athlete_code'], $r['student_id'], athleteFullName($r), ucfirst($r['gender']), $r['team_name'] ?: '', $r['department'] ?: '', $r['year_level'] ?: ''];
+        $rows[] = [$r['athlete_code'], $r['student_id'], athleteFullNameReport($r), ucfirst($r['gender']), $r['team_name'] ?: '', $r['department'] ?: '', $r['year_level'] ?: ''];
         $htmlRows[] = $rows[count($rows) - 1];
     }
 } elseif ($type === 'rosters') {
@@ -57,7 +74,7 @@ if ($type === 'athletes') {
     $data = $stmt->fetchAll();
     $headers = ['Sport', 'Category', 'Team', 'Athlete', 'Student ID', 'Jersey', 'Position', 'Event'];
     foreach ($data as $r) {
-        $rows[] = [$r['sport_name'], ucfirst($r['category']), $r['team_name'], athleteFullName($r), $r['student_id'], $r['jersey_number'] ?: '', $r['position'] ?: '', $r['event_category'] ?: ''];
+        $rows[] = [$r['sport_name'], ucfirst($r['category']), $r['team_name'], athleteFullNameReport($r), $r['student_id'], $r['jersey_number'] ?: '', $r['position'] ?: '', $r['event_category'] ?: ''];
         $htmlRows[] = $rows[count($rows) - 1];
     }
 } elseif ($type === 'schedules') {
@@ -69,13 +86,14 @@ if ($type === 'athletes') {
     $params = [];
     if ($seasonId) { $sql .= ' AND m.season_id = ?'; $params[] = $seasonId; }
     if ($sportId !== '') { $sql .= ' AND m.sport_id = ?'; $params[] = (int) $sportId; }
+    appendTmSportFilter($sql, $params);
     $sql .= ' ORDER BY m.scheduled_at';
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
     $data = $stmt->fetchAll();
-    $headers = ['Date/Time', 'Sport', 'Category', 'Team A', 'Team B', 'Venue', 'Referee', 'Status'];
+    $headers = ['Date/Time', 'Game #', 'Sport', 'Category', 'Team A', 'Team B', 'Venue', 'Referee', 'Status'];
     foreach ($data as $r) {
-        $rows[] = [formatDateTime($r['scheduled_at']), $r['sport_name'], ucfirst($r['category']), $r['team_a_name'], $r['team_b_name'], $r['venue'] ?: '', $r['referee_name'] ?: '', ucfirst($r['status'])];
+        $rows[] = [formatDateTime($r['scheduled_at']), $r['game_number'] ?: '', $r['sport_name'], ucfirst($r['category']), $r['team_a_name'], $r['team_b_name'], $r['venue'] ?: '', $r['referee_name'] ?: '', ucfirst($r['status'])];
         $htmlRows[] = $rows[count($rows) - 1];
     }
 } elseif ($type === 'results') {
@@ -89,32 +107,114 @@ if ($type === 'athletes') {
     $params = [];
     if ($seasonId) { $sql .= ' AND m.season_id = ?'; $params[] = $seasonId; }
     if ($sportId !== '') { $sql .= ' AND m.sport_id = ?'; $params[] = (int) $sportId; }
+    appendTmSportFilter($sql, $params);
     $sql .= ' ORDER BY m.scheduled_at DESC';
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
     $data = $stmt->fetchAll();
-    $headers = ['Date', 'Sport', 'Team A', 'Score A', 'Score B', 'Team B', 'Winner', 'Status'];
+    $headers = ['Date', 'Game #', 'Sport', 'Team A', 'Score A', 'Score B', 'Team B', 'Winner', 'Status'];
     foreach ($data as $r) {
-        $rows[] = [formatDateTime($r['scheduled_at']), $r['sport_name'], $r['team_a_name'], $r['score_a'], $r['score_b'], $r['team_b_name'], $r['winner_name'] ?: 'Draw', ucfirst($r['status'])];
+        $rows[] = [formatDateTime($r['scheduled_at']), $r['game_number'] ?: '', $r['sport_name'], $r['team_a_name'], $r['score_a'], $r['score_b'], $r['team_b_name'], $r['winner_name'] ?: 'Draw', ucfirst($r['status'])];
         $htmlRows[] = $rows[count($rows) - 1];
     }
 } elseif ($type === 'medals') {
     $overall = computeOverallStandings();
-    $headers = ['Rank', 'Team', 'Gold', 'Silver', 'Bronze', 'Total Points'];
-    foreach ($overall['standings'] as $r) {
-        $rows[] = [$r['rank'], $r['team_name'], $r['gold'], $r['silver'], $r['bronze'], $r['total']];
-        $htmlRows[] = $rows[count($rows) - 1];
+    $headers = ['Division', 'Rank', 'Team', 'Gold', 'Silver', 'Bronze', 'Total Medals', 'Total Points'];
+    foreach ($overall['by_division'] ?? [] as $group) {
+        foreach ($group['medal_tally'] as $r) {
+            $medalTotal = (int) ($r['medal_total'] ?? ($r['gold'] + $r['silver'] + $r['bronze']));
+            if ($medalTotal === 0 && (int) $r['total'] === 0) {
+                continue;
+            }
+            $row = [
+                $group['division_name'],
+                $r['medal_rank'],
+                $r['team_name'],
+                $r['gold'],
+                $r['silver'],
+                $r['bronze'],
+                $medalTotal,
+                $r['total'],
+            ];
+            $rows[] = $row;
+            $htmlRows[] = $row;
+        }
+    }
+} elseif ($type === 'overall') {
+    $overall = computeOverallStandings();
+    $headers = ['Division', 'Events', 'Rank', 'Team', 'Event', 'Points', 'Total Points', 'Gold', 'Silver', 'Bronze'];
+    foreach ($overall['by_division'] ?? [] as $group) {
+        $labels = $group['sport_labels'] ?? [];
+        $eventCount = count($labels);
+        foreach ($group['standings'] as $r) {
+            if ($labels === []) {
+                $row = [
+                    $group['division_name'],
+                    0,
+                    $r['division_rank'] ?? $r['rank'],
+                    $r['team_name'],
+                    '',
+                    0,
+                    $r['total'],
+                    $r['gold'],
+                    $r['silver'],
+                    $r['bronze'],
+                ];
+                $rows[] = $row;
+                $htmlRows[] = $row;
+                continue;
+            }
+            foreach ($labels as $label) {
+                $row = [
+                    $group['division_name'],
+                    $eventCount,
+                    $r['division_rank'] ?? $r['rank'],
+                    $r['team_name'],
+                    $label,
+                    $r['sports'][$label] ?? 0,
+                    $r['total'],
+                    $r['gold'],
+                    $r['silver'],
+                    $r['bronze'],
+                ];
+                $rows[] = $row;
+                $htmlRows[] = $row;
+            }
+        }
     }
 } elseif ($type === 'standings') {
     $sid = $sportId !== '' ? (int) $sportId : ((int) ($sports[0]['id'] ?? 0));
+    if ($sid && !canViewEvent($sid)) {
+        $sid = (int) ($sports[0]['id'] ?? 0);
+    }
     $blocks = $sid ? computeSportStandings($sid) : [];
     $block = $blocks[$sid] ?? null;
-    $headers = ['Rank', 'Placement', 'Team', 'Wins', 'Losses', 'Draws', 'Match Pts', 'Event Pts', 'Diff'];
+    $headers = ['Division', 'Rank', 'Placement', 'Team', 'Wins', 'Losses', 'Draws', 'Match Pts', 'Event Pts', 'Diff'];
     if ($block) {
-        foreach ($block['standings'] as $r) {
-            if ($r['played'] === 0) continue;
-            $rows[] = [$r['rank'], $r['placement_label'] ?: '', $r['team_name'], $r['wins'], $r['losses'], $r['draws'], $r['points'], $r['placement_points'], $r['diff']];
-            $htmlRows[] = $rows[count($rows) - 1];
+        $divBlocks = $block['divisions'] ?? [[
+            'division_name' => 'All teams',
+            'standings' => $block['standings'] ?? [],
+        ]];
+        foreach ($divBlocks as $divBlock) {
+            foreach ($divBlock['standings'] as $r) {
+                if ($r['played'] === 0 && empty($r['manual_rank'])) {
+                    continue;
+                }
+                $row = [
+                    $divBlock['division_name'],
+                    $r['rank'] >= 1000 ? '' : $r['rank'],
+                    $r['placement_label'] ?: '',
+                    $r['team_name'],
+                    $r['wins'],
+                    $r['losses'],
+                    $r['draws'],
+                    $r['points'],
+                    $r['placement_points'],
+                    $r['diff'],
+                ];
+                $rows[] = $row;
+                $htmlRows[] = $row;
+            }
         }
     }
 }
@@ -134,9 +234,12 @@ require __DIR__ . '/../_season_bar.php';
         <p class="text-muted mb-0">Printable reports with Excel/PDF export</p>
     </div>
     <div class="d-flex gap-2">
+        <?php if (isAdmin() || isPublishStaff()): ?>
+        <a class="btn btn-outline-warning" href="<?= BASE_URL ?>/intramurals/reports/certificates.php"><i class="bi bi-award"></i> Certificate of Recognition</a>
+        <?php endif; ?>
         <a class="btn btn-outline-success" href="?type=<?= urlencode($type) ?>&sport=<?= urlencode($sportId) ?>&team=<?= urlencode($teamId) ?>&export=excel"><i class="bi bi-file-earmark-excel"></i> Export Excel</a>
         <button class="btn btn-outline-secondary" onclick="printReport()"><i class="bi bi-printer"></i> Print / PDF</button>
-        <a href="<?= BASE_URL ?>/intramurals/index.php" class="btn btn-outline-secondary">Back</a>
+        <a href="<?= getHomeUrl() ?>" class="btn btn-outline-secondary">Back</a>
     </div>
 </div>
 
@@ -154,9 +257,7 @@ require __DIR__ . '/../_season_bar.php';
             <label class="form-label">Sport</label>
             <select name="sport" class="form-select">
                 <option value="">All / Default</option>
-                <?php foreach ($sports as $s): ?>
-                <option value="<?= $s['id'] ?>" <?= $sportId === (string) $s['id'] ? 'selected' : '' ?>><?= sanitize(sportLabel($s)) ?></option>
-                <?php endforeach; ?>
+                <?= renderSportSelectOptions($sports, $sportId) ?>
             </select>
         </div>
         <div class="col-md-3">
@@ -172,13 +273,19 @@ require __DIR__ . '/../_season_bar.php';
     </form>
 </div>
 
+<?= renderReportHeader($reportTitle, [
+    'meta' => (function_exists('getCurrentSeason') && getCurrentSeason())
+        ? ('Season: ' . seasonLabel(getCurrentSeason()))
+        : '',
+]) ?>
+
 <div class="card">
     <div class="card-header d-flex justify-content-between">
         <span><?= sanitize($reportTitle) ?></span>
-        <small class="text-muted"><?= APP_CAMPUS ?> · <?= date('M d, Y h:i A') ?></small>
+        <small class="text-muted"><?= sanitize(APP_CAMPUS) ?> · <?= date('M d, Y h:i A') ?></small>
     </div>
     <div class="card-body p-0">
-        <div class="table-responsive">
+        <div class="standings-scroll-wrap">
             <table class="table table-sm table-striped mb-0">
                 <thead class="table-light">
                     <tr><?php foreach ($headers as $h): ?><th><?= sanitize($h) ?></th><?php endforeach; ?></tr>
@@ -197,5 +304,6 @@ require __DIR__ . '/../_season_bar.php';
 </div>
 
 <p class="text-muted small mt-2 no-print">For PDF: click Print / PDF and choose “Save as PDF”.</p>
+<?= renderReportFooter($reportTitle) ?>
 
 <?php require_once __DIR__ . '/../../includes/footer.php'; ?>

@@ -51,11 +51,12 @@ foreach ($teams as $team) {
     $managerId = $exists->fetchColumn();
 
     if (!$managerId) {
-        $stmt = $db->prepare('INSERT INTO users (username, email, password, first_name, last_name, department, role, team_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+        $stmt = $db->prepare('INSERT INTO users (username, email, password, password_plain, first_name, last_name, department, role, team_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
         $stmt->execute([
             $managerUser,
             $managerUser . '@jhcsc.edu.ph',
             $password,
+            'coach123',
             'Unit',
             'Manager (' . ($team['short_name'] ?: $team['name']) . ')',
             $team['department'],
@@ -72,11 +73,12 @@ foreach ($teams as $team) {
     $coachId = $exists->fetchColumn();
 
     if (!$coachId) {
-        $stmt = $db->prepare('INSERT INTO users (username, email, password, first_name, last_name, department, role, team_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+        $stmt = $db->prepare('INSERT INTO users (username, email, password, password_plain, first_name, last_name, department, role, team_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
         $stmt->execute([
             $coachUser,
             $coachUser . '@jhcsc.edu.ph',
             $password,
+            'coach123',
             'Coach',
             ($team['short_name'] ?: $team['name']),
             $team['department'],

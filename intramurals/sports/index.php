@@ -1,9 +1,20 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
-requireLogin();
+requireSportsCatalogAccess();
+ensurePlayersPerEventColumn();
+ensureSportCategoryEnum();
+ensureSportVenueColumn();
+ensureSportGuidelinesColumn();
+ensureSportGameDurationColumn();
+ensureTournamentFormatEnum();
+ensureEventManagersTable();
 
 $db = getDB();
-$errors = [];
+$formState = null;
+if (!empty($_SESSION['sport_form'])) {
+    $formState = $_SESSION['sport_form'];
+    unset($_SESSION['sport_form']);
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && canManageIntramurals()) {
     if (!verifyCsrf(post('csrf_token'))) {
@@ -16,76 +27,115 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && canManageIntramurals()) {
     if ($action === 'add' || $action === 'edit') {
         $id = (int) post('id');
         $name = post('name');
-        $category = post('category', 'mixed');
+        $category = post('category', 'men');
+        $eventGroup = normalizeSportEventGroup(post('event_group', 'sports_competition'));
         $description = post('description');
         $scoring = post('scoring_method', 'points');
         $rules = post('rules');
+        $guidelines = trim(post('guidelines'));
         $scheduleNotes = post('schedule_notes');
+        $venue = post('venue');
+        $gameDurationMinutes = post('game_duration_minutes') !== ''
+            ? normalizeGameDurationMinutes((int) post('game_duration_minutes'))
+            : DEFAULT_GAME_DURATION_MINUTES;
         $tournamentFormat = post('tournament_format', 'round_robin');
         $formatNotes = post('format_notes');
         $winPoints = max(0, (int) post('win_points', '3'));
         $drawPoints = max(0, (int) post('draw_points', '1'));
         $lossPoints = max(0, (int) post('loss_points', '0'));
         $pointSchemeId = (int) post('point_scheme_id') ?: null;
+        $playersPerEvent = post('players_per_event') !== '' ? max(1, (int) post('players_per_event')) : null;
+        $errors = [];
 
         if ($name === '') {
             $errors[] = 'Sport name is required.';
         }
-        if (!in_array($category, ['men', 'women', 'mixed'], true)) {
+        if (!array_key_exists($category, sportCategoryOptions())) {
             $errors[] = 'Invalid category.';
+        }
+        if (!array_key_exists($eventGroup, sportEventGroupOptions())) {
+            $errors[] = 'Invalid event group.';
         }
         if (!array_key_exists($tournamentFormat, tournamentFormatLabels())) {
             $errors[] = 'Invalid tournament format.';
+        }
+        if ($playersPerEvent !== null && $playersPerEvent < 1) {
+            $errors[] = 'Players per event must be at least 1.';
+        }
+        if ($gameDurationMinutes < MIN_GAME_DURATION_MINUTES || $gameDurationMinutes > MAX_GAME_DURATION_MINUTES) {
+            $errors[] = 'Estimated game duration must be between ' . MIN_GAME_DURATION_MINUTES . ' and ' . MAX_GAME_DURATION_MINUTES . ' minutes.';
         }
 
         if (empty($errors)) {
             if ($action === 'add') {
                 try {
-                    $stmt = $db->prepare('INSERT INTO intramural_sports (name, description, category, scoring_method, rules, schedule_notes, tournament_format, format_notes, win_points, draw_points, loss_points, point_scheme_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-                    $stmt->execute([$name, $description, $category, $scoring, $rules, $scheduleNotes, $tournamentFormat, $formatNotes ?: null, $winPoints, $drawPoints, $lossPoints, $pointSchemeId]);
-                    auditLog($_SESSION['user_id'], 'create', 'intramural_sport', (int) $db->lastInsertId(), null, ['name' => $name, 'category' => $category, 'tournament_format' => $tournamentFormat]);
-                    flash('success', 'Sport added successfully.');
+                    $stmt = $db->prepare('INSERT INTO intramural_sports (name, description, category, event_group, players_per_event, scoring_method, rules, guidelines, schedule_notes, venue, game_duration_minutes, tournament_format, format_notes, win_points, draw_points, loss_points, point_scheme_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+                    $stmt->execute([$name, $description, $category, $eventGroup, $playersPerEvent, $scoring, $rules, $guidelines !== '' ? $guidelines : null, $scheduleNotes, $venue ?: null, $gameDurationMinutes, $tournamentFormat, $formatNotes ?: null, $winPoints, $drawPoints, $lossPoints, $pointSchemeId]);
+                    $newSportId = (int) $db->lastInsertId();
+                    if ($eventGroup === 'socio_cultural') {
+                        seedDefaultRubricForSport($newSportId, $name);
+                    }
+                    auditLog($_SESSION['user_id'], 'create', 'intramural_sport', $newSportId, null, ['name' => $name, 'category' => $category, 'event_group' => $eventGroup, 'tournament_format' => $tournamentFormat, 'venue' => $venue]);
+                    flash('success', 'Event added successfully.');
+                    redirect(BASE_URL . '/intramurals/sports/index.php');
                 } catch (PDOException $e) {
-                    flash('error', 'Sport with this name and category already exists.');
+                    $errors[] = 'Sport with this name and category already exists.';
                 }
             } else {
                 try {
-                    $stmt = $db->prepare('UPDATE intramural_sports SET name=?, description=?, category=?, scoring_method=?, rules=?, schedule_notes=?, tournament_format=?, format_notes=?, win_points=?, draw_points=?, loss_points=?, point_scheme_id=? WHERE id=?');
-                    $stmt->execute([$name, $description, $category, $scoring, $rules, $scheduleNotes, $tournamentFormat, $formatNotes ?: null, $winPoints, $drawPoints, $lossPoints, $pointSchemeId, $id]);
-                    auditLog($_SESSION['user_id'], 'update', 'intramural_sport', $id, null, ['name' => $name, 'tournament_format' => $tournamentFormat]);
-                    flash('success', 'Sport updated successfully.');
+                    $stmt = $db->prepare('UPDATE intramural_sports SET name=?, description=?, category=?, event_group=?, players_per_event=?, scoring_method=?, rules=?, schedule_notes=?, venue=?, game_duration_minutes=?, tournament_format=?, format_notes=?, win_points=?, draw_points=?, loss_points=?, point_scheme_id=? WHERE id=?');
+                    $stmt->execute([$name, $description, $category, $eventGroup, $playersPerEvent, $scoring, $rules, $scheduleNotes, $venue ?: null, $gameDurationMinutes, $tournamentFormat, $formatNotes ?: null, $winPoints, $drawPoints, $lossPoints, $pointSchemeId, $id]);
+                    if ($eventGroup === 'socio_cultural') {
+                        seedDefaultRubricForSport($id, $name);
+                    }
+                    auditLog($_SESSION['user_id'], 'update', 'intramural_sport', $id, null, ['name' => $name, 'event_group' => $eventGroup, 'tournament_format' => $tournamentFormat, 'venue' => $venue]);
+                    flash('success', 'Event updated successfully.');
+                    redirect(BASE_URL . '/intramurals/sports/index.php');
                 } catch (PDOException $e) {
-                    flash('error', 'Could not update sport (duplicate name/category?).');
+                    $errors[] = 'Could not update sport (duplicate name/category?).';
                 }
             }
-            redirect(BASE_URL . '/intramurals/sports/index.php');
+        }
+
+        if (!empty($errors)) {
+            $_SESSION['sport_form'] = [
+                'mode' => $action,
+                'id' => $id,
+                'errors' => $errors,
+                'data' => [
+                    'name' => $name,
+                    'category' => $category,
+                    'event_group' => $eventGroup,
+                    'description' => $description,
+                    'scoring_method' => $scoring,
+                    'rules' => $rules,
+                    'guidelines' => $guidelines,
+                    'schedule_notes' => $scheduleNotes,
+                    'venue' => $venue,
+                    'game_duration_minutes' => $gameDurationMinutes,
+                    'tournament_format' => $tournamentFormat,
+                    'format_notes' => $formatNotes,
+                    'win_points' => $winPoints,
+                    'draw_points' => $drawPoints,
+                    'loss_points' => $lossPoints,
+                    'point_scheme_id' => $pointSchemeId,
+                    'players_per_event' => $playersPerEvent ?? '',
+                ],
+            ];
+            redirect(BASE_URL . '/intramurals/sports/index.php' . ($action === 'edit' && $id ? '?edit=' . $id : ''));
         }
     }
 
     if ($action === 'delete') {
         $id = (int) post('id');
-        $db->prepare('UPDATE intramural_sports SET is_active = 0 WHERE id = ?')->execute([$id]);
+        $db->prepare('DELETE FROM intramural_sports WHERE id = ?')->execute([$id]);
         auditLog($_SESSION['user_id'], 'delete', 'intramural_sport', $id);
-        flash('success', 'Sport deactivated.');
-        redirect(BASE_URL . '/intramurals/sports/index.php');
-    }
-
-    if ($action === 'restore') {
-        $id = (int) post('id');
-        $db->prepare('UPDATE intramural_sports SET is_active = 1 WHERE id = ?')->execute([$id]);
-        flash('success', 'Sport restored.');
+        flash('success', 'Event removed.');
         redirect(BASE_URL . '/intramurals/sports/index.php');
     }
 }
 
 $editId = (int) get('edit');
-$editSport = null;
-if ($editId) {
-    $stmt = $db->prepare('SELECT * FROM intramural_sports WHERE id = ?');
-    $stmt->execute([$editId]);
-    $editSport = $stmt->fetch() ?: null;
-}
-
 $seasonId = getCurrentSeasonId();
 $regCount = $seasonId
     ? '(SELECT COUNT(*) FROM intramural_registrations r WHERE r.sport_id = s.id AND r.season_id = ' . (int) $seasonId . ')'
@@ -93,212 +143,593 @@ $regCount = $seasonId
 $matchCount = $seasonId
     ? '(SELECT COUNT(*) FROM intramural_matches m WHERE m.sport_id = s.id AND m.season_id = ' . (int) $seasonId . ')'
     : '(SELECT COUNT(*) FROM intramural_matches m WHERE m.sport_id = s.id)';
+$tmJoin = $seasonId
+    ? 'LEFT JOIN intramural_event_managers em ON em.sport_id = s.id AND em.season_id = ' . (int) $seasonId . '
+    LEFT JOIN users tm ON em.manager_user_id = tm.id'
+    : 'LEFT JOIN intramural_event_managers em ON em.sport_id = s.id
+    LEFT JOIN users tm ON em.manager_user_id = tm.id';
 $sports = $db->query("SELECT s.*, ps.name as scheme_name, ps.points_1, ps.points_2, ps.points_3, ps.points_4, ps.points_5, ps.points_6,
+    tm.first_name as tm_first_name, tm.last_name as tm_last_name, tm.username as tm_username,
     $regCount as athlete_count,
     $matchCount as match_count
     FROM intramural_sports s
     LEFT JOIN intramural_point_schemes ps ON s.point_scheme_id = ps.id
-    ORDER BY s.is_active DESC, s.name, s.category")->fetchAll();
+    $tmJoin
+    ORDER BY " . intramuralSportsOrderBy('s'))->fetchAll();
 $pointSchemes = getAllPointSchemes(true);
 
-$pageTitle = 'Sports Management';
+$formDefaults = [
+    'name' => '',
+    'category' => 'men',
+    'event_group' => 'sports_competition',
+    'description' => '',
+    'scoring_method' => 'points',
+    'rules' => '',
+    'guidelines' => '',
+    'schedule_notes' => '',
+    'venue' => '',
+    'game_duration_minutes' => DEFAULT_GAME_DURATION_MINUTES,
+    'tournament_format' => 'round_robin',
+    'format_notes' => '',
+    'win_points' => 3,
+    'draw_points' => 1,
+    'loss_points' => 0,
+    'point_scheme_id' => '',
+    'players_per_event' => '',
+];
+$formData = $formDefaults;
+$formErrors = [];
+$openModal = '';
+
+if ($formState) {
+    $openModal = $formState['mode'];
+    $formErrors = $formState['errors'] ?? [];
+    $formData = array_merge($formDefaults, $formState['data'] ?? []);
+    if ($openModal === 'edit' && !empty($formState['id'])) {
+        $editId = (int) $formState['id'];
+    }
+} elseif ($editId) {
+    $openModal = 'edit';
+    foreach ($sports as $sport) {
+        if ((int) $sport['id'] === $editId) {
+            $formData = [
+                'name' => $sport['name'],
+                'category' => $sport['category'],
+                'event_group' => sportEventGroupOf($sport),
+                'description' => $sport['description'] ?? '',
+                'scoring_method' => $sport['scoring_method'],
+                'rules' => $sport['rules'] ?? '',
+                'guidelines' => $sport['guidelines'] ?? '',
+                'schedule_notes' => $sport['schedule_notes'] ?? '',
+                'venue' => $sport['venue'] ?? '',
+                'game_duration_minutes' => getSportGameDurationMinutes($sport),
+                'tournament_format' => $sport['tournament_format'] ?? 'round_robin',
+                'format_notes' => $sport['format_notes'] ?? '',
+                'win_points' => (int) $sport['win_points'],
+                'draw_points' => (int) $sport['draw_points'],
+                'loss_points' => (int) $sport['loss_points'],
+                'point_scheme_id' => $sport['point_scheme_id'] ?? '',
+                'players_per_event' => $sport['players_per_event'] ?? '',
+            ];
+            break;
+        }
+    }
+}
+
+$pageTitle = 'Events';
+$canManageSports = canManageIntramurals();
+$viewOnlySports = isSportsCatalogViewOnly();
+$sportColumnCount = 10 + ($canManageSports ? 1 : 0);
+$sportsByGroup = groupSportsByEventGroup($sports);
 require_once __DIR__ . '/../../includes/header.php';
 require __DIR__ . '/../_season_bar.php';
 ?>
 
-<div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+<div class="page-header d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
     <div>
-        <h1><i class="bi bi-trophy"></i> Sports Management</h1>
-        <p class="text-muted mb-0">Sports, agreed tournament styles, and placement point schemes</p>
+        <h1 class="mb-1"><i class="bi bi-trophy"></i> Events</h1>
+        <p class="text-muted mb-0">
+            <?= count($sports) ?> event<?= count($sports) === 1 ? '' : 's' ?> · Sports Competition and Socio-Cultural · same roster, matches, ranks, and overall standing
+            <?php if ($viewOnlySports): ?>
+            <span class="badge bg-secondary ms-1">View only</span>
+            <?php endif; ?>
+        </p>
     </div>
-    <div class="d-flex gap-2">
-        <a href="<?= BASE_URL ?>/intramurals/points/index.php" class="btn btn-outline-primary"><i class="bi bi-calculator"></i> Point System</a>
-        <a href="<?= BASE_URL ?>/intramurals/index.php" class="btn btn-outline-secondary">Back</a>
+    <div class="d-flex flex-wrap gap-2 ms-auto">
+        <?php if ($canManageSports): ?>
+        <a href="<?= BASE_URL ?>/intramurals/points/index.php" class="btn btn-sm btn-outline-primary"><i class="bi bi-calculator"></i> Point System</a>
+        <?php endif; ?>
+        <a href="<?= BASE_URL ?>/intramurals/sports/guidelines.php" class="btn btn-sm btn-outline-primary"><i class="bi bi-journal-text"></i> Event Guidelines</a>
+        <?php if (canViewEventRubrics()): ?>
+        <a href="<?= BASE_URL ?>/intramurals/rubrics/index.php" class="btn btn-sm btn-outline-warning"><i class="bi bi-clipboard-check"></i> Event Rubrics</a>
+        <?php endif; ?>
+        <?php if ($canManageSports): ?>
+        <a href="<?= BASE_URL ?>/intramurals/sports/managers.php" class="btn btn-sm btn-outline-primary"><i class="bi bi-person-workspace"></i> Tournament Managers</a>
+        <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#sportModal" data-sport-mode="add">
+            <i class="bi bi-plus-lg"></i> Add Event
+        </button>
+        <?php endif; ?>
+        <a href="<?= $viewOnlySports ? sanitize(getHomeUrl()) : BASE_URL . '/intramurals/index.php' ?>" class="btn btn-sm btn-outline-secondary">Back</a>
     </div>
 </div>
 
-<div class="row g-4">
-    <?php if (canManageIntramurals()): ?>
-    <div class="col-lg-4">
-        <div class="card">
-            <div class="card-header"><?= $editSport ? 'Edit Sport' : 'Add Sport' ?></div>
-            <div class="card-body">
-                <?php if ($errors): ?>
-                <div class="alert alert-danger"><ul class="mb-0"><?php foreach ($errors as $e): ?><li><?= sanitize($e) ?></li><?php endforeach; ?></ul></div>
-                <?php endif; ?>
-                <form method="POST">
-                    <?= csrfField() ?>
-                    <input type="hidden" name="action" value="<?= $editSport ? 'edit' : 'add' ?>">
-                    <?php if ($editSport): ?><input type="hidden" name="id" value="<?= $editSport['id'] ?>"><?php endif; ?>
-                    <div class="mb-3">
-                        <label class="form-label">Sport Name *</label>
-                        <input type="text" name="name" id="sportNameInput" class="form-control" required value="<?= sanitize($editSport['name'] ?? post('name')) ?>">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Category *</label>
-                        <select name="category" class="form-select" required>
-                            <?php foreach (['men' => 'Men', 'women' => 'Women', 'mixed' => 'Mixed'] as $val => $label): ?>
-                            <option value="<?= $val ?>" <?= ($editSport['category'] ?? post('category', 'mixed')) === $val ? 'selected' : '' ?>><?= $label ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Scoring Method</label>
-                        <select name="scoring_method" class="form-select">
-                            <?php foreach (['points', 'sets', 'games', 'time'] as $m): ?>
-                            <option value="<?= $m ?>" <?= ($editSport['scoring_method'] ?? post('scoring_method', 'points')) === $m ? 'selected' : '' ?>><?= ucfirst($m) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Placement Point Scheme</label>
-                        <select name="point_scheme_id" class="form-select">
-                            <option value="">Default (10/7/5/3/2/1)</option>
-                            <?php foreach ($pointSchemes as $ps): ?>
-                            <option value="<?= $ps['id'] ?>" <?= (int) ($editSport['point_scheme_id'] ?? post('point_scheme_id')) === (int) $ps['id'] ? 'selected' : '' ?>>
-                                <?= sanitize($ps['name']) ?> (<?= sanitize(formatSchemePoints($ps)) ?>)
-                            </option>
-                            <?php endforeach; ?>
-                        </select>
-                        <div class="form-text">Used for overall rankings (Champion → 5th Runner Up).</div>
-                    </div>
-                    <div class="row g-2 mb-3">
-                        <div class="col-4"><label class="form-label">Match Win</label><input type="number" name="win_points" class="form-control" min="0" value="<?= (int) ($editSport['win_points'] ?? post('win_points', '3')) ?>"></div>
-                        <div class="col-4"><label class="form-label">Match Draw</label><input type="number" name="draw_points" class="form-control" min="0" value="<?= (int) ($editSport['draw_points'] ?? post('draw_points', '1')) ?>"></div>
-                        <div class="col-4"><label class="form-label">Match Loss</label><input type="number" name="loss_points" class="form-control" min="0" value="<?= (int) ($editSport['loss_points'] ?? post('loss_points', '0')) ?>"></div>
-                    </div>
-                    <div class="form-text mb-3">Match W/D/L points only rank teams within this event.</div>
-                    <div class="mb-3">
-                        <label class="form-label">Description</label>
-                        <textarea name="description" class="form-control" rows="2"><?= sanitize($editSport['description'] ?? post('description')) ?></textarea>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Game Rules</label>
-                        <textarea name="rules" class="form-control" rows="3"><?= sanitize($editSport['rules'] ?? post('rules')) ?></textarea>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Event Schedule Notes</label>
-                        <textarea name="schedule_notes" class="form-control" rows="2"><?= sanitize($editSport['schedule_notes'] ?? post('schedule_notes')) ?></textarea>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Agreed Tournament Style *</label>
-                        <select name="tournament_format" class="form-select" required id="tournamentFormatSelect">
-                            <?php foreach (tournamentFormatLabels() as $val => $label): ?>
-                            <option value="<?= $val ?>" <?= ($editSport['tournament_format'] ?? post('tournament_format', 'round_robin')) === $val ? 'selected' : '' ?>><?= sanitize($label) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                        <div class="form-text" id="sdsFormatHint" style="display:none">
-                            <strong>Team Play SDS (Single Elimination)</strong> — single-elim team bracket;
-                            each tie is Singles → Doubles → Singles (best of 3).
-                            Recommended for Badminton, Table Tennis, and Lawn Tennis.
-                        </div>
-                        <div class="form-text">Tabulators use this when generating match fixtures.</div>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Format Notes (agreed details)</label>
-                        <textarea name="format_notes" class="form-control" rows="2" placeholder="e.g. Best of 3, top 4 advance, seeding rules"><?= sanitize($editSport['format_notes'] ?? post('format_notes')) ?></textarea>
-                    </div>
-                    <div class="d-flex gap-2">
-                        <button type="submit" class="btn btn-primary"><?= $editSport ? 'Update' : 'Add Sport' ?></button>
-                        <?php if ($editSport): ?><a href="<?= BASE_URL ?>/intramurals/sports/index.php" class="btn btn-outline-secondary">Cancel</a><?php endif; ?>
-                    </div>
-                </form>
-            </div>
+<div class="card">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0 align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>Event</th>
+                        <th>Category</th>
+                        <th>Players/Event</th>
+                        <th>Venue</th>
+                        <th>Duration</th>
+                        <th>Tournament Style</th>
+                        <th>Tournament Manager</th>
+                        <th>Placement Scheme</th>
+                        <th>Athletes</th>
+                        <th>Matches</th>
+                        <?php if ($canManageSports): ?><th class="text-end" style="width: 11rem;">Actions</th><?php endif; ?>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if (empty($sports)): ?>
+                    <tr><td colspan="<?= (int) $sportColumnCount ?>" class="text-center text-muted py-4">No events yet.</td></tr>
+                    <?php else: ?>
+                    <?php foreach ($sportsByGroup as $groupKey => $groupSports): ?>
+                    <?php if ($groupSports === []) continue; ?>
+                    <tr class="table-secondary">
+                        <td colspan="<?= (int) $sportColumnCount ?>" class="fw-semibold">
+                            <?php if ($groupKey === 'socio_cultural'): ?>
+                            <i class="bi bi-palette"></i>
+                            <?php else: ?>
+                            <i class="bi bi-trophy"></i>
+                            <?php endif; ?>
+                            <?= sanitize(sportEventGroupLabel($groupKey)) ?>
+                            <span class="badge bg-dark bg-opacity-25 text-dark ms-1"><?= count($groupSports) ?></span>
+                        </td>
+                    </tr>
+                    <?php foreach ($groupSports as $s): ?>
+                    <?php
+                    $sportPayload = htmlspecialchars(json_encode([
+                        'id' => (int) $s['id'],
+                        'name' => $s['name'],
+                        'category' => $s['category'],
+                        'event_group' => sportEventGroupOf($s),
+                        'description' => $s['description'] ?? '',
+                        'scoring_method' => $s['scoring_method'],
+                        'rules' => $s['rules'] ?? '',
+                        'guidelines' => $s['guidelines'] ?? '',
+                        'schedule_notes' => $s['schedule_notes'] ?? '',
+                        'venue' => $s['venue'] ?? '',
+                        'game_duration_minutes' => getSportGameDurationMinutes($s),
+                        'tournament_format' => $s['tournament_format'] ?? 'round_robin',
+                        'format_notes' => $s['format_notes'] ?? '',
+                        'win_points' => (int) $s['win_points'],
+                        'draw_points' => (int) $s['draw_points'],
+                        'loss_points' => (int) $s['loss_points'],
+                        'point_scheme_id' => $s['point_scheme_id'] ?? '',
+                        'players_per_event' => $s['players_per_event'] ?? '',
+                    ], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP), ENT_QUOTES, 'UTF-8');
+                    ?>
+                    <tr>
+                        <td>
+                            <strong><?= sanitize($s['name']) ?></strong>
+                            <?php if ($s['rules']): ?><br><small class="text-muted"><?= sanitize($s['rules']) ?></small><?php endif; ?>
+                        </td>
+                        <td><?= ucfirst($s['category']) ?></td>
+                        <td>
+                            <?php if (!empty($s['players_per_event'])): ?>
+                            <?= (int) $s['players_per_event'] ?>
+                            <?php else: ?>
+                            <span class="text-muted">—</span>
+                            <?php endif; ?>
+                        </td>
+                        <td><?= sanitize($s['venue'] ?: '—') ?></td>
+                        <td><?= sanitize(formatGameDurationMinutes(getSportGameDurationMinutes($s))) ?></td>
+                        <td>
+                            <span class="badge bg-info text-dark"><?= sanitize(tournamentFormatLabel($s['tournament_format'] ?? 'round_robin')) ?></span>
+                            <?php if (!empty($s['format_notes'])): ?>
+                            <br><small class="text-muted"><?= sanitize($s['format_notes']) ?></small>
+                            <?php endif; ?>
+                        </td>
+                        <td>
+                            <?php if (!empty($s['tm_username'])): ?>
+                            <?= sanitize(trim(($s['tm_first_name'] ?? '') . ' ' . ($s['tm_last_name'] ?? ''))) ?>
+                            <br><small class="text-muted"><?= sanitize($s['tm_username']) ?></small>
+                            <?php else: ?>
+                            <span class="badge bg-warning text-dark">Unassigned</span>
+                            <?php endif; ?>
+                        </td>
+                        <td>
+                            <?= sanitize($s['scheme_name'] ?: 'Default') ?>
+                            <br><small class="text-muted"><?= $s['scheme_name'] ? sanitize(formatSchemePoints($s)) : '10/7/5/3/2/1' ?></small>
+                        </td>
+                        <td><?= (int) $s['athlete_count'] ?></td>
+                        <td><?= (int) $s['match_count'] ?></td>
+                        <?php if ($canManageSports): ?>
+                        <td class="text-end text-nowrap">
+                            <?php if (isSocioCulturalSport($s)): ?>
+                            <a href="<?= BASE_URL ?>/intramurals/rubrics/edit.php?sport=<?= (int) $s['id'] ?>"
+                               class="btn btn-sm btn-outline-warning"
+                               title="Event rubric">
+                                <i class="bi bi-clipboard-check"></i>
+                            </a>
+                            <?php endif; ?>
+                            <a href="<?= BASE_URL ?>/intramurals/sports/guidelines.php?sport=<?= (int) $s['id'] ?>"
+                               class="btn btn-sm btn-outline-secondary"
+                               title="Guidelines">
+                                <i class="bi bi-journal-text"></i>
+                            </a>
+                            <button type="button"
+                                    class="btn btn-sm btn-outline-secondary btn-copy-sport"
+                                    data-bs-toggle="modal"
+                                    data-bs-target="#sportModal"
+                                    data-sport-mode="copy"
+                                    data-sport="<?= $sportPayload ?>"
+                                    title="Copy event">
+                                <i class="bi bi-copy"></i>
+                            </button>
+                            <button type="button"
+                                    class="btn btn-sm btn-outline-primary btn-edit-sport"
+                                    data-bs-toggle="modal"
+                                    data-bs-target="#sportModal"
+                                    data-sport-mode="edit"
+                                    data-sport="<?= $sportPayload ?>"
+                                    title="Edit event">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            <form method="POST" class="d-inline">
+                                <?= csrfField() ?>
+                                <input type="hidden" name="id" value="<?= $s['id'] ?>">
+                                <input type="hidden" name="action" value="delete">
+                                <button type="submit" class="btn btn-sm btn-outline-danger" data-confirm="Remove this event? Related registrations and matches will also be deleted." title="Remove"><i class="bi bi-trash"></i></button>
+                            </form>
+                        </td>
+                        <?php endif; ?>
+                    </tr>
+                    <?php endforeach; ?>
+                    <?php endforeach; ?>
+                    <?php endif; ?>
+                </tbody>
+            </table>
         </div>
     </div>
-    <?php endif; ?>
-    <div class="col-lg-<?= canManageIntramurals() ? '8' : '12' ?>">
-        <div class="card">
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                    <table class="table table-hover mb-0">
-                        <thead class="table-light">
-                            <tr>
-                                <th>Sport</th>
-                                <th>Category</th>
-                                <th>Tournament Style</th>
-                                <th>Placement Scheme</th>
-                                <th>Match W/D/L</th>
-                                <th>Athletes</th>
-                                <th>Matches</th>
-                                <th>Status</th>
-                                <?php if (canManageIntramurals()): ?><th>Actions</th><?php endif; ?>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($sports as $s): ?>
-                            <tr class="<?= $s['is_active'] ? '' : 'table-secondary' ?>">
-                                <td>
-                                    <strong><?= sanitize($s['name']) ?></strong>
-                                    <?php if ($s['rules']): ?><br><small class="text-muted"><?= sanitize(strlen($s['rules']) > 60 ? substr($s['rules'], 0, 57) . '...' : $s['rules']) ?></small><?php endif; ?>
-                                </td>
-                                <td><?= ucfirst($s['category']) ?></td>
-                                <td>
-                                    <span class="badge bg-info text-dark"><?= sanitize(tournamentFormatLabel($s['tournament_format'] ?? 'round_robin')) ?></span>
-                                    <?php if (!empty($s['format_notes'])): ?>
-                                    <br><small class="text-muted"><?= sanitize(strlen($s['format_notes']) > 50 ? substr($s['format_notes'], 0, 47) . '...' : $s['format_notes']) ?></small>
-                                    <?php endif; ?>
-                                </td>
-                                <td>
-                                    <?= sanitize($s['scheme_name'] ?: 'Default') ?>
-                                    <br><small class="text-muted"><?= $s['scheme_name'] ? sanitize(formatSchemePoints($s)) : '10/7/5/3/2/1' ?></small>
-                                </td>
-                                <td><?= (int) $s['win_points'] ?>/<?= (int) $s['draw_points'] ?>/<?= (int) $s['loss_points'] ?></td>
-                                <td><?= (int) $s['athlete_count'] ?></td>
-                                <td><?= (int) $s['match_count'] ?></td>
-                                <td><?= $s['is_active'] ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-secondary">Inactive</span>' ?></td>
-                                <?php if (canManageIntramurals()): ?>
-                                <td class="text-nowrap">
-                                    <a href="?edit=<?= $s['id'] ?>" class="btn btn-sm btn-outline-primary">Edit</a>
-                                    <form method="POST" class="d-inline">
-                                        <?= csrfField() ?>
-                                        <input type="hidden" name="id" value="<?= $s['id'] ?>">
-                                        <?php if ($s['is_active']): ?>
-                                        <input type="hidden" name="action" value="delete">
-                                        <button type="submit" class="btn btn-sm btn-outline-danger" data-confirm="Deactivate this sport?">Delete</button>
-                                        <?php else: ?>
-                                        <input type="hidden" name="action" value="restore">
-                                        <button type="submit" class="btn btn-sm btn-outline-success">Restore</button>
-                                        <?php endif; ?>
-                                    </form>
-                                </td>
-                                <?php endif; ?>
-                            </tr>
-                            <?php endforeach; ?>
-                            <?php if (empty($sports)): ?>
-                            <tr><td colspan="9" class="text-muted p-3">No sports yet.</td></tr>
-                            <?php endif; ?>
-                        </tbody>
-                    </table>
+</div>
+
+<?php if (canManageIntramurals()): ?>
+<div class="modal fade" id="sportModal" tabindex="-1" aria-labelledby="sportModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <form method="POST" id="sportForm">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" id="sportAction" value="add">
+                <input type="hidden" name="id" id="sportId" value="">
+                <input type="hidden" name="guidelines" id="sportGuidelines" value="">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="sportModalLabel"><i class="bi bi-plus-lg"></i> Add Event</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
-            </div>
+                <div class="modal-body">
+                    <div id="sportCopyNotice" class="alert alert-info d-none">
+                        <i class="bi bi-copy"></i> Creating a copy — review the name, group, and category, then save to add the new event.
+                    </div>
+                    <div id="sportFormErrors" class="alert alert-danger d-none"></div>
+                    <div class="row g-3">
+                        <div class="col-md-8">
+                            <label class="form-label" for="sportNameInput">Event Name *</label>
+                            <input type="text" name="name" id="sportNameInput" class="form-control" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label" for="sportEventGroup">Event Group *</label>
+                            <select name="event_group" id="sportEventGroup" class="form-select" required>
+                                <?php foreach (sportEventGroupOptions() as $val => $label): ?>
+                                <option value="<?= $val ?>"><?= sanitize($label) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <div class="form-text">Socio-cultural events use the same workflow and count in overall standing / medal tally.</div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label" for="sportCategory">Category *</label>
+                            <select name="category" id="sportCategory" class="form-select" required>
+                                <?php foreach (sportCategoryOptions() as $val => $label): ?>
+                                <option value="<?= $val ?>"><?= $label ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label" for="playersPerEvent">Players per Event</label>
+                            <input type="number" name="players_per_event" id="playersPerEvent" class="form-control" min="1" placeholder="e.g. 12">
+                            <div class="form-text">Max players per team for this event. Leave blank for no limit.</div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label" for="scoringMethod">Scoring Method</label>
+                            <select name="scoring_method" id="scoringMethod" class="form-select">
+                                <?php foreach (['points', 'sets', 'games', 'time'] as $m): ?>
+                                <option value="<?= $m ?>"><?= ucfirst($m) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-8">
+                            <label class="form-label" for="pointSchemeId">Placement Point Scheme</label>
+                            <select name="point_scheme_id" id="pointSchemeId" class="form-select">
+                                <option value="">Default (10/7/5/3/2/1)</option>
+                                <?php foreach ($pointSchemes as $ps): ?>
+                                <option value="<?= $ps['id'] ?>"><?= sanitize($ps['name']) ?> (<?= sanitize(formatSchemePoints($ps)) ?>)</option>
+                                <?php endforeach; ?>
+                            </select>
+                            <div class="form-text">Used for overall rankings (Champion → 5th Runner Up).</div>
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label" for="winPoints">Match Win</label>
+                            <input type="number" name="win_points" id="winPoints" class="form-control" min="0" value="3">
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label" for="drawPoints">Match Draw</label>
+                            <input type="number" name="draw_points" id="drawPoints" class="form-control" min="0" value="1">
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label" for="lossPoints">Match Loss</label>
+                            <input type="number" name="loss_points" id="lossPoints" class="form-control" min="0" value="0">
+                        </div>
+                        <div class="col-12">
+                            <div class="form-text">Match W/D/L points only rank teams within this event.</div>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label" for="sportDescription">Description</label>
+                            <textarea name="description" id="sportDescription" class="form-control" rows="2"></textarea>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label" for="sportRules">Game Rules</label>
+                            <textarea name="rules" id="sportRules" class="form-control" rows="3"></textarea>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="sportVenue">Venue</label>
+                            <input type="text" name="venue" id="sportVenue" class="form-control" placeholder="e.g. Gymnasium Court A">
+                            <div class="form-text">Default venue used when generating matches for this event.</div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="gameDurationMinutes">Estimated game duration (minutes) *</label>
+                            <input type="number" name="game_duration_minutes" id="gameDurationMinutes" class="form-control" min="<?= MIN_GAME_DURATION_MINUTES ?>" max="<?= MAX_GAME_DURATION_MINUTES ?>" value="<?= (int) DEFAULT_GAME_DURATION_MINUTES ?>" required>
+                            <div class="form-text">Used as the time block when auto-scheduling generated matches (e.g. 90 for basketball).</div>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label" for="scheduleNotes">Event Schedule Notes</label>
+                            <textarea name="schedule_notes" id="scheduleNotes" class="form-control" rows="2"></textarea>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label" for="tournamentFormatSelect">Agreed Tournament Style *</label>
+                            <select name="tournament_format" class="form-select" required id="tournamentFormatSelect">
+                                <?php foreach (tournamentFormatLabels() as $val => $label): ?>
+                                <option value="<?= $val ?>"><?= sanitize($label) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <div class="form-text" id="sdsFormatHint" style="display:none">
+                                <strong>Team Play SDS</strong> — each team tie is Singles → Doubles → Singles (best of 3).
+                                Single elimination advances the tie winner. <em>With Consolation</em> also schedules
+                                first-round-loser and 3rd-place SDS ties (championship Final last).
+                                Recommended for Badminton, Table Tennis, and Lawn Tennis.
+                            </div>
+                            <div class="form-text" id="sepakFormatHint" style="display:none">
+                                <strong>Sepak Takraw</strong> — use Single Elimination with Consolation.
+                                Each team tie is 1st, 2nd, and 3rd Regu (best of 3).
+                                Final winner = Champion, Final loser = 1st Runner Up; consolation winner = 3rd, loser = 4th.
+                            </div>
+                            <div class="form-text" id="modifiedConsolationHint" style="display:none">
+                                <strong>Modified Single Elimination w Consolation</strong> — 4 teams only.
+                                Game 1: Team 1 vs Team 2. Game 2: Team 3 vs Team 4.
+                                Game 3: losers of Games 1–2 (loser is 4th). Game 4: winners of Games 1–2.
+                                Game 5: Game 4 loser vs Game 3 winner. Game 6: Game 5 winner vs undefeated Game 4 winner.
+                            </div>
+                            <div class="form-text">Tournament managers use this when generating match fixtures.</div>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label" for="formatNotes">Format Notes (agreed details)</label>
+                            <textarea name="format_notes" id="formatNotes" class="form-control" rows="2" placeholder="e.g. Best of 3, top 4 advance, seeding rules"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="sportFormSubmit">Add Event</button>
+                </div>
+            </form>
         </div>
     </div>
 </div>
 
 <script>
 (function () {
-    const racketSports = <?= json_encode(racketSdsSportNames()) ?>;
+    const modalEl = document.getElementById('sportModal');
+    const form = document.getElementById('sportForm');
+    const sportAction = document.getElementById('sportAction');
+    const sportId = document.getElementById('sportId');
+    const modalTitle = document.getElementById('sportModalLabel');
+    const formSubmit = document.getElementById('sportFormSubmit');
+    const errorsBox = document.getElementById('sportFormErrors');
     const nameInput = document.getElementById('sportNameInput');
     const formatSelect = document.getElementById('tournamentFormatSelect');
     const sdsHint = document.getElementById('sdsFormatHint');
-    if (!nameInput || !formatSelect) return;
+    const sepakHint = document.getElementById('sepakFormatHint');
+    const modifiedConsolationHint = document.getElementById('modifiedConsolationHint');
+    const copyNotice = document.getElementById('sportCopyNotice');
+    const guidelinesInput = document.getElementById('sportGuidelines');
+    const racketSports = <?= json_encode(racketSdsSportNames()) ?>;
+    const existingSports = <?= json_encode(array_map(static fn($s) => [
+        'name' => $s['name'],
+        'category' => $s['category'],
+    ], $sports), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>;
+    let allowAutoSds = true;
+
+    function sportExists(name, category) {
+        const n = (name || '').trim().toLowerCase();
+        return existingSports.some(function (s) {
+            return s.name.trim().toLowerCase() === n && s.category === category;
+        });
+    }
+
+    function suggestCopyFields(data) {
+        const baseName = (data.name || '').trim();
+        let category = data.category || 'men';
+        if (!sportExists(baseName, category)) {
+            return { name: baseName, category: category };
+        }
+        const categories = ['men', 'women', 'mixed'];
+        for (let i = 0; i < categories.length; i++) {
+            const cat = categories[i];
+            if (cat !== category && !sportExists(baseName, cat)) {
+                return { name: baseName, category: cat };
+            }
+        }
+        let copyName = baseName + ' (Copy)';
+        let suffix = 2;
+        while (sportExists(copyName, category)) {
+            copyName = baseName + ' (Copy ' + suffix + ')';
+            suffix++;
+        }
+        return { name: copyName, category: category };
+    }
+
+    function fillSportForm(data) {
+        nameInput.value = data.name || '';
+        document.getElementById('sportEventGroup').value = data.event_group || 'sports_competition';
+        document.getElementById('sportCategory').value = data.category || 'men';
+        document.getElementById('playersPerEvent').value = data.players_per_event ?? '';
+        document.getElementById('scoringMethod').value = data.scoring_method || 'points';
+        document.getElementById('pointSchemeId').value = data.point_scheme_id || '';
+        document.getElementById('winPoints').value = data.win_points ?? 3;
+        document.getElementById('drawPoints').value = data.draw_points ?? 1;
+        document.getElementById('lossPoints').value = data.loss_points ?? 0;
+        document.getElementById('sportDescription').value = data.description || '';
+        document.getElementById('sportRules').value = data.rules || '';
+        document.getElementById('scheduleNotes').value = data.schedule_notes || '';
+        document.getElementById('sportVenue').value = data.venue || '';
+        document.getElementById('gameDurationMinutes').value = data.game_duration_minutes ?? <?= (int) DEFAULT_GAME_DURATION_MINUTES ?>;
+        formatSelect.value = data.tournament_format || 'round_robin';
+        document.getElementById('formatNotes').value = data.format_notes || '';
+        guidelinesInput.value = data.guidelines || '';
+    }
 
     function syncSdsUi() {
         const name = (nameInput.value || '').trim();
         const isRacket = racketSports.some(function (s) { return s.toLowerCase() === name.toLowerCase(); });
-        const isSds = formatSelect.value === 'team_play_sds';
+        const isSds = formatSelect.value === 'team_play_sds' || formatSelect.value === 'team_play_sds_consolation';
+        const isSepak = /sepak/i.test(name);
+        const isModifiedConsolation = formatSelect.value === 'modified_single_elimination_consolation';
         if (sdsHint) sdsHint.style.display = isSds ? '' : 'none';
-        if (isRacket && formatSelect.value === 'round_robin' && !<?= $editSport ? 'true' : 'false' ?>) {
+        if (sepakHint) sepakHint.style.display = isSepak ? '' : 'none';
+        if (modifiedConsolationHint) modifiedConsolationHint.style.display = isModifiedConsolation ? '' : 'none';
+        if (allowAutoSds && isRacket && formatSelect.value === 'round_robin') {
             formatSelect.value = 'team_play_sds';
             if (sdsHint) sdsHint.style.display = '';
+            if (sepakHint) sepakHint.style.display = 'none';
+            if (modifiedConsolationHint) modifiedConsolationHint.style.display = 'none';
+        }
+        if (allowAutoSds && isSepak && formatSelect.value === 'round_robin') {
+            formatSelect.value = 'single_elimination_consolation';
+            if (sepakHint) sepakHint.style.display = '';
+            if (sdsHint) sdsHint.style.display = 'none';
+            if (modifiedConsolationHint) modifiedConsolationHint.style.display = 'none';
         }
     }
 
+    function showErrors(errors) {
+        if (!errors || !errors.length) {
+            errorsBox.classList.add('d-none');
+            return;
+        }
+        errorsBox.innerHTML = '<ul class="mb-0">' + errors.map(function (e) {
+            return '<li>' + String(e).replace(/</g, '&lt;') + '</li>';
+        }).join('') + '</ul>';
+        errorsBox.classList.remove('d-none');
+    }
+
+    function setMode(mode, data) {
+        data = data || {};
+        sportAction.value = mode === 'copy' ? 'add' : mode;
+        sportId.value = mode === 'edit' ? (data.id || '') : '';
+        form.reset();
+        allowAutoSds = mode === 'add' || mode === 'copy';
+
+        if (copyNotice) {
+            copyNotice.classList.toggle('d-none', mode !== 'copy');
+        }
+
+        if (mode === 'add') {
+            modalTitle.innerHTML = '<i class="bi bi-plus-lg"></i> Add Event';
+            formSubmit.textContent = 'Add Event';
+            fillSportForm({});
+        } else if (mode === 'copy') {
+            modalTitle.innerHTML = '<i class="bi bi-copy"></i> Copy Event';
+            formSubmit.textContent = 'Create Copy';
+            const suggested = suggestCopyFields(data);
+            fillSportForm(Object.assign({}, data, suggested, { id: '' }));
+        } else {
+            modalTitle.innerHTML = '<i class="bi bi-pencil"></i> Edit Event';
+            formSubmit.textContent = 'Update Event';
+            allowAutoSds = false;
+            fillSportForm(data);
+        }
+
+        syncSdsUi();
+        showErrors([]);
+    }
+
+    document.querySelectorAll('[data-bs-target="#sportModal"]').forEach(function (trigger) {
+        trigger.addEventListener('click', function () {
+            const mode = this.dataset.sportMode || 'add';
+            let data = {};
+            if ((mode === 'edit' || mode === 'copy') && this.dataset.sport) {
+                try {
+                    data = JSON.parse(this.dataset.sport);
+                } catch (e) {
+                    data = {};
+                }
+            }
+            setMode(mode, data);
+        });
+    });
+
     nameInput.addEventListener('input', syncSdsUi);
-    formatSelect.addEventListener('change', syncSdsUi);
-    syncSdsUi();
+    const eventGroupSelect = document.getElementById('sportEventGroup');
+    if (eventGroupSelect) {
+        eventGroupSelect.addEventListener('change', function () {
+            if (sportAction.value === 'add' && this.value === 'socio_cultural') {
+                document.getElementById('sportCategory').value = 'mixed';
+            }
+        });
+    }
+    formatSelect.addEventListener('change', function () {
+        allowAutoSds = false;
+        syncSdsUi();
+    });
+
+    modalEl.addEventListener('shown.bs.modal', function () {
+        const body = modalEl.querySelector('.modal-body');
+        if (body) {
+            body.scrollTop = 0;
+        }
+    });
+
+    modalEl.addEventListener('hidden.bs.modal', function () {
+        if (window.history.replaceState) {
+            const url = new URL(window.location.href);
+            url.searchParams.delete('edit');
+            window.history.replaceState({}, '', url.pathname + url.search);
+        }
+    });
+
+    const bootMode = <?= json_encode($openModal) ?>;
+    const bootData = <?= json_encode(array_merge(['id' => $editId ?: null], $formData), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>;
+    const bootErrors = <?= json_encode($formErrors, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>;
+
+    if (bootMode) {
+        setMode(bootMode === 'copy' ? 'copy' : bootMode, bootData);
+        showErrors(bootErrors);
+        bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    }
 })();
 </script>
+<?php endif; ?>
 
 <?php require_once __DIR__ . '/../../includes/footer.php'; ?>

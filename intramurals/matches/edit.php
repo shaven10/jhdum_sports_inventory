@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
+requireIntramuralsAccess();
 if (!canManageMatches()) {
     flash('error', 'You do not have permission to edit matches.');
     redirect(BASE_URL . '/intramurals/matches/index.php');
@@ -17,7 +18,17 @@ if (!$match) {
     redirect(BASE_URL . '/intramurals/matches/index.php');
 }
 
-$sports = $db->query('SELECT * FROM intramural_sports WHERE is_active = 1 ORDER BY name, category')->fetchAll();
+requireEventMatchAccess((int) $match['sport_id']);
+requireUnlockedResults(null, (int) $match['sport_id']);
+
+maybeCancelUnneededDecidingRubber($db, $id);
+$stmt->execute([$id]);
+$match = $stmt->fetch();
+$decidingRubberDisabled = isDecidingRubberDisabled($db, $match);
+$decidingRubberDisabledMsg = decidingRubberDisabledMessage($db, $match);
+$decidingRubberDisabledAlert = decidingRubberDisabledAlert($db, $match);
+
+$sports = $db->query('SELECT * FROM intramural_sports ORDER BY ' . intramuralSportsOrderBy())->fetchAll();
 $teams = $db->query('SELECT * FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll();
 $errors = [];
 
@@ -57,6 +68,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!$sportId || !$teamA || !$teamB) $errors[] = 'Sport and both teams are required.';
     if ($teamA === $teamB) $errors[] = 'Teams must be different.';
+    if ($decidingRubberDisabled && $decidingRubberDisabledMsg) {
+        $errors[] = $decidingRubberDisabledMsg;
+    }
+    if (!canManageEventMatches($sportId)) {
+        $errors[] = 'You do not have permission to manage matches for this event.';
+    }
     if ($scheduledAt !== '' && strtotime($scheduledAt) === false) {
         $errors[] = 'Invalid schedule date/time.';
     }
@@ -91,7 +108,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $venue, $referee, $status, $scoreA, $scoreB, $winner, $forfeitTeam, $notes, $id
         ]);
         auditLog($_SESSION['user_id'], 'update', 'intramural_match', $id, null, ['status' => $status, 'score_a' => $scoreA, 'score_b' => $scoreB]);
-        flash('success', 'Match updated.');
+
+        if (!empty($match['season_id'])) {
+            recalculateVenueGameNumbers((int) $match['season_id']);
+        }
+
+        maybeCancelUnneededDecidingRubber($db, $id);
+
+        if (in_array($status, ['completed', 'forfeit'], true)) {
+            notifyMatchFinished($id, (string) ($match['status'] ?? ''));
+        }
+
+        $advanceMsg = '';
+        if (in_array($status, ['completed', 'forfeit'], true)) {
+            $activeSeasonId = getCurrentSeasonId();
+            if ($activeSeasonId) {
+                $adv = advanceBracketFromResults((int) $sportId, (int) $activeSeasonId);
+                if ((int) ($adv['updated'] ?? 0) > 0) {
+                    $advanceMsg = ' Bracket updated: ' . (int) $adv['updated'] . ' TBD slot(s) filled.';
+                }
+            }
+        }
+
+        flash('success', 'Match updated.' . $advanceMsg);
         redirect(BASE_URL . '/intramurals/matches/view.php?id=' . $id);
     }
 }
@@ -104,17 +143,23 @@ $dtLocal = $match['scheduled_at'] ? date('Y-m-d\TH:i', strtotime($match['schedul
 
 <div class="page-header"><h1><i class="bi bi-pencil"></i> Edit Match / Record Score</h1></div>
 
+<?php if ($decidingRubberDisabled && $decidingRubberDisabledAlert): ?>
+<div class="alert alert-secondary">
+    <i class="bi bi-slash-circle"></i>
+    <strong>Deciding rubber disabled.</strong> <?= sanitize($decidingRubberDisabledAlert) ?>
+</div>
+<?php endif; ?>
+
 <div class="row"><div class="col-lg-8"><div class="card"><div class="card-body">
     <?php if ($errors): ?><div class="alert alert-danger"><ul class="mb-0"><?php foreach ($errors as $e): ?><li><?= sanitize($e) ?></li><?php endforeach; ?></ul></div><?php endif; ?>
     <form method="POST">
         <?= csrfField() ?>
+        <fieldset <?= $decidingRubberDisabled ? 'disabled' : '' ?>>
         <div class="row g-3">
             <div class="col-md-6">
                 <label class="form-label">Sport *</label>
                 <select name="sport_id" id="matchSportId" class="form-select" required>
-                    <?php foreach ($sports as $s): ?>
-                    <option value="<?= $s['id'] ?>" <?= (int) $match['sport_id'] === (int) $s['id'] ? 'selected' : '' ?>><?= sanitize(sportLabel($s)) ?></option>
-                    <?php endforeach; ?>
+                    <?= renderSportSelectOptions($sports, $match['sport_id'] ?? 0) ?>
                 </select>
                 <div id="sportFormatHint" class="form-text mt-2">
                     <?php if ($currentSport): ?>
@@ -186,9 +231,12 @@ $dtLocal = $match['scheduled_at'] ? date('Y-m-d\TH:i', strtotime($match['schedul
                 <textarea name="notes" class="form-control" rows="2"><?= sanitize(post('notes', $match['notes'] ?? '')) ?></textarea>
             </div>
         </div>
+        </fieldset>
         <div class="mt-4 d-flex gap-2">
+            <?php if (!$decidingRubberDisabled): ?>
             <button class="btn btn-primary">Save</button>
-            <a href="<?= BASE_URL ?>/intramurals/matches/view.php?id=<?= $id ?>" class="btn btn-outline-secondary">Cancel</a>
+            <?php endif; ?>
+            <a href="<?= BASE_URL ?>/intramurals/matches/view.php?id=<?= $id ?>" class="btn btn-outline-secondary"><?= $decidingRubberDisabled ? 'Back to Match' : 'Cancel' ?></a>
         </div>
     </form>
 </div></div></div></div>

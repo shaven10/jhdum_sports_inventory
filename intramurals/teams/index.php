@@ -1,11 +1,14 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
-requireLogin();
+requireIntramuralsAccess();
 
 $db = getDB();
+ensureIntramuralDivisionsSchema();
 $search = get('search');
+$divisionFilter = get('division');
 $page = max(1, (int) get('page', '1'));
 $perPage = 12;
+$divisions = getDivisions(false);
 
 $where = ['1=1'];
 $params = [];
@@ -14,6 +17,22 @@ if ($search) {
     $params[] = "%$search%";
     $params[] = "%$search%";
     $params[] = "%$search%";
+}
+if ($divisionFilter === 'none') {
+    $where[] = 't.division_id IS NULL';
+} elseif ($divisionFilter !== '' && ctype_digit((string) $divisionFilter)) {
+    $where[] = 't.division_id = ?';
+    $params[] = (int) $divisionFilter;
+}
+if (isCoach() && !canManageIntramurals()) {
+    $coachTeamIds = getCoachTeamIds();
+    if (empty($coachTeamIds)) {
+        $where[] = '0=1';
+    } else {
+        $placeholders = implode(',', array_fill(0, count($coachTeamIds), '?'));
+        $where[] = "t.id IN ($placeholders)";
+        $params = array_merge($params, $coachTeamIds);
+    }
 }
 $whereClause = implode(' AND ', $where);
 
@@ -25,10 +44,12 @@ $seasonId = getCurrentSeasonId();
 $sportCountSql = $seasonId
     ? '(SELECT COUNT(DISTINCT r.sport_id) FROM intramural_registrations r WHERE r.team_id = t.id AND r.season_id = ' . (int) $seasonId . ')'
     : '(SELECT COUNT(DISTINCT r.sport_id) FROM intramural_registrations r WHERE r.team_id = t.id)';
-$stmt = $db->prepare("SELECT t.*,
+$stmt = $db->prepare("SELECT t.*, d.name AS division_name,
     (SELECT COUNT(*) FROM intramural_athletes a WHERE a.team_id = t.id AND a.is_active = 1) as member_count,
     $sportCountSql as sport_count
-    FROM intramural_teams t WHERE $whereClause ORDER BY t.is_active DESC, t.name ASC
+    FROM intramural_teams t
+    LEFT JOIN intramural_divisions d ON d.id = t.division_id
+    WHERE $whereClause ORDER BY t.is_active DESC, t.name ASC
     LIMIT {$pagination['offset']}, $perPage");
 $stmt->execute($params);
 $teams = $stmt->fetchAll();
@@ -41,10 +62,11 @@ require __DIR__ . '/../_season_bar.php';
 <div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2">
     <div>
         <h1><i class="bi bi-shield-shaded"></i> Teams / Houses</h1>
-        <p class="text-muted mb-0">Register teams, colors, logos, and rosters</p>
+        <p class="text-muted mb-0"><?= isCoach() && !canManageIntramurals() ? 'Teams and events you are assigned to coach' : 'Register teams, colors, logos, and rosters' ?></p>
     </div>
     <div class="d-flex gap-2">
         <?php if (canManageIntramurals()): ?>
+        <a href="<?= BASE_URL ?>/admin/divisions/index.php" class="btn btn-outline-primary"><i class="bi bi-diagram-3"></i> Divisions</a>
         <a href="<?= BASE_URL ?>/intramurals/teams/add.php" class="btn btn-primary"><i class="bi bi-plus-lg"></i> Add Team</a>
         <?php endif; ?>
         <a href="<?= BASE_URL ?>/intramurals/index.php" class="btn btn-outline-secondary">Back</a>
@@ -56,6 +78,18 @@ require __DIR__ . '/../_season_bar.php';
         <div class="col-md-4">
             <label class="form-label">Search</label>
             <input type="text" name="search" class="form-control" value="<?= sanitize($search) ?>" placeholder="Team name, department...">
+        </div>
+        <div class="col-md-3">
+            <label class="form-label">Division</label>
+            <select name="division" class="form-select">
+                <option value="">All divisions</option>
+                <option value="none" <?= $divisionFilter === 'none' ? 'selected' : '' ?>>No division</option>
+                <?php foreach ($divisions as $d): ?>
+                <option value="<?= (int) $d['id'] ?>" <?= (string) $divisionFilter === (string) $d['id'] ? 'selected' : '' ?>>
+                    <?= sanitize($d['name']) ?>
+                </option>
+                <?php endforeach; ?>
+            </select>
         </div>
         <div class="col-md-2"><button class="btn btn-primary w-100">Filter</button></div>
     </form>
@@ -78,6 +112,9 @@ require __DIR__ . '/../_season_bar.php';
                         <h5 class="mb-1"><?= sanitize($t['name']) ?></h5>
                         <div class="text-muted small"><?= sanitize($t['department'] ?: 'No department') ?></div>
                         <div class="mt-2">
+                            <?php if (!empty($t['division_name'])): ?>
+                            <span class="badge bg-info text-dark"><?= sanitize($t['division_name']) ?></span>
+                            <?php endif; ?>
                             <span class="badge bg-primary"><?= (int) $t['member_count'] ?> athletes</span>
                             <span class="badge bg-secondary"><?= (int) $t['sport_count'] ?> sports</span>
                             <?php if (!$t['is_active']): ?><span class="badge bg-warning text-dark">Inactive</span><?php endif; ?>
@@ -88,7 +125,9 @@ require __DIR__ . '/../_season_bar.php';
                 <div class="mt-3 small"><i class="bi bi-person"></i> Coach: <?= sanitize($t['coach_name']) ?></div>
                 <?php endif; ?>
                 <div class="mt-3 d-flex gap-2">
+                    <?php if (canViewAthletesDirectory()): ?>
                     <a href="<?= BASE_URL ?>/intramurals/teams/view.php?id=<?= $t['id'] ?>" class="btn btn-sm btn-outline-primary">View Roster</a>
+                    <?php endif; ?>
                     <?php if (canEditOwnTeam((int) $t['id']) || canManageIntramurals()): ?>
                     <a href="<?= BASE_URL ?>/intramurals/teams/coaches.php?id=<?= $t['id'] ?>" class="btn btn-sm btn-outline-primary">Coaches</a>
                     <a href="<?= BASE_URL ?>/intramurals/teams/edit.php?id=<?= $t['id'] ?>" class="btn btn-sm btn-outline-secondary">Edit</a>
@@ -105,6 +144,6 @@ require __DIR__ . '/../_season_bar.php';
     <?php endif; ?>
 </div>
 
-<div class="mt-3"><?= paginationLinks($pagination, BASE_URL . '/intramurals/teams/index.php?search=' . urlencode($search)) ?></div>
+<div class="mt-3"><?= paginationLinks($pagination, BASE_URL . '/intramurals/teams/index.php?search=' . urlencode($search) . '&division=' . urlencode((string) $divisionFilter)) ?></div>
 
 <?php require_once __DIR__ . '/../../includes/footer.php'; ?>

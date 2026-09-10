@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS intramural_sports (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
     description TEXT,
-    category ENUM('men', 'women', 'mixed') NOT NULL DEFAULT 'mixed',
+    category ENUM('men', 'women', 'mixed') NOT NULL DEFAULT 'men',
     scoring_method ENUM('points', 'sets', 'games', 'time') NOT NULL DEFAULT 'points',
     rules TEXT,
     schedule_notes TEXT,
@@ -106,6 +106,9 @@ INSERT INTO intramural_teams (name, short_name, color, department) VALUES
 INSERT INTO intramural_sports (name, description, category, scoring_method, rules, win_points) VALUES
 ('Basketball', '5-on-5 basketball tournament', 'men', 'points', 'Standard FIBA rules. Games are 4 quarters.', 3),
 ('Basketball', '5-on-5 basketball tournament', 'women', 'points', 'Standard FIBA rules. Games are 4 quarters.', 3),
-('Volleyball', 'Indoor volleyball', 'mixed', 'sets', 'Best of 5 sets. Rally scoring.', 3),
-('Chess', 'Individual/team chess', 'mixed', 'games', 'Standard FIDE rules. Team based on board wins.', 3),
-('Table Tennis', 'Singles and doubles', 'mixed', 'games', 'Best of 5 games to 11 points.', 3);
+('Volleyball', 'Indoor volleyball', 'men', 'sets', 'Best of 5 sets. Rally scoring.', 3),
+('Volleyball', 'Indoor volleyball', 'women', 'sets', 'Best of 5 sets. Rally scoring.', 3),
+('Chess', 'Individual/team chess', 'men', 'games', 'Standard FIDE rules. Team based on board wins.', 3),
+('Chess', 'Individual/team chess', 'women', 'games', 'Standard FIDE rules. Team based on board wins.', 3),
+('Table Tennis', 'Singles and doubles', 'men', 'games', 'Best of 5 games to 11 points.', 3),
+('Table Tennis', 'Singles and doubles', 'women', 'games', 'Best of 5 games to 11 points.', 3);

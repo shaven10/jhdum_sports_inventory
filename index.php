@@ -5,4 +5,9 @@ if (isLoggedIn()) {
     redirect(getHomeUrl());
 }
 
-redirect(BASE_URL . '/login.php');
+ensureLiveBoardColumns();
+if (isLiveBoardEnabled()) {
+    redirect(BASE_URL . '/live.php');
+}
+
+redirect(BASE_URL . '/landing.php');
