@@ -15,7 +15,7 @@ try {
     $champions = array_slice(array_filter($overall, fn($r) => $r['total'] > 0), 0, 3);
 
     if ($seasonId) {
-        $stmt = $db->prepare("
+        $upcomingSql = "
             SELECT m.*, s.name as sport_name, s.category as sport_category,
                    ta.name as team_a_name, ta.color as team_a_color,
                    tb.name as team_b_name, tb.color as team_b_color
@@ -24,9 +24,18 @@ try {
             JOIN intramural_teams ta ON m.team_a_id = ta.id
             JOIN intramural_teams tb ON m.team_b_id = tb.id
             WHERE m.season_id = ? AND m.status IN ('scheduled', 'ongoing') AND m.scheduled_at >= NOW()
-            ORDER BY m.scheduled_at ASC LIMIT 8
-        ");
-        $stmt->execute([$seasonId]);
+        ";
+        $upcomingParams = [$seasonId];
+        $tmSportIds = isTournamentManager() && !canManageMatches() ? getTournamentManagerSportIds() : [];
+        if ($tmSportIds) {
+            $upcomingSql .= ' AND m.sport_id IN (' . implode(',', array_fill(0, count($tmSportIds), '?')) . ')';
+            $upcomingParams = array_merge($upcomingParams, $tmSportIds);
+        } elseif (isTournamentManager() && !canManageMatches()) {
+            $upcomingSql .= ' AND 1=0';
+        }
+        $upcomingSql .= ' ORDER BY m.scheduled_at ASC LIMIT 8';
+        $stmt = $db->prepare($upcomingSql);
+        $stmt->execute($upcomingParams);
         $upcoming = $stmt->fetchAll();
     }
 } catch (Throwable $e) {
@@ -41,7 +50,7 @@ require __DIR__ . '/_season_bar.php';
 <div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2">
     <div>
         <h1><i class="bi bi-trophy-fill"></i> Intramurals</h1>
-        <p class="text-muted mb-0">Athlete, team, match, and standings management</p>
+        <p class="text-muted mb-0"><?= isTournamentManager() && !canManageMatches() ? 'Record scores and standings for your assigned events' : 'Athlete, team, match, and standings management' ?></p>
     </div>
     <div class="d-flex gap-2 flex-wrap">
         <?php if (canManageTeamAthletes()): ?>
@@ -51,6 +60,13 @@ require __DIR__ . '/_season_bar.php';
         <?php if (canManageMatches()): ?>
         <a href="<?= BASE_URL ?>/intramurals/matches/generate.php" class="btn btn-primary"><i class="bi bi-magic"></i> Generate Matches</a>
         <?php endif; ?>
+        <?php if (isTournamentManager()): ?>
+        <a href="<?= BASE_URL ?>/intramurals/matches/index.php" class="btn btn-primary"><i class="bi bi-clipboard-data"></i> Record Scores</a>
+        <a href="<?= BASE_URL ?>/intramurals/standings/index.php" class="btn btn-outline-primary"><i class="bi bi-bar-chart-steps"></i> Standings</a>
+        <?php endif; ?>
+        <?php if (canManageIntramurals()): ?>
+        <a href="<?= BASE_URL ?>/intramurals/sports/managers.php" class="btn btn-outline-primary"><i class="bi bi-person-gear"></i> Event TMs</a>
+        <?php endif; ?>
         <?php if (hasRole('unit_manager') && getUserTeamId()): ?>
         <a href="<?= BASE_URL ?>/intramurals/teams/view.php?id=<?= (int) getUserTeamId() ?>" class="btn btn-outline-secondary"><i class="bi bi-shield"></i> My Team</a>
         <a href="<?= BASE_URL ?>/intramurals/teams/coaches.php?id=<?= (int) getUserTeamId() ?>" class="btn btn-outline-primary"><i class="bi bi-person-badge"></i> Event Coaches</a>
@@ -59,6 +75,30 @@ require __DIR__ . '/_season_bar.php';
         <?php endif; ?>
     </div>
 </div>
+
+<?php if (isTournamentManager() && !canManageMatches()): ?>
+<?php
+$assignedSports = [];
+$tmIds = getTournamentManagerSportIds();
+if ($tmIds) {
+    $ph = implode(',', array_fill(0, count($tmIds), '?'));
+    $as = $db->prepare("SELECT name, category FROM intramural_sports WHERE id IN ($ph) ORDER BY name, category");
+    $as->execute($tmIds);
+    $assignedSports = $as->fetchAll();
+}
+?>
+<div class="alert alert-primary">
+    <?php if ($assignedSports): ?>
+    Your assigned events:
+    <?php foreach ($assignedSports as $asport): ?>
+    <span class="badge bg-dark"><?= sanitize(sportLabel($asport)) ?></span>
+    <?php endforeach; ?>
+    — update match scores; standings refresh automatically.
+    <?php else: ?>
+    No events are assigned to you for this season. Ask an administrator to assign you under Sports → Tournament Managers.
+    <?php endif; ?>
+</div>
+<?php endif; ?>
 
 <div class="row g-3 mb-4">
     <div class="col-6 col-md-4 col-xl-2">

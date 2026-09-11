@@ -110,7 +110,7 @@ require_once __DIR__ . '/../includes/header.php';
             <option value="<?= $t['id'] ?>" <?= (int) ($user['team_id'] ?? 0) === (int) $t['id'] ? 'selected' : '' ?>><?= sanitize($t['name']) ?></option>
             <?php endforeach; ?>
         </select>
-        <div class="form-text">Required for Unit Manager. For Coaches, assign events under Teams → Event Coaches.</div>
+        <div class="form-text">Required for Unit Manager. Coaches: Teams → Event Coaches. Tournament managers: Sports → Tournament Managers.</div>
     </div>
     <div class="col-md-6"><label class="form-label">Student ID</label><input type="text" name="student_id" class="form-control" value="<?= sanitize($user['student_id'] ?? '') ?>"></div>
     <div class="col-md-6"><label class="form-label">Department</label><input type="text" name="department" class="form-control" value="<?= sanitize($user['department'] ?? '') ?>"></div>

@@ -6,9 +6,17 @@ $db = getDB();
 $sportId = (int) get('sport');
 $export = get('export');
 $sports = $db->query('SELECT * FROM intramural_sports WHERE is_active = 1 ORDER BY name, category')->fetchAll();
+$tmSportIds = isTournamentManager() ? getTournamentManagerSportIds() : [];
+if (isTournamentManager() && !canManageMatches()) {
+    $sports = array_values(array_filter($sports, static fn($s) => in_array((int) $s['id'], $tmSportIds, true)));
+}
 
 if (!$sportId && $sports) {
     $sportId = (int) $sports[0]['id'];
+}
+if (isTournamentManager() && !canManageMatches() && $sportId && !in_array($sportId, $tmSportIds, true)) {
+    flash('error', 'You can only view standings for events assigned to you.');
+    redirect(BASE_URL . '/intramurals/standings/index.php');
 }
 
 $blocks = $sportId ? computeSportStandings($sportId) : [];
@@ -32,7 +40,7 @@ require __DIR__ . '/../_season_bar.php';
 <div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2 no-print">
     <div>
         <h1><i class="bi bi-bar-chart-steps"></i> Result Tabulation</h1>
-        <p class="text-muted mb-0">Automatic rankings, points, and medals per sport</p>
+        <p class="text-muted mb-0"><?= isTournamentManager() && !canManageMatches() ? 'Standings for your assigned events (updated from match scores)' : 'Automatic rankings, points, and medals per sport' ?></p>
     </div>
     <div class="d-flex gap-2">
         <a href="<?= BASE_URL ?>/intramurals/standings/overall.php" class="btn btn-outline-primary">Overall Standing</a>
@@ -57,7 +65,7 @@ require __DIR__ . '/../_season_bar.php';
 </div>
 
 <?php if (!$block): ?>
-<div class="alert alert-info">No sports available.</div>
+<div class="alert alert-info"><?= isTournamentManager() && !canManageMatches() ? 'No events are assigned to you for this season. Ask an administrator to assign you under Sports → Tournament Managers.' : 'No sports available.' ?></div>
 <?php else: ?>
 <div class="card mb-3">
     <?php $scheme = $block['scheme'] ?? getPointSchemeForSport($block['sport']); ?>

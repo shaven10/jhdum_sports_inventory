@@ -188,6 +188,7 @@ function roleBadge(string $role): string
         'unit_manager'  => 'warning',
         'coach'         => 'dark',
         'tabulator'     => 'secondary',
+        'tournament_manager' => 'primary',
         'student'       => 'success',
     ];
     $class = $classes[$role] ?? 'secondary';

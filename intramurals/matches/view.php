@@ -24,8 +24,14 @@ if (!$match) {
     redirect(BASE_URL . '/intramurals/matches/index.php');
 }
 
+$canScoreThis = canRecordScores((int) $match['sport_id']);
+if (isTournamentManager() && !canManageMatches() && !$canScoreThis) {
+    flash('error', 'You can only open matches for events assigned to you.');
+    redirect(BASE_URL . '/intramurals/matches/index.php');
+}
+
 // Quick live score / status update
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && canRecordScores() && verifyCsrf(post('csrf_token'))) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canScoreThis && verifyCsrf(post('csrf_token'))) {
     requireWritableSeason();
     $action = post('action');
     if ($action === 'live_score') {
@@ -59,11 +65,9 @@ require __DIR__ . '/../_season_bar.php';
         <a href="<?= BASE_URL ?>/intramurals/matches/schedule.php?id=<?= $id ?>" class="btn btn-<?= empty($match['scheduled_at']) ? 'warning' : 'outline-primary' ?>">
             <?= empty($match['scheduled_at']) ? 'Set Date/Time' : 'Reschedule' ?>
         </a>
-        <?php if (canManageIntramurals()): ?>
-        <a href="<?= BASE_URL ?>/intramurals/matches/edit.php?id=<?= $id ?>" class="btn btn-primary">Edit / Record Score</a>
-        <?php elseif (canRecordScores()): ?>
-        <a href="<?= BASE_URL ?>/intramurals/matches/edit.php?id=<?= $id ?>" class="btn btn-primary">Record Score</a>
         <?php endif; ?>
+        <?php if ($canScoreThis): ?>
+        <a href="<?= BASE_URL ?>/intramurals/matches/edit.php?id=<?= $id ?>" class="btn btn-primary"><?= canManageIntramurals() ? 'Edit / Record Score' : 'Record Score' ?></a>
         <?php endif; ?>
         <a href="<?= BASE_URL ?>/intramurals/matches/index.php" class="btn btn-outline-secondary">Back</a>
     </div>
@@ -97,7 +101,7 @@ require __DIR__ . '/../_season_bar.php';
             </div>
         </div>
 
-        <?php if (canRecordScores() && in_array($match['status'], ['scheduled', 'ongoing'], true)): ?>
+        <?php if ($canScoreThis && in_array($match['status'], ['scheduled', 'ongoing', 'completed'], true)): ?>
         <div class="card mt-3">
             <div class="card-header">Live Score Update</div>
             <div class="card-body">

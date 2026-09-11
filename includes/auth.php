@@ -34,7 +34,7 @@ function requireRole(array $roles): void
  */
 function isIntramuralsOnlyRole(): bool
 {
-    return isLoggedIn() && in_array($_SESSION['user_role'] ?? '', ['unit_manager', 'coach', 'tabulator'], true);
+    return isLoggedIn() && in_array($_SESSION['user_role'] ?? '', ['unit_manager', 'coach', 'tabulator', 'tournament_manager'], true);
 }
 
 function getHomeUrl(): string
@@ -137,6 +137,7 @@ function getAllRoles(): array
         'unit_manager' => 'Unit Manager',
         'coach' => 'Coach',
         'tabulator' => 'Tabulator',
+        'tournament_manager' => 'Tournament Manager',
         'student' => 'Student',
     ];
 }
@@ -351,9 +352,89 @@ function canManageMatches(): bool
     return canManageIntramurals() || hasRole('tabulator');
 }
 
-function canRecordScores(): bool
+function isTournamentManager(): bool
 {
-    return canManageMatches();
+    return isLoggedIn() && ($_SESSION['user_role'] ?? '') === 'tournament_manager';
+}
+
+/**
+ * Sport IDs assigned to the current (or given) tournament manager for the viewed season.
+ *
+ * @return list<int>
+ */
+function getTournamentManagerSportIds(?int $userId = null): array
+{
+    if ($userId === null) {
+        if (!isTournamentManager()) {
+            return [];
+        }
+        $userId = (int) $_SESSION['user_id'];
+    }
+
+    static $cache = [];
+    $seasonId = function_exists('getCurrentSeasonId') ? getCurrentSeasonId() : null;
+    $cacheKey = $userId . ':' . ($seasonId ?? 0);
+    if (isset($cache[$cacheKey])) {
+        return $cache[$cacheKey];
+    }
+
+    try {
+        $db = getDB();
+        if ($seasonId) {
+            $stmt = $db->prepare('SELECT sport_id FROM intramural_event_managers WHERE user_id = ? AND season_id = ?');
+            $stmt->execute([$userId, $seasonId]);
+        } else {
+            $stmt = $db->prepare('SELECT DISTINCT sport_id FROM intramural_event_managers WHERE user_id = ?');
+            $stmt->execute([$userId]);
+        }
+        $cache[$cacheKey] = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
+    } catch (Throwable $e) {
+        $cache[$cacheKey] = [];
+    }
+
+    return $cache[$cacheKey];
+}
+
+function canManageAssignedEvent(?int $sportId = null): bool
+{
+    if (!isTournamentManager()) {
+        return false;
+    }
+    $ids = getTournamentManagerSportIds();
+    if (empty($ids)) {
+        return false;
+    }
+    return $sportId === null || in_array($sportId, $ids, true);
+}
+
+function canRecordScores(?int $sportId = null): bool
+{
+    if (canManageMatches()) {
+        return true;
+    }
+    return canManageAssignedEvent($sportId);
+}
+
+/**
+ * Assign or clear the tournament manager for an event in a season.
+ */
+function assignEventTournamentManager(int $sportId, ?int $userId, ?int $seasonId = null): void
+{
+    $db = getDB();
+    $seasonId = $seasonId ?? getCurrentSeasonId();
+    if (!$seasonId) {
+        return;
+    }
+
+    if (!$userId) {
+        $db->prepare('DELETE FROM intramural_event_managers WHERE sport_id = ? AND season_id = ?')
+            ->execute([$sportId, $seasonId]);
+        return;
+    }
+
+    $db->prepare('INSERT INTO intramural_event_managers (season_id, sport_id, user_id) VALUES (?, ?, ?)
+        ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), updated_at = CURRENT_TIMESTAMP')
+        ->execute([$seasonId, $sportId, $userId]);
 }
 
 function canBorrowEquipment(): bool

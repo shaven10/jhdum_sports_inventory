@@ -101,6 +101,22 @@ $sports = $db->query("SELECT s.*, ps.name as scheme_name, ps.points_1, ps.points
     ORDER BY s.is_active DESC, s.name, s.category")->fetchAll();
 $pointSchemes = getAllPointSchemes(true);
 
+$eventManagers = [];
+if ($seasonId) {
+    try {
+        $mgrStmt = $db->prepare("SELECT em.sport_id, u.first_name, u.last_name
+            FROM intramural_event_managers em
+            JOIN users u ON u.id = em.user_id
+            WHERE em.season_id = ?");
+        $mgrStmt->execute([$seasonId]);
+        foreach ($mgrStmt->fetchAll() as $row) {
+            $eventManagers[(int) $row['sport_id']] = trim($row['first_name'] . ' ' . $row['last_name']);
+        }
+    } catch (Throwable $e) {
+        $eventManagers = [];
+    }
+}
+
 $pageTitle = 'Sports Management';
 require_once __DIR__ . '/../../includes/header.php';
 require __DIR__ . '/../_season_bar.php';
@@ -112,6 +128,9 @@ require __DIR__ . '/../_season_bar.php';
         <p class="text-muted mb-0">Sports, agreed tournament styles, and placement point schemes</p>
     </div>
     <div class="d-flex gap-2">
+        <?php if (canManageIntramurals()): ?>
+        <a href="<?= BASE_URL ?>/intramurals/sports/managers.php" class="btn btn-outline-primary"><i class="bi bi-person-gear"></i> Tournament Managers</a>
+        <?php endif; ?>
         <a href="<?= BASE_URL ?>/intramurals/points/index.php" class="btn btn-outline-primary"><i class="bi bi-calculator"></i> Point System</a>
         <a href="<?= BASE_URL ?>/intramurals/index.php" class="btn btn-outline-secondary">Back</a>
     </div>
@@ -222,6 +241,7 @@ require __DIR__ . '/../_season_bar.php';
                                 <th>Athletes</th>
                                 <th>Matches</th>
                                 <th>Status</th>
+                                <th>Tournament Manager</th>
                                 <?php if (canManageIntramurals()): ?><th>Actions</th><?php endif; ?>
                             </tr>
                         </thead>
@@ -247,6 +267,7 @@ require __DIR__ . '/../_season_bar.php';
                                 <td><?= (int) $s['athlete_count'] ?></td>
                                 <td><?= (int) $s['match_count'] ?></td>
                                 <td><?= $s['is_active'] ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-secondary">Inactive</span>' ?></td>
+                                <td><?= !empty($eventManagers[(int) $s['id']]) ? sanitize($eventManagers[(int) $s['id']]) : '<span class="text-muted">Unassigned</span>' ?></td>
                                 <?php if (canManageIntramurals()): ?>
                                 <td class="text-nowrap">
                                     <a href="?edit=<?= $s['id'] ?>" class="btn btn-sm btn-outline-primary">Edit</a>
@@ -266,7 +287,7 @@ require __DIR__ . '/../_season_bar.php';
                             </tr>
                             <?php endforeach; ?>
                             <?php if (empty($sports)): ?>
-                            <tr><td colspan="9" class="text-muted p-3">No sports yet.</td></tr>
+                            <tr><td colspan="<?= canManageIntramurals() ? '10' : '9' ?>" class="text-muted p-3">No sports yet.</td></tr>
                             <?php endif; ?>
                         </tbody>
                     </table>

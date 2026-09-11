@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS users (
     student_id VARCHAR(20) DEFAULT NULL,
     department VARCHAR(100) DEFAULT NULL,
     phone VARCHAR(20) DEFAULT NULL,
-    role ENUM('admin', 'coordinator', 'staff', 'unit_manager', 'coach', 'tabulator', 'student') NOT NULL DEFAULT 'student',
+    role ENUM('admin', 'coordinator', 'staff', 'unit_manager', 'coach', 'tabulator', 'tournament_manager', 'student') NOT NULL DEFAULT 'student',
     team_id INT DEFAULT NULL,
     avatar VARCHAR(255) DEFAULT NULL,
     is_active TINYINT(1) NOT NULL DEFAULT 1,
@@ -358,6 +358,21 @@ CREATE TABLE IF NOT EXISTS intramural_event_coaches (
     FOREIGN KEY (team_id) REFERENCES intramural_teams(id) ON DELETE CASCADE,
     FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE,
     FOREIGN KEY (coach_user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- One tournament manager per event (sport) + season — records scores/standings for that event only
+CREATE TABLE IF NOT EXISTS intramural_event_managers (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    season_id INT NOT NULL,
+    sport_id INT NOT NULL,
+    user_id INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_event_manager_season_sport (season_id, sport_id),
+    KEY idx_event_manager_user (user_id, season_id),
+    FOREIGN KEY (season_id) REFERENCES intramural_seasons(id) ON DELETE RESTRICT,
+    FOREIGN KEY (sport_id) REFERENCES intramural_sports(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS intramural_matches (

@@ -89,6 +89,9 @@ $flash = getFlash();
                         <?php endif; ?>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/teams/index.php">Teams</a></li>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/sports/index.php">Sports / Events</a></li>
+                        <?php if (canManageIntramurals()): ?>
+                        <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/sports/managers.php"><i class="bi bi-person-gear"></i> Tournament Managers</a></li>
+                        <?php endif; ?>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/roster/index.php">Rosters</a></li>
                         <?php if (canManageTeamAthletes() || canManageTeamRoster()): ?>
                         <li><a class="dropdown-item" href="<?= BASE_URL ?>/intramurals/roster/import.php">Import Roster</a></li>

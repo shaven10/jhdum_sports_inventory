@@ -1,9 +1,6 @@
 <?php
 require_once __DIR__ . '/../../includes/auth.php';
-if (!canManageMatches()) {
-    flash('error', 'You do not have permission to edit matches.');
-    redirect(BASE_URL . '/intramurals/matches/index.php');
-}
+requireLogin();
 requireWritableSeason();
 
 $db = getDB();
@@ -16,6 +13,14 @@ if (!$match) {
     flash('error', 'Match not found.');
     redirect(BASE_URL . '/intramurals/matches/index.php');
 }
+
+$canFullEdit = canManageMatches();
+$canScore = canRecordScores((int) $match['sport_id']);
+if (!$canFullEdit && !$canScore) {
+    flash('error', 'You do not have permission to update this match.');
+    redirect(BASE_URL . '/intramurals/matches/index.php');
+}
+$scoreOnly = $canScore && !$canFullEdit;
 
 $sports = $db->query('SELECT * FROM intramural_sports WHERE is_active = 1 ORDER BY name, category')->fetchAll();
 $teams = $db->query('SELECT * FROM intramural_teams WHERE is_active = 1 ORDER BY name')->fetchAll();
@@ -43,21 +48,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect(BASE_URL . '/intramurals/matches/edit.php?id=' . $id);
     }
 
-    $sportId = (int) post('sport_id');
-    $teamA = (int) post('team_a_id');
-    $teamB = (int) post('team_b_id');
-    $scheduledAt = post('scheduled_at');
-    $venue = post('venue');
-    $referee = post('referee_name');
+    if ($scoreOnly) {
+        $sportId = (int) $match['sport_id'];
+        $teamA = (int) $match['team_a_id'];
+        $teamB = (int) $match['team_b_id'];
+        $scheduledAt = $match['scheduled_at'] ? date('Y-m-d\TH:i', strtotime($match['scheduled_at'])) : '';
+        $venue = $match['venue'] ?? '';
+        $referee = $match['referee_name'] ?? '';
+        $notes = $match['notes'] ?? '';
+    } else {
+        $sportId = (int) post('sport_id');
+        $teamA = (int) post('team_a_id');
+        $teamB = (int) post('team_b_id');
+        $scheduledAt = post('scheduled_at');
+        $venue = post('venue');
+        $referee = post('referee_name');
+        $notes = post('notes');
+    }
     $status = post('status', 'scheduled');
-    $notes = post('notes');
     $scoreA = post('score_a') === '' ? null : (int) post('score_a');
     $scoreB = post('score_b') === '' ? null : (int) post('score_b');
     $forfeitTeam = (int) post('forfeit_team_id') ?: null;
 
-    if (!$sportId || !$teamA || !$teamB) $errors[] = 'Sport and both teams are required.';
-    if ($teamA === $teamB) $errors[] = 'Teams must be different.';
-    if ($scheduledAt !== '' && strtotime($scheduledAt) === false) {
+    if (!$scoreOnly && (!$sportId || !$teamA || !$teamB)) $errors[] = 'Sport and both teams are required.';
+    if ($teamA && $teamB && $teamA === $teamB) $errors[] = 'Teams must be different.';
+    if (!$scoreOnly && $scheduledAt !== '' && strtotime($scheduledAt) === false) {
         $errors[] = 'Invalid schedule date/time.';
     }
     if (!in_array($status, ['scheduled', 'ongoing', 'completed', 'cancelled', 'forfeit'], true)) {
@@ -84,14 +99,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $winner = determineMatchWinner($scoreA, $scoreB, $teamA, $teamB, $status, $forfeitTeam);
         }
 
-        $scheduledValue = $scheduledAt !== '' ? date('Y-m-d H:i:s', strtotime($scheduledAt)) : null;
-        $stmt = $db->prepare('UPDATE intramural_matches SET sport_id=?, team_a_id=?, team_b_id=?, scheduled_at=?, venue=?, referee_name=?, status=?, score_a=?, score_b=?, winner_team_id=?, forfeit_team_id=?, notes=? WHERE id=?');
-        $stmt->execute([
-            $sportId, $teamA, $teamB, $scheduledValue,
-            $venue, $referee, $status, $scoreA, $scoreB, $winner, $forfeitTeam, $notes, $id
-        ]);
-        auditLog($_SESSION['user_id'], 'update', 'intramural_match', $id, null, ['status' => $status, 'score_a' => $scoreA, 'score_b' => $scoreB]);
-        flash('success', 'Match updated.');
+        if ($scoreOnly) {
+            $db->prepare('UPDATE intramural_matches SET status=?, score_a=?, score_b=?, winner_team_id=?, forfeit_team_id=? WHERE id=?')
+                ->execute([$status, $scoreA, $scoreB, $winner, $forfeitTeam, $id]);
+        } else {
+            $scheduledValue = $scheduledAt !== '' ? date('Y-m-d H:i:s', strtotime($scheduledAt)) : null;
+            $stmt = $db->prepare('UPDATE intramural_matches SET sport_id=?, team_a_id=?, team_b_id=?, scheduled_at=?, venue=?, referee_name=?, status=?, score_a=?, score_b=?, winner_team_id=?, forfeit_team_id=?, notes=? WHERE id=?');
+            $stmt->execute([
+                $sportId, $teamA, $teamB, $scheduledValue,
+                $venue, $referee, $status, $scoreA, $scoreB, $winner, $forfeitTeam, $notes, $id
+            ]);
+        }
+        auditLog($_SESSION['user_id'], $scoreOnly ? 'score_update' : 'update', 'intramural_match', $id, null, ['status' => $status, 'score_a' => $scoreA, 'score_b' => $scoreB]);
+        flash('success', $scoreOnly ? 'Score and standing updated.' : 'Match updated.');
         redirect(BASE_URL . '/intramurals/matches/view.php?id=' . $id);
     }
 }
@@ -102,13 +122,36 @@ require __DIR__ . '/../_season_bar.php';
 $dtLocal = $match['scheduled_at'] ? date('Y-m-d\TH:i', strtotime($match['scheduled_at'])) : '';
 ?>
 
-<div class="page-header"><h1><i class="bi bi-pencil"></i> Edit Match / Record Score</h1></div>
+<div class="page-header">
+    <h1><i class="bi bi-pencil"></i> <?= $scoreOnly ? 'Record Score' : 'Edit Match / Record Score' ?></h1>
+    <?php if ($scoreOnly): ?>
+    <p class="text-muted mb-0">You can update the result for this assigned event only. Standings refresh automatically after a completed match.</p>
+    <?php endif; ?>
+</div>
 
 <div class="row"><div class="col-lg-8"><div class="card"><div class="card-body">
     <?php if ($errors): ?><div class="alert alert-danger"><ul class="mb-0"><?php foreach ($errors as $e): ?><li><?= sanitize($e) ?></li><?php endforeach; ?></ul></div><?php endif; ?>
     <form method="POST">
         <?= csrfField() ?>
         <div class="row g-3">
+            <?php if ($scoreOnly): ?>
+            <div class="col-12">
+                <div class="alert alert-light border mb-0">
+                    <strong><?= $currentSport ? sanitize(sportLabel($currentSport)) : 'Event' ?></strong>
+                    · <?= sanitize($match['round_label'] ?: ('Round ' . (int) ($match['round_number'] ?? 1))) ?>
+                    <div class="mt-1">
+                        <?php
+                        $teamAName = $teamBName = 'TBD';
+                        foreach ($teams as $t) {
+                            if ((int) $t['id'] === (int) $match['team_a_id']) $teamAName = $t['name'];
+                            if ((int) $t['id'] === (int) $match['team_b_id']) $teamBName = $t['name'];
+                        }
+                        ?>
+                        <?= sanitize($teamAName) ?> vs <?= sanitize($teamBName) ?>
+                    </div>
+                </div>
+            </div>
+            <?php else: ?>
             <div class="col-md-6">
                 <label class="form-label">Sport *</label>
                 <select name="sport_id" id="matchSportId" class="form-select" required>
@@ -154,7 +197,8 @@ $dtLocal = $match['scheduled_at'] ? date('Y-m-d\TH:i', strtotime($match['schedul
                 <label class="form-label">Referee</label>
                 <input type="text" name="referee_name" class="form-control" value="<?= sanitize(post('referee_name', $match['referee_name'] ?? '')) ?>">
             </div>
-            <div class="col-md-4">
+            <?php endif; ?>
+            <div class="<?= $scoreOnly ? 'col-md-12' : 'col-md-4' ?>">
                 <label class="form-label">Status</label>
                 <select name="status" class="form-select">
                     <?php foreach (['scheduled', 'ongoing', 'completed', 'forfeit', 'cancelled'] as $st): ?>
@@ -181,13 +225,15 @@ $dtLocal = $match['scheduled_at'] ? date('Y-m-d\TH:i', strtotime($match['schedul
                     <?php endforeach; ?>
                 </select>
             </div>
+            <?php if (!$scoreOnly): ?>
             <div class="col-12">
                 <label class="form-label">Notes</label>
                 <textarea name="notes" class="form-control" rows="2"><?= sanitize(post('notes', $match['notes'] ?? '')) ?></textarea>
             </div>
+            <?php endif; ?>
         </div>
         <div class="mt-4 d-flex gap-2">
-            <button class="btn btn-primary">Save</button>
+            <button class="btn btn-primary"><?= $scoreOnly ? 'Save Score' : 'Save' ?></button>
             <a href="<?= BASE_URL ?>/intramurals/matches/view.php?id=<?= $id ?>" class="btn btn-outline-secondary">Cancel</a>
         </div>
     </form>

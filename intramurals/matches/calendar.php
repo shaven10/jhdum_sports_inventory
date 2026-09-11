@@ -26,6 +26,14 @@ if ($seasonId) {
     $sql .= ' AND m.season_id = ?';
     $params[] = $seasonId;
 }
+$tmSportIds = isTournamentManager() && !canManageMatches() ? getTournamentManagerSportIds() : [];
+if ($tmSportIds) {
+    $placeholders = implode(',', array_fill(0, count($tmSportIds), '?'));
+    $sql .= " AND m.sport_id IN ($placeholders)";
+    $params = array_merge($params, $tmSportIds);
+} elseif (isTournamentManager() && !canManageMatches()) {
+    $sql .= ' AND 1=0';
+}
 $sql .= ' ORDER BY m.scheduled_at';
 $stmt = $db->prepare($sql);
 $stmt->execute($params);

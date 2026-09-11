@@ -89,7 +89,7 @@ require_once __DIR__ . '/../includes/header.php';
             <option value="<?= $t['id'] ?>" <?= post('team_id') == $t['id'] ? 'selected' : '' ?>><?= sanitize($t['name']) ?></option>
             <?php endforeach; ?>
         </select>
-        <div class="form-text" id="teamHelp">Unit managers require a team. Coaches: set a home team, then assign them per event under Teams → Event Coaches.</div>
+        <div class="form-text" id="teamHelp">Unit managers require a team. Coaches: set a home team, then assign them per event under Teams → Event Coaches. Tournament managers are assigned per event under Sports → Tournament Managers.</div>
     </div>
     <div class="col-md-6"><label class="form-label">Student ID</label><input type="text" name="student_id" class="form-control" value="<?= sanitize(post('student_id')) ?>"></div>
     <div class="col-md-6"><label class="form-label">Department</label><input type="text" name="department" class="form-control" value="<?= sanitize(post('department')) ?>"></div>

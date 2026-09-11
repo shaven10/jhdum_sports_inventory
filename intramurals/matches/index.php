@@ -11,11 +11,23 @@ $unscheduled = get('unscheduled');
 $page = max(1, (int) get('page', '1'));
 $perPage = 20;
 
+$tmSportIds = isTournamentManager() ? getTournamentManagerSportIds() : [];
+$isTmOnly = isTournamentManager() && !canManageMatches();
+
 $where = ['1=1'];
 $params = [];
 if ($seasonId) {
     $where[] = 'm.season_id = ?';
     $params[] = $seasonId;
+}
+if ($isTmOnly) {
+    if ($tmSportIds) {
+        $placeholders = implode(',', array_fill(0, count($tmSportIds), '?'));
+        $where[] = "m.sport_id IN ($placeholders)";
+        $params = array_merge($params, $tmSportIds);
+    } else {
+        $where[] = '1=0';
+    }
 }
 if ($search) {
     $where[] = '(ta.name LIKE ? OR tb.name LIKE ? OR m.venue LIKE ? OR m.referee_name LIKE ? OR m.round_label LIKE ?)';
@@ -56,6 +68,9 @@ $stmt->execute($params);
 $matches = $stmt->fetchAll();
 
 $sports = $db->query('SELECT id, name, category, tournament_format FROM intramural_sports WHERE is_active = 1 ORDER BY name')->fetchAll();
+if ($isTmOnly) {
+    $sports = array_values(array_filter($sports, static fn($s) => in_array((int) $s['id'], $tmSportIds, true)));
+}
 
 $pendingCount = 0;
 if ($seasonId) {
@@ -73,8 +88,12 @@ $queryBase = BASE_URL . '/intramurals/matches/index.php?search=' . urlencode($se
 
 <div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2">
     <div>
-        <h1><i class="bi bi-calendar3"></i> Match Scheduling</h1>
-        <p class="text-muted mb-0">Generate fixtures by tournament style, auto-schedule, then edit any date/time as needed</p>
+        <h1><i class="bi bi-calendar3"></i> <?= $isTmOnly ? 'Assigned Event Matches' : 'Match Scheduling' ?></h1>
+        <p class="text-muted mb-0">
+            <?= $isTmOnly
+                ? 'Update scores and standings for events assigned to you'
+                : 'Generate fixtures by tournament style, auto-schedule, then edit any date/time as needed' ?>
+        </p>
     </div>
     <div class="d-flex gap-2 flex-wrap">
         <?php if (canManageMatches()): ?>
@@ -88,7 +107,7 @@ $queryBase = BASE_URL . '/intramurals/matches/index.php?search=' . urlencode($se
     </div>
 </div>
 
-<?php if ($pendingCount > 0 && canManageMatches()): ?>
+<?php if ($pendingCount > 0 && canManageMatches() && !$isTmOnly): ?>
 <div class="alert alert-warning d-flex justify-content-between align-items-center flex-wrap gap-2">
     <span><i class="bi bi-clock"></i> <?= $pendingCount ?> generated match<?= $pendingCount === 1 ? '' : 'es' ?> still need a date &amp; time.</span>
     <a href="?unscheduled=1" class="btn btn-sm btn-warning">Show unscheduled</a>
@@ -174,19 +193,27 @@ $queryBase = BASE_URL . '/intramurals/matches/index.php?search=' . urlencode($se
                         <td><?= statusBadge($m['status']) ?></td>
                         <td class="text-nowrap">
                             <a href="<?= BASE_URL ?>/intramurals/matches/view.php?id=<?= $m['id'] ?>" class="btn btn-sm btn-outline-primary">View</a>
+                            <?php if (canManageIntramurals()): ?>
+                            <a href="<?= BASE_URL ?>/intramurals/matches/edit.php?id=<?= $m['id'] ?>" class="btn btn-sm btn-outline-secondary">Edit</a>
+                            <?php elseif (canRecordScores((int) $m['sport_id'])): ?>
+                            <a href="<?= BASE_URL ?>/intramurals/matches/edit.php?id=<?= $m['id'] ?>" class="btn btn-sm btn-primary">Score</a>
+                            <?php endif; ?>
                             <?php if (canManageMatches()): ?>
                             <a href="<?= BASE_URL ?>/intramurals/matches/schedule.php?id=<?= $m['id'] ?>" class="btn btn-sm btn-<?= empty($m['scheduled_at']) ? 'warning' : 'outline-secondary' ?>">
                                 <?= empty($m['scheduled_at']) ? 'Set Date/Time' : 'Reschedule' ?>
                             </a>
-                            <?php if (canManageIntramurals()): ?>
-                            <a href="<?= BASE_URL ?>/intramurals/matches/edit.php?id=<?= $m['id'] ?>" class="btn btn-sm btn-outline-secondary">Edit</a>
-                            <?php endif; ?>
                             <?php endif; ?>
                         </td>
                     </tr>
                     <?php endforeach; ?>
                     <?php if (empty($matches)): ?>
-                    <tr><td colspan="9" class="text-muted p-3">No matches found. <?php if (canManageMatches()): ?><a href="<?= BASE_URL ?>/intramurals/matches/generate.php">Generate fixtures</a><?php endif; ?></td></tr>
+                    <tr><td colspan="9" class="text-muted p-3">
+                        <?php if ($isTmOnly && empty($tmSportIds)): ?>
+                        No events are assigned to you for this season.
+                        <?php else: ?>
+                        No matches found. <?php if (canManageMatches()): ?><a href="<?= BASE_URL ?>/intramurals/matches/generate.php">Generate fixtures</a><?php endif; ?>
+                        <?php endif; ?>
+                    </td></tr>
                     <?php endif; ?>
                 </tbody>
             </table>
